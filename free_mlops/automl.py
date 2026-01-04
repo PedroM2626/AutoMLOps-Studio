@@ -155,6 +155,9 @@ def run_automl(
     elif problem_type == "regression":
         candidates = {
             "ridge": Ridge(),
+            "lasso": Lasso(max_iter=5000),
+            "elastic_net": ElasticNet(max_iter=5000),
+            "svr": SVR(),
             "random_forest": RandomForestRegressor(
                 n_estimators=200, random_state=random_state, n_jobs=-1
             ),
@@ -162,6 +165,8 @@ def run_automl(
                 n_estimators=300, random_state=random_state, n_jobs=-1
             ),
             "gradient_boosting": GradientBoostingRegressor(random_state=random_state),
+            "decision_tree": DecisionTreeRegressor(random_state=random_state),
+            "knn": KNeighborsRegressor(),
         }
     else:
         raise ValueError(f"Unsupported problem_type: {problem_type}")
