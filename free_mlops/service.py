@@ -60,7 +60,7 @@ def validate_problem_setup(df: pd.DataFrame, target_column: str, problem_type: P
         n_unique = int(y_non_null.nunique())
         if n_unique <= 1:
             raise ValueError("Classification target must have at least 2 classes")
-        if pd.api.types.is_numeric_dtype(y_non_null) and n_unique > 100:
+        if n_unique > 100:
             raise ValueError(
                 "Target looks continuous (too many unique values). If this is regression, choose regression."
             )
