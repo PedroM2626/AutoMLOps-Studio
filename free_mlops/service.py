@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 
 from free_mlops.automl import ProblemType
 from free_mlops.automl import run_automl
+from free_mlops.finetune import run_finetune
 from free_mlops.config import Settings
 from free_mlops.db import get_experiment
 from free_mlops.db import get_latest_experiment
@@ -150,6 +151,30 @@ def run_experiment(
         encoding="utf-8",
     )
 
+    model_version = "v1.0.0"
+    model_metadata = {
+        "version": model_version,
+        "framework": "scikit-learn",
+        "problem_type": problem_type,
+        "target_column": target_column,
+        "feature_columns": feature_columns,
+        "model_name": automl_result.best_model_name,
+        "created_at": created_at,
+        "dataset_path": str(dataset_path),
+        "test_size": settings.default_test_size,
+        "random_state": settings.random_state,
+        "n_rows": int(df.shape[0]),
+        "n_cols": int(df.shape[1]),
+        "best_metrics": automl_result.best_metrics,
+        "leaderboard": automl_result.leaderboard,
+    }
+
+    metadata_path = artifact_dir / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(model_metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
     record: dict[str, Any] = {
         "id": experiment_id,
         "created_at": created_at,
@@ -165,6 +190,8 @@ def run_experiment(
         "best_model_name": automl_result.best_model_name,
         "best_metrics": automl_result.best_metrics,
         "model_path": str(model_path),
+        "model_version": model_version,
+        "model_metadata": model_metadata,
     }
 
     insert_experiment(settings.db_path, record)

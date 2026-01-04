@@ -27,12 +27,17 @@ def init_db(db_path: Path) -> None:
                 leaderboard_json TEXT NOT NULL,
                 best_model_name TEXT NOT NULL,
                 best_metrics_json TEXT NOT NULL,
-                model_path TEXT NOT NULL
+                model_path TEXT NOT NULL,
+                model_version TEXT NOT NULL,
+                model_metadata_json TEXT NOT NULL
             );
             """
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_experiments_created_at ON experiments(created_at);"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_experiments_model_version ON experiments(model_version);"
         )
 
 
@@ -48,6 +53,7 @@ def insert_experiment(db_path: Path, record: dict[str, Any]) -> None:
     feature_columns_json = json.dumps(record["feature_columns"], ensure_ascii=False)
     leaderboard_json = json.dumps(record["leaderboard"], ensure_ascii=False)
     best_metrics_json = json.dumps(record["best_metrics"], ensure_ascii=False)
+    model_metadata_json = json.dumps(record["model_metadata"], ensure_ascii=False)
 
     with _connect(db_path) as conn:
         conn.execute(
@@ -66,8 +72,10 @@ def insert_experiment(db_path: Path, record: dict[str, Any]) -> None:
                 leaderboard_json,
                 best_model_name,
                 best_metrics_json,
-                model_path
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                model_path,
+                model_version,
+                model_metadata_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record["id"],
@@ -84,6 +92,8 @@ def insert_experiment(db_path: Path, record: dict[str, Any]) -> None:
                 record["best_model_name"],
                 best_metrics_json,
                 record["model_path"],
+                record["model_version"],
+                model_metadata_json,
             ),
         )
         conn.commit()
@@ -105,6 +115,8 @@ def _row_to_record(row: sqlite3.Row) -> dict[str, Any]:
         "best_model_name": row["best_model_name"],
         "best_metrics": json.loads(row["best_metrics_json"]),
         "model_path": row["model_path"],
+        "model_version": row["model_version"],
+        "model_metadata": json.loads(row["model_metadata_json"]),
     }
 
 

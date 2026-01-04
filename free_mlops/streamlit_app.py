@@ -11,6 +11,10 @@ from free_mlops.service import list_experiment_records
 from free_mlops.service import load_csv
 from free_mlops.service import run_experiment
 from free_mlops.service import save_uploaded_bytes
+from free_mlops.finetune import run_finetune
+from free_mlops.registry import list_registered_models
+from free_mlops.registry import register_model
+from free_mlops.registry import download_model_package
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -24,7 +28,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -157,6 +161,157 @@ def main() -> None:
                     )
 
     with tabs[2]:
+        st.subheader("Model Registry")
+
+        try:
+            registered = list_registered_models(settings=settings, limit=200, offset=0)
+        except Exception as exc:
+            st.error(f"Falha ao carregar modelos registrados: {exc}")
+            registered = []
+
+        if not registered:
+            st.info("Nenhum modelo registrado ainda.")
+        else:
+            df_reg = pd.DataFrame(
+                [
+                    {
+                        "id": r["id"],
+                        "version": r["model_version"],
+                        "model_name": r["best_model_name"],
+                        "problem_type": r["problem_type"],
+                        "target": r["target_column"],
+                        "created_at": r["created_at"],
+                    }
+                    for r in registered
+                ]
+            )
+            st.dataframe(df_reg, use_container_width=True)
+
+            selected_reg_id = st.selectbox(
+                "Ver detalhes / registrar nova versão",
+                options=[r["id"] for r in registered],
+                key="reg_select",
+            )
+            selected_reg = next((r for r in registered if r["id"] == selected_reg_id), None)
+            if selected_reg:
+                st.write("Metadados")
+                st.json(selected_reg.get("model_metadata", {}))
+
+                st.write("Registrar nova versão")
+                with st.form("register_form"):
+                    new_version = st.text_input("Nova versão (ex: v1.1.0)", value="v1.1.0")
+                    description = st.text_area("Descrição (opcional)", value="")
+                    submitted = st.form_submit_button("Registrar versão")
+                    if submitted:
+                        try:
+                            new_record = register_model(
+                                settings=settings,
+                                experiment_id=selected_reg_id,
+                                new_version=new_version,
+                                description=description,
+                            )
+                            st.success(f"Nova versão registrada: {new_record['id']}")
+                        except Exception as exc:
+                            st.error(str(exc))
+
+                model_path = Path(selected_reg["model_path"])
+                if model_path.exists():
+                    st.download_button(
+                        label="Baixar modelo (.pkl)",
+                        data=_read_bytes(model_path),
+                        file_name=f"model_{selected_reg['id']}.pkl",
+                        mime="application/octet-stream",
+                        key=f"download_reg_{selected_reg['id']}",
+                    )
+
+    with tabs[3]:
+        st.subheader("Fine-Tune (ajuste de hiperparâmetros)")
+
+        try:
+            experiments = list_experiment_records(settings=settings, limit=200, offset=0)
+        except Exception as exc:
+            st.error(f"Falha ao carregar experimentos: {exc}")
+            experiments = []
+
+        if not experiments:
+            st.info("Nenhum experimento encontrado para fine-tune.")
+        else:
+            exp_options = {f"{e['id']} – {e['best_model_name']}": e for e in experiments}
+            selected_label = st.selectbox("Escolha um experimento para fine-tune", options=list(exp_options.keys()))
+            selected_exp = exp_options[selected_label]
+
+            st.write("Detalhes do experimento base")
+            st.json(selected_exp["best_metrics"])
+
+            model_name = st.selectbox(
+                "Modelo para fine-tune",
+                options=[
+                    "logistic_regression",
+                    "linear_svc",
+                    "random_forest",
+                    "extra_trees",
+                    "gradient_boosting",
+                    "decision_tree",
+                    "knn",
+                    "ridge",
+                    "lasso",
+                    "elastic_net",
+                    "svr",
+                ],
+                index=0,
+            )
+
+            search_type = st.radio("Tipo de busca", options=["grid", "random"], horizontal=True)
+
+            if st.button("Iniciar Fine-Tune", type="primary"):
+                with st.spinner("Rodando fine-tune..."):
+                    try:
+                        from free_mlops.automl import ProblemType
+                        from free_mlops.service import load_csv
+                        from sklearn.model_selection import train_test_split
+
+                        df = load_csv(Path(selected_exp["dataset_path"]))
+                        target = selected_exp["target_column"]
+                        problem_type = ProblemType(selected_exp["problem_type"])
+
+                        df = df.dropna(subset=[target]).reset_index(drop=True)
+                        feature_cols = [c for c in df.columns if c != target]
+                        X = df[feature_cols]
+                        y = df[target]
+
+                        if problem_type == "regression":
+                            y = pd.to_numeric(y, errors="raise")
+
+                        X_train, X_test, y_train, y_test = train_test_split(
+                            X, y, test_size=0.2, random_state=42
+                        )
+
+                        result = run_finetune(
+                            X_train=X_train,
+                            y_train=y_train,
+                            X_test=X_test,
+                            y_test=y_test,
+                            problem_type=problem_type,
+                            model_name=model_name,
+                            search_type=search_type,
+                            random_state=42,
+                            cv_folds=3,
+                        )
+
+                        st.success("Fine-tune concluído")
+                        st.json(
+                            {
+                                "model_name": result["model_name"],
+                                "search_type": result["search_type"],
+                                "best_params": result["best_params"],
+                                "best_score": result["best_score"],
+                                "metrics": result["metrics"],
+                            }
+                        )
+                    except Exception as exc:
+                        st.error(f"Erro no fine-tune: {exc}")
+
+    with tabs[4]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
