@@ -36,9 +36,24 @@ def init_db(db_path: Path) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_experiments_created_at ON experiments(created_at);"
         )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_experiments_model_version ON experiments(model_version);"
-        )
+        try:
+            conn.execute(
+                "ALTER TABLE experiments ADD COLUMN model_version TEXT NOT NULL DEFAULT 'v1.0.0';"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute(
+                "ALTER TABLE experiments ADD COLUMN model_metadata_json TEXT NOT NULL DEFAULT '{}';"
+            )
+        except sqlite3.OperationalError:
+            pass
+        try:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_experiments_model_version ON experiments(model_version);"
+            )
+        except sqlite3.OperationalError:
+            pass
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
