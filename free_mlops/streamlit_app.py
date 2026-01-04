@@ -267,7 +267,6 @@ def main() -> None:
                 with st.spinner("Rodando fine-tune..."):
                     try:
                         from free_mlops.automl import ProblemType
-                        from free_mlops.service import load_csv
                         from sklearn.model_selection import train_test_split
 
                         df = load_csv(Path(selected_exp["dataset_path"]))
