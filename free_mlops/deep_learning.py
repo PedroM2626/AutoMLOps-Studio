@@ -64,7 +64,7 @@ class DeepLearningAutoML:
                     "optimizer": "adam",
                 },
                 "cnn": {
-                    "conv_layers": [{"out_channels": 32, "kernel_size": 3}, {"out_channels": 64, "kernel_size": 3}],
+                    "conv_layers": [{"filters": 32, "kernel_size": 3}, {"filters": 64, "kernel_size": 3}],
                     "dense_layers": [128, 64],
                     "activation": "relu",
                     "dropout_rate": 0.3,
@@ -655,6 +655,485 @@ class DeepLearningAutoML:
                 "val_mae": history.history.get("val_mae", []),
             },
             "validation_metrics": dict(zip(model.metrics_names, val_results)),
+            "input_shape": input_shape,
+            "num_classes": num_classes,
+        }
+        
+        return result
+    
+    def create_pytorch_cnn(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_val: np.ndarray,
+        y_val: np.ndarray,
+        input_shape: Tuple[int, ...],
+        num_classes: int,
+        config: Optional[Dict[str, Any]] = None,
+        problem_type: str = "classification",
+    ) -> Dict[str, Any]:
+        """Cria e treina CNN com PyTorch."""
+        
+        try:
+            import torch
+            import torch.nn as nn
+            import torch.optim as optim
+            from torch.utils.data import DataLoader, TensorDataset
+        except ImportError:
+            raise ImportError("PyTorch não está instalado. Instale com: pip install torch")
+        
+        config = config or self.default_configs["pytorch"]["cnn"]
+        
+        # Para CNN, precisamos reshape os dados para (batch, channels, height, width)
+        # Para dados tabulares, vamos tratar como (batch, channels, 1, features)
+        X_train_reshaped = X_train.reshape(X_train.shape[0], 1, 1, X_train.shape[1])
+        X_val_reshaped = X_val.reshape(X_val.shape[0], 1, 1, X_val.shape[1])
+        
+        # Converter para tensores
+        X_train_tensor = torch.FloatTensor(X_train_reshaped)
+        y_train_tensor = torch.LongTensor(y_train) if problem_type == "classification" else torch.FloatTensor(y_train)
+        X_val_tensor = torch.FloatTensor(X_val_reshaped)
+        y_val_tensor = torch.LongTensor(y_val) if problem_type == "classification" else torch.FloatTensor(y_val)
+        
+        # Data loaders
+        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+        val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
+        
+        train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], shuffle=False)
+        
+        # Definir modelo CNN
+        class CNN(nn.Module):
+            def __init__(self, input_channels, conv_layers, dense_layers, dropout_rate, num_classes, problem_type):
+                super(CNN, self).__init__()
+                
+                layers = []
+                prev_channels = input_channels
+                
+                # Camadas convolucionais
+                for conv_layer in conv_layers:
+                    layers.append(nn.Conv2d(prev_channels, conv_layer["filters"], conv_layer["kernel_size"], padding=1))
+                    layers.append(nn.ReLU())
+                    layers.append(nn.MaxPool2d(2, 2))
+                    prev_channels = conv_layer["filters"]
+                
+                layers.append(nn.Flatten())
+                
+                # Camadas densas
+                for units in dense_layers:
+                    layers.append(nn.Linear(prev_channels, units))
+                    layers.append(nn.ReLU())
+                    if dropout_rate > 0:
+                        layers.append(nn.Dropout(dropout_rate))
+                    prev_channels = units
+                
+                # Camada de saída
+                if problem_type == "classification":
+                    if num_classes == 2:
+                        layers.append(nn.Linear(prev_channels, 1))
+                        layers.append(nn.Sigmoid())
+                    else:
+                        layers.append(nn.Linear(prev_channels, num_classes))
+                        layers.append(nn.Softmax(dim=1))
+                else:
+                    layers.append(nn.Linear(prev_channels, 1))
+                
+                self.network = nn.Sequential(*layers)
+            
+            def forward(self, x):
+                return self.network(x)
+        
+        model = CNN(1, config["conv_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type)
+        
+        # Loss e optimizer
+        if problem_type == "classification":
+            if num_classes == 2:
+                criterion = nn.BCELoss()
+            else:
+                criterion = nn.CrossEntropyLoss()
+        else:
+            criterion = nn.MSELoss()
+        
+        if config["optimizer"] == "adam":
+            optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+        elif config["optimizer"] == "sgd":
+            optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"])
+        else:
+            optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+        
+        # Treinar
+        start_time = time.time()
+        history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
+        
+        best_val_loss = float('inf')
+        patience_counter = 0
+        
+        for epoch in range(config["epochs"]):
+            # Training
+            model.train()
+            train_loss = 0.0
+            train_correct = 0
+            train_total = 0
+            
+            for batch_X, batch_y in train_loader:
+                optimizer.zero_grad()
+                outputs = model(batch_X)
+                
+                if problem_type == "classification" and num_classes == 2:
+                    loss = criterion(outputs.squeeze(), batch_y.float())
+                    predicted = (outputs.squeeze() > 0.5).long()
+                elif problem_type == "classification":
+                    loss = criterion(outputs, batch_y)
+                    predicted = outputs.argmax(dim=1)
+                else:
+                    loss = criterion(outputs.squeeze(), batch_y)
+                    predicted = None
+                
+                loss.backward()
+                optimizer.step()
+                
+                train_loss += loss.item()
+                
+                if predicted is not None:
+                    train_correct += (predicted == batch_y).sum().item()
+                    train_total += batch_y.size(0)
+            
+            # Validation
+            model.eval()
+            val_loss = 0.0
+            val_correct = 0
+            val_total = 0
+            
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    
+                    if problem_type == "classification" and num_classes == 2:
+                        loss = criterion(outputs.squeeze(), batch_y.float())
+                        predicted = (outputs.squeeze() > 0.5).long()
+                    elif problem_type == "classification":
+                        loss = criterion(outputs, batch_y)
+                        predicted = outputs.argmax(dim=1)
+                    else:
+                        loss = criterion(outputs.squeeze(), batch_y)
+                        predicted = None
+                    
+                    val_loss += loss.item()
+                    
+                    if predicted is not None:
+                        val_correct += (predicted == batch_y).sum().item()
+                        val_total += batch_y.size(0)
+            
+            # Record history
+            avg_train_loss = train_loss / len(train_loader)
+            avg_val_loss = val_loss / len(val_loader)
+            
+            history["loss"].append(avg_train_loss)
+            history["val_loss"].append(avg_val_loss)
+            
+            if problem_type == "classification":
+                train_acc = train_correct / train_total if train_total > 0 else 0
+                val_acc = val_correct / val_total if val_total > 0 else 0
+                history["accuracy"].append(train_acc)
+                history["val_accuracy"].append(val_acc)
+            
+            # Early stopping
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                # Save best model
+                best_model_state = model.state_dict().copy()
+            else:
+                patience_counter += 1
+                if patience_counter >= 10:
+                    break
+        
+        # Load best model
+        model.load_state_dict(best_model_state)
+        training_time = time.time() - start_time
+        
+        # Final evaluation
+        model.eval()
+        final_val_loss = 0.0
+        final_val_correct = 0
+        final_val_total = 0
+        
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                outputs = model(batch_X)
+                
+                if problem_type == "classification" and num_classes == 2:
+                    loss = criterion(outputs.squeeze(), batch_y.float())
+                    predicted = (outputs.squeeze() > 0.5).long()
+                elif problem_type == "classification":
+                    loss = criterion(outputs, batch_y)
+                    predicted = outputs.argmax(dim=1)
+                else:
+                    loss = criterion(outputs.squeeze(), batch_y)
+                    predicted = None
+                
+                final_val_loss += loss.item()
+                
+                if predicted is not None:
+                    final_val_correct += (predicted == batch_y).sum().item()
+                    final_val_total += batch_y.size(0)
+        
+        avg_final_val_loss = final_val_loss / len(val_loader)
+        
+        # Preparar resultados
+        result = {
+            "framework": "pytorch",
+            "model_type": "cnn",
+            "problem_type": problem_type,
+            "model": model,
+            "config": config,
+            "training_time": training_time,
+            "history": history,
+            "validation_metrics": {
+                "val_loss": avg_final_val_loss,
+                "val_accuracy": final_val_correct / final_val_total if problem_type == "classification" else None,
+            },
+            "input_shape": input_shape,
+            "num_classes": num_classes,
+        }
+        
+        return result
+    
+    def create_pytorch_lstm(
+        self,
+        X_train: np.ndarray,
+        y_train: np.ndarray,
+        X_val: np.ndarray,
+        y_val: np.ndarray,
+        input_shape: Tuple[int, ...],
+        num_classes: int,
+        config: Optional[Dict[str, Any]] = None,
+        problem_type: str = "classification",
+    ) -> Dict[str, Any]:
+        """Cria e treina LSTM com PyTorch."""
+        
+        try:
+            import torch
+            import torch.nn as nn
+            import torch.optim as optim
+            from torch.utils.data import DataLoader, TensorDataset
+        except ImportError:
+            raise ImportError("PyTorch não está instalado. Instale com: pip install torch")
+        
+        config = config or self.default_configs["pytorch"]["lstm"]
+        
+        # Para LSTM, precisamos reshape para (batch, sequence_length, features)
+        sequence_length = 1  # Simplificado para dados tabulares
+        X_train_reshaped = X_train.reshape(X_train.shape[0], sequence_length, X_train.shape[1])
+        X_val_reshaped = X_val.reshape(X_val.shape[0], sequence_length, X_val.shape[1])
+        
+        # Converter para tensores
+        X_train_tensor = torch.FloatTensor(X_train_reshaped)
+        y_train_tensor = torch.LongTensor(y_train) if problem_type == "classification" else torch.FloatTensor(y_train)
+        X_val_tensor = torch.FloatTensor(X_val_reshaped)
+        y_val_tensor = torch.LongTensor(y_val) if problem_type == "classification" else torch.FloatTensor(y_val)
+        
+        # Data loaders
+        train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+        val_dataset = TensorDataset(X_val_tensor, y_val_tensor)
+        
+        train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], shuffle=False)
+        
+        # Definir modelo LSTM
+        class LSTM(nn.Module):
+            def __init__(self, input_size, lstm_layers, dense_layers, dropout_rate, num_classes, problem_type):
+                super(LSTM, self).__init__()
+                
+                # Camada LSTM
+                self.lstm = nn.LSTM(input_size, lstm_layers[0], lstm_layers[1], batch_first=True, dropout=dropout_rate)
+                
+                # Camadas densas
+                layers = []
+                prev_size = lstm_layers[1]
+                for units in dense_layers:
+                    layers.append(nn.Linear(prev_size, units))
+                    layers.append(nn.ReLU())
+                    if dropout_rate > 0:
+                        layers.append(nn.Dropout(dropout_rate))
+                    prev_size = units
+                
+                # Camada de saída
+                if problem_type == "classification":
+                    if num_classes == 2:
+                        layers.append(nn.Linear(prev_size, 1))
+                        layers.append(nn.Sigmoid())
+                    else:
+                        layers.append(nn.Linear(prev_size, num_classes))
+                        layers.append(nn.Softmax(dim=1))
+                else:
+                    layers.append(nn.Linear(prev_size, 1))
+                
+                self.dense_layers = nn.Sequential(*layers)
+            
+            def forward(self, x):
+                # Passar através da LSTM
+                lstm_out, _ = self.lstm(x)
+                
+                # Pegar apenas a última saída da LSTM para cada sequência
+                if lstm_out.dim() == 3:  # (batch, seq, features)
+                    last_output = lstm_out[:, -1, :]  # (batch, features)
+                else:
+                    last_output = lstm_out[:, -1]  # (batch, features)
+                
+                # Passar através das camadas densas
+                return self.dense_layers(last_output)
+        
+        model = LSTM(X_train.shape[1], config["lstm_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type)
+        
+        # Loss e optimizer
+        if problem_type == "classification":
+            if num_classes == 2:
+                criterion = nn.BCELoss()
+            else:
+                criterion = nn.CrossEntropyLoss()
+        else:
+            criterion = nn.MSELoss()
+        
+        if config["optimizer"] == "adam":
+            optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+        elif config["optimizer"] == "sgd":
+            optimizer = optim.SGD(model.parameters(), lr=config["learning_rate"])
+        else:
+            optimizer = optim.Adam(model.parameters(), lr=config["learning_rate"])
+        
+        # Treinar
+        start_time = time.time()
+        history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
+        
+        best_val_loss = float('inf')
+        patience_counter = 0
+        
+        for epoch in range(config["epochs"]):
+            # Training
+            model.train()
+            train_loss = 0.0
+            train_correct = 0
+            train_total = 0
+            
+            for batch_X, batch_y in train_loader:
+                optimizer.zero_grad()
+                outputs = model(batch_X)
+                
+                if problem_type == "classification" and num_classes == 2:
+                    loss = criterion(outputs.squeeze(), batch_y.float())
+                    predicted = (outputs.squeeze() > 0.5).long()
+                elif problem_type == "classification":
+                    loss = criterion(outputs, batch_y)
+                    predicted = outputs.argmax(dim=1)
+                else:
+                    loss = criterion(outputs.squeeze(), batch_y)
+                    predicted = None
+                
+                loss.backward()
+                optimizer.step()
+                
+                train_loss += loss.item()
+                
+                if predicted is not None:
+                    train_correct += (predicted == batch_y).sum().item()
+                    train_total += batch_y.size(0)
+            
+            # Validation
+            model.eval()
+            val_loss = 0.0
+            val_correct = 0
+            val_total = 0
+            
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    
+                    if problem_type == "classification" and num_classes == 2:
+                        loss = criterion(outputs.squeeze(), batch_y.float())
+                        predicted = (outputs.squeeze() > 0.5).long()
+                    elif problem_type == "classification":
+                        loss = criterion(outputs, batch_y)
+                        predicted = outputs.argmax(dim=1)
+                    else:
+                        loss = criterion(outputs.squeeze(), batch_y)
+                        predicted = None
+                    
+                    val_loss += loss.item()
+                    
+                    if predicted is not None:
+                        val_correct += (predicted == batch_y).sum().item()
+                        val_total += batch_y.size(0)
+            
+            # Record history
+            avg_train_loss = train_loss / len(train_loader)
+            avg_val_loss = val_loss / len(val_loader)
+            
+            history["loss"].append(avg_train_loss)
+            history["val_loss"].append(avg_val_loss)
+            
+            if problem_type == "classification":
+                train_acc = train_correct / train_total if train_total > 0 else 0
+                val_acc = val_correct / val_total if val_total > 0 else 0
+                history["accuracy"].append(train_acc)
+                history["val_accuracy"].append(val_acc)
+            
+            # Early stopping
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+                # Save best model
+                best_model_state = model.state_dict().copy()
+            else:
+                patience_counter += 1
+                if patience_counter >= 10:
+                    break
+        
+        # Load best model
+        model.load_state_dict(best_model_state)
+        training_time = time.time() - start_time
+        
+        # Final evaluation
+        model.eval()
+        final_val_loss = 0.0
+        final_val_correct = 0
+        final_val_total = 0
+        
+        with torch.no_grad():
+            for batch_X, batch_y in val_loader:
+                outputs = model(batch_X)
+                
+                if problem_type == "classification" and num_classes == 2:
+                    loss = criterion(outputs.squeeze(), batch_y.float())
+                    predicted = (outputs.squeeze() > 0.5).long()
+                elif problem_type == "classification":
+                    loss = criterion(outputs, batch_y)
+                    predicted = outputs.argmax(dim=1)
+                else:
+                    loss = criterion(outputs.squeeze(), batch_y)
+                    predicted = None
+                
+                final_val_loss += loss.item()
+                
+                if predicted is not None:
+                    final_val_correct += (predicted == batch_y).sum().item()
+                    final_val_total += batch_y.size(0)
+        
+        avg_final_val_loss = final_val_loss / len(val_loader)
+        
+        # Preparar resultados
+        result = {
+            "framework": "pytorch",
+            "model_type": "lstm",
+            "problem_type": problem_type,
+            "model": model,
+            "config": config,
+            "training_time": training_time,
+            "history": history,
+            "validation_metrics": {
+                "val_loss": avg_final_val_loss,
+                "val_accuracy": final_val_correct / final_val_total if problem_type == "classification" else None,
+            },
             "input_shape": input_shape,
             "num_classes": num_classes,
         }
