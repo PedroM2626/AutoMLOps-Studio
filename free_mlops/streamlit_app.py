@@ -28,6 +28,7 @@ from free_mlops.drift_detection import get_drift_detector
 from free_mlops.concept_drift import get_concept_drift_detector
 from free_mlops.hyperopt import get_hyperparameter_optimizer
 from free_mlops.dvc_integration import get_dvc_integration
+from free_mlops.data_validation import get_data_validator
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -41,7 +42,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -958,6 +959,284 @@ def main() -> None:
                     st.error(f"Erro na análise de linhagem: {exc}")
 
     with tabs[7]:
+        st.subheader("Data Validation (Pandera)")
+        
+        validator = get_data_validator()
+        
+        # Tabs de validação
+        val_tabs = st.tabs(["Criar Schema", "Validar Dados", "Schemas", "Comparação"])
+        
+        with val_tabs[0]:
+            st.subheader("Criar Schema de Validação")
+            
+            # Upload de dados para criar schema
+            schema_file = st.file_uploader("Upload Dataset para criar Schema (CSV)", type=["csv"])
+            
+            if schema_file is not None:
+                try:
+                    # Ler dados
+                    df = pd.read_csv(schema_file)
+                    st.write(f"Dataset carregado: {df.shape}")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    # Configurações do schema
+                    with st.form("create_schema_form"):
+                        schema_name = st.text_input("Nome do Schema", value=schema_file.name.replace('.csv', '_schema'))
+                        description = st.text_area("Descrição (opcional)")
+                        strict = st.checkbox("Strict (valida colunas extras)", value=True)
+                        coerce = st.checkbox("Coerce (converte tipos)", value=True)
+                        
+                        submitted = st.form_submit_button("Criar Schema")
+                        
+                        if submitted:
+                            with st.spinner("Criando schema..."):
+                                try:
+                                    result = validator.create_schema_from_dataframe(
+                                        df=df,
+                                        schema_name=schema_name,
+                                        description=description,
+                                        strict=strict,
+                                        coerce=coerce,
+                                    )
+                                    
+                                    st.success("✅ Schema criado com sucesso!")
+                                    st.info(f"Schema salvo como: {result['schema_name']}")
+                                    
+                                    # Mostrar informações do schema
+                                    schema_info = result["schema_info"]
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Colunas", len(schema_info["columns"]))
+                                    col2.metric("Strict", schema_info["strict"])
+                                    col3.metric("Coerce", schema_info["coerce"])
+                                    
+                                    # Detalhes das colunas
+                                    st.write("**Análise das Colunas:**")
+                                    columns_df = pd.DataFrame([
+                                        {
+                                            "Coluna": col,
+                                            "Tipo": info["pandas_dtype"],
+                                            "Nullable": info["nullable"],
+                                            "Únicos": info["unique_count"],
+                                            "Total": info["total_count"],
+                                        }
+                                        for col, info in schema_info["columns"].items()
+                                    ])
+                                    st.dataframe(columns_df, use_container_width=True)
+                                    
+                                except ImportError:
+                                    st.error("Pandera não está instalado. Instale com: pip install pandera")
+                                except Exception as exc:
+                                    st.error(f"Erro ao criar schema: {exc}")
+                
+                except Exception as exc:
+                    st.error(f"Erro ao ler dataset: {exc}")
+        
+        with val_tabs[1]:
+            st.subheader("Validar Dados")
+            
+            # Upload de dados para validar
+            validation_file = st.file_uploader("Upload Dataset para Validar (CSV)", type=["csv"])
+            
+            if validation_file is not None:
+                try:
+                    # Ler dados
+                    df = pd.read_csv(validation_file)
+                    st.write(f"Dataset carregado: {df.shape}")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    # Selecionar schema
+                    schemas = validator.list_schemas()
+                    if schemas:
+                        schema_options = {s["name"]: s for s in schemas}
+                        selected_schema = st.selectbox(
+                            "Schema para validação",
+                            options=list(schema_options.keys()),
+                            key="validation_schema_select"
+                        )
+                        
+                        if selected_schema:
+                            # Mostrar info do schema
+                            schema_info = schema_options[selected_schema]
+                            col1, col2 = st.columns(2)
+                            col1.metric("Schema", selected_schema)
+                            col2.metric("Colunas", schema_info["columns_count"])
+                            
+                            lazy_validation = st.checkbox("Validação Lazy (mostra todos os erros)")
+                            
+                            if st.button("Validar Dataset", type="primary"):
+                                with st.spinner("Validando dados..."):
+                                    try:
+                                        result = validator.validate_dataframe(
+                                            df=df,
+                                            schema_name=selected_schema,
+                                            lazy=lazy_validation,
+                                        )
+                                        
+                                        if result["success"]:
+                                            st.success("✅ Dataset validado com sucesso!")
+                                            col1, col2 = st.columns(2)
+                                            col1.metric("Shape Original", result["original_shape"])
+                                            col2.metric("Shape Validado", result["validated_shape"])
+                                        else:
+                                            st.error("❌ Falha na validação!")
+                                            
+                                            # Mostrar erros
+                                            if result["errors"]:
+                                                st.write("**Erros encontrados:**")
+                                                errors_df = pd.DataFrame(result["errors"])
+                                                st.dataframe(errors_df, use_container_width=True)
+                                            
+                                            col1.metric("Shape", result["original_shape"])
+                                            col2.metric("Erros", len(result["errors"]))
+                                        
+                                        # Timestamp da validação
+                                        st.info(f"Validação realizada em: {result['validation_time'][:19]}")
+                                        
+                                    except Exception as exc:
+                                        st.error(f"Erro na validação: {exc}")
+                    else:
+                        st.warning("Nenhum schema encontrado. Crie um schema primeiro.")
+                
+                except Exception as exc:
+                    st.error(f"Erro ao ler dataset: {exc}")
+        
+        with val_tabs[2]:
+            st.subheader("Schemas Disponíveis")
+            
+            schemas = validator.list_schemas()
+            
+            if schemas:
+                # Tabela de schemas
+                schemas_df = pd.DataFrame(schemas)
+                st.dataframe(schemas_df, use_container_width=True)
+                
+                # Detalhes do schema selecionado
+                selected_details_schema = st.selectbox(
+                    "Ver detalhes do schema",
+                    options=[s["name"] for s in schemas],
+                    key="details_schema_select"
+                )
+                
+                if selected_details_schema:
+                    schema_details = validator.get_schema_details(selected_details_schema)
+                    if schema_details:
+                        st.write("**Detalhes do Schema:**")
+                        
+                        # Metadados
+                        metadata = schema_details.get("metadata", {})
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Nome", metadata.get("name", ""))
+                        col2.metric("Criado em", metadata.get("created_at", "")[:19])
+                        col3.metric("Strict", metadata.get("strict", False))
+                        
+                        # Colunas
+                        st.write("**Colunas:**")
+                        columns_data = metadata.get("columns", {})
+                        if columns_data:
+                            columns_details_df = pd.DataFrame([
+                                {
+                                    "Coluna": col,
+                                    "Tipo": info["pandas_dtype"],
+                                    "Nullable": info["nullable"],
+                                    "Únicos": info["unique_count"],
+                                    "Total": info["total_count"],
+                                }
+                                for col, info in columns_data.items()
+                            ])
+                            st.dataframe(columns_details_df, use_container_width=True)
+                        
+                        # Histórico de validações
+                        st.write("**Histórico de Validações:**")
+                        validation_history = validator.get_validation_history(selected_details_schema)
+                        
+                        if validation_history:
+                            history_df = pd.DataFrame([
+                                {
+                                    "Data": result["validation_time"][:19],
+                                    "Sucesso": result["success"],
+                                    "Shape": str(result["original_shape"]),
+                                    "Erros": len(result.get("errors", [])),
+                                }
+                                for result in validation_history[:10]  # Últimas 10
+                            ])
+                            st.dataframe(history_df, use_container_width=True)
+                        else:
+                            st.info("Nenhuma validação realizada ainda.")
+                        
+                        # Exportar schema
+                        st.write("**Exportar Schema:**")
+                        export_format = st.selectbox("Formato", options=["json", "python"])
+                        
+                        if st.button("Exportar Schema", key=f"export_{selected_details_schema}"):
+                            try:
+                                exported = validator.export_schema(selected_details_schema, export_format)
+                                st.download_button(
+                                    label=f"Baixar Schema ({export_format})",
+                                    data=exported,
+                                    file_name=f"{selected_details_schema}.{export_format}",
+                                    mime="text/plain",
+                                )
+                            except Exception as exc:
+                                st.error(f"Erro ao exportar: {exc}")
+            else:
+                st.info("Nenhum schema encontrado. Crie um schema primeiro.")
+        
+        with val_tabs[3]:
+            st.subheader("Comparação de Schemas")
+            
+            schemas = validator.list_schemas()
+            
+            if len(schemas) >= 2:
+                col1, col2 = st.columns(2)
+                with col1:
+                    schema1 = st.selectbox("Schema 1", options=[s["name"] for s in schemas])
+                with col2:
+                    schema2 = st.selectbox("Schema 2", options=[s["name"] for s in schemas])
+                
+                if schema1 and schema2 and schema1 != schema2:
+                    if st.button("Comparar Schemas", type="primary"):
+                        with st.spinner("Comparando schemas..."):
+                            try:
+                                comparison = validator.compare_schemas(schema1, schema2)
+                                
+                                if "error" in comparison:
+                                    st.error(comparison["error"])
+                                else:
+                                    if comparison["identical"]:
+                                        st.success("✅ Os schemas são idênticos!")
+                                    else:
+                                        st.warning("⚠️ Os schemas apresentam diferenças:")
+                                    
+                                    # Colunas adicionadas
+                                    if comparison["columns_added"]:
+                                        st.write("**Colunas Adicionadas:**")
+                                        for col in comparison["columns_added"]:
+                                            st.write(f"- + {col}")
+                                    
+                                    # Colunas removidas
+                                    if comparison["columns_removed"]:
+                                        st.write("**Colunas Removidas:**")
+                                        for col in comparison["columns_removed"]:
+                                            st.write(f"- - {col}")
+                                    
+                                    # Colunas modificadas
+                                    if comparison["columns_modified"]:
+                                        st.write("**Colunas Modificadas:**")
+                                        for mod in comparison["columns_modified"]:
+                                            st.write(f"- ~ {mod['column']}")
+                                            with st.expander(f"Detalhes de {mod['column']}"):
+                                                col1, col2 = st.columns(2)
+                                                col1.write("**Antes:**")
+                                                col1.json(mod["old"])
+                                                col2.write("**Depois:**")
+                                                col2.json(mod["new"])
+                                
+                            except Exception as exc:
+                                st.error(f"Erro na comparação: {exc}")
+            else:
+                st.info("É necessário ter pelo menos 2 schemas para comparar.")
+
+    with tabs[8]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
