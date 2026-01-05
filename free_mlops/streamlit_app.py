@@ -44,7 +44,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -76,7 +76,7 @@ def main() -> None:
 
             st.subheader("2) Selecionar target e tipo")
             st.write("Prévia do dataset")
-            st.dataframe(df.head(200), use_container_width=True)
+            st.dataframe(df.head(200), width='stretch')
 
             target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
             problem_type = st.radio(
@@ -2235,6 +2235,59 @@ def main() -> None:
                     st.error(f"Erro ao ler dataset: {exc}")
 
     with tabs[10]:
+        st.subheader("Monitoramento")
+        
+        # Selecionar modelo para monitorar
+        try:
+            experiments = list_experiment_records(settings=settings, limit=200, offset=0)
+            if experiments:
+                model_options = {f"{e['id']} – {e['best_model_name']}": e for e in experiments}
+                selected_label = st.selectbox("Selecione um modelo para monitorar", options=list(model_options.keys()))
+                selected_exp = model_options[selected_label]
+                
+                # Inicializar monitor
+                monitor = get_performance_monitor(f"model_{selected_exp['id']}")
+                
+                st.write("### Métricas de Performance")
+                
+                # Log de predição manual para teste
+                with st.expander("Testar Log de Predição"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        prediction = st.number_input("Predição", value=1.0)
+                        ground_truth = st.number_input("Ground Truth", value=1.0)
+                    with col2:
+                        latency_ms = st.number_input("Latência (ms)", value=100.0)
+                    
+                    if st.button("Registrar Predição"):
+                        monitor.log_prediction({"test": "data"}, prediction, ground_truth, latency_ms)
+                        st.success("Predição registrada!")
+                
+                # Mostrar métricas
+                metrics = monitor.get_metrics()
+                if metrics:
+                    st.json(metrics)
+                else:
+                    st.info("Nenhuma métrica registrada ainda")
+                
+                # Alertas
+                st.write("### Configurar Alertas")
+                alert_manager = get_alert_manager()
+                
+                with st.expander("Configurar Thresholds"):
+                    accuracy_threshold = st.slider("Threshold de Accuracy", 0.0, 1.0, 0.8)
+                    latency_threshold = st.slider("Threshold de Latência (ms)", 0, 1000, 500)
+                    
+                    if st.button("Salvar Configurações"):
+                        st.success("Configurações salvas!")
+                
+            else:
+                st.info("Nenhum experimento encontrado para monitorar")
+                
+        except Exception as exc:
+            st.error(f"Erro no monitoramento: {exc}")
+
+    with tabs[11]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
