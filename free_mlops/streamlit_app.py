@@ -29,6 +29,7 @@ from free_mlops.concept_drift import get_concept_drift_detector
 from free_mlops.hyperopt import get_hyperparameter_optimizer
 from free_mlops.dvc_integration import get_dvc_integration
 from free_mlops.data_validation import get_data_validator
+from free_mlops.deep_learning import get_deep_learning_automl
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -42,7 +43,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -1237,6 +1238,354 @@ def main() -> None:
                 st.info("É necessário ter pelo menos 2 schemas para comparar.")
 
     with tabs[8]:
+        st.subheader("Deep Learning (TensorFlow/PyTorch)")
+        
+        dl_automl = get_deep_learning_automl()
+        
+        # Tabs de Deep Learning
+        dl_tabs = st.tabs(["Treinar Modelo", "Modelos Salvos", "Predições", "Configurações"])
+        
+        with dl_tabs[0]:
+            st.subheader("Treinar Modelo Deep Learning")
+            
+            # Upload de dados
+            dl_file = st.file_uploader("Upload Dataset para Deep Learning (CSV)", type=["csv"])
+            
+            if dl_file is not None:
+                try:
+                    # Ler dados
+                    df = pd.read_csv(dl_file)
+                    st.write(f"Dataset carregado: {df.shape}")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    # Configurações
+                    target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
+                    problem_type = st.radio(
+                        "Tipo do problema",
+                        options=["classification", "regression"],
+                        horizontal=True,
+                    )
+                    
+                    # Framework e tipo de modelo
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"])
+                    with col2:
+                        model_type = st.selectbox(
+                            "Tipo de Modelo",
+                            options=["mlp", "cnn", "lstm"],
+                            help="MLP: dados tabulares, CNN: imagens, LSTM: sequências/temporal"
+                        )
+                    
+                    # Configurações avançadas
+                    with st.expander("Configurações Avançadas"):
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100)
+                            batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32)
+                        with col2:
+                            learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, format="%.4f")
+                            dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, format="%.2f")
+                    
+                    if st.button("Treinar Modelo Deep Learning", type="primary"):
+                        with st.spinner("Preparando dados e treinando modelo..."):
+                            try:
+                                # Preparar dados
+                                df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                                feature_cols = [c for c in df_clean.columns if c != target_column]
+                                X = df_clean[feature_cols].values
+                                y = df_clean[target_column].values
+                                
+                                # Para classificação, converter labels para inteiros
+                                if problem_type == "classification":
+                                    from sklearn.preprocessing import LabelEncoder
+                                    le = LabelEncoder()
+                                    y = le.fit_transform(y)
+                                    num_classes = len(le.classes_)
+                                else:
+                                    num_classes = 1
+                                
+                                # Split treino/validação
+                                from sklearn.model_selection import train_test_split
+                                X_train, X_val, y_train, y_val = train_test_split(
+                                    X, y, test_size=0.2, random_state=42
+                                )
+                                
+                                # Preparar input shape
+                                if model_type == "mlp":
+                                    input_shape = (X_train.shape[1],)
+                                elif model_type == "cnn":
+                                    # Para CNN, precisamos reshape adequado (simplificado)
+                                    # Aqui estamos tratando como 1D CNN para dados tabulares
+                                    input_shape = (X_train.shape[1], 1)
+                                    X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
+                                    X_val = X_val.reshape(X_val.shape[0], X_val.shape[1], 1)
+                                elif model_type == "lstm":
+                                    # Para LSTM, tratamos como sequência
+                                    input_shape = (1, X_train.shape[1])
+                                    X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
+                                    X_val = X_val.reshape(X_val.shape[0], 1, X_val.shape[1])
+                                
+                                # Configuração personalizada
+                                custom_config = {
+                                    "epochs": epochs,
+                                    "batch_size": batch_size,
+                                    "learning_rate": learning_rate,
+                                    "dropout_rate": dropout_rate,
+                                }
+                                
+                                # Treinar modelo
+                                if framework == "tensorflow":
+                                    if model_type == "mlp":
+                                        result = dl_automl.create_tensorflow_mlp(
+                                            X_train, y_train, X_val, y_val,
+                                            input_shape, num_classes, custom_config, problem_type
+                                        )
+                                    elif model_type == "cnn":
+                                        result = dl_automl.create_tensorflow_cnn(
+                                            X_train, y_train, X_val, y_val,
+                                            input_shape, num_classes, custom_config, problem_type
+                                        )
+                                    elif model_type == "lstm":
+                                        result = dl_automl.create_tensorflow_lstm(
+                                            X_train, y_train, X_val, y_val,
+                                            input_shape, num_classes, custom_config, problem_type
+                                        )
+                                else:  # pytorch
+                                    if model_type == "mlp":
+                                        result = dl_automl.create_pytorch_mlp(
+                                            X_train, y_train, X_val, y_val,
+                                            input_shape, num_classes, custom_config, problem_type
+                                        )
+                                    else:
+                                        st.error("PyTorch CNN/LSTM não implementado ainda. Use TensorFlow.")
+                                        return
+                                
+                                st.success("✅ Modelo treinado com sucesso!")
+                                
+                                # Mostrar resultados
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric("Framework", result["framework"])
+                                col2.metric("Modelo", result["model_type"])
+                                col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                                
+                                # Métricas de validação
+                                st.write("**Métricas de Validação:**")
+                                st.json(result["validation_metrics"])
+                                
+                                # Gráfico de treinamento
+                                if result["history"]:
+                                    import plotly.express as px
+                                    import plotly.graph_objects as go
+                                    
+                                    fig = go.Figure()
+                                    
+                                    # Loss
+                                    fig.add_trace(go.Scatter(
+                                        y=result["history"]["loss"],
+                                        mode="lines",
+                                        name="Training Loss",
+                                    ))
+                                    fig.add_trace(go.Scatter(
+                                        y=result["history"]["val_loss"],
+                                        mode="lines",
+                                        name="Validation Loss",
+                                    ))
+                                    
+                                    # Accuracy (se disponível)
+                                    if result["history"].get("accuracy"):
+                                        fig.add_trace(go.Scatter(
+                                            y=result["history"]["accuracy"],
+                                            mode="lines",
+                                            name="Training Accuracy",
+                                            yaxis="y2",
+                                        ))
+                                        fig.add_trace(go.Scatter(
+                                            y=result["history"]["val_accuracy"],
+                                            mode="lines",
+                                            name="Validation Accuracy",
+                                            yaxis="y2",
+                                        ))
+                                        
+                                        fig.update_layout(
+                                            yaxis2=dict(
+                                                title="Accuracy",
+                                                overlaying="y",
+                                                side="right"
+                                            )
+                                        )
+                                    
+                                    fig.update_layout(
+                                        title=f"Training History - {result['framework']} {result['model_type']}",
+                                        xaxis_title="Epoch",
+                                        yaxis_title="Loss",
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Salvar modelo
+                                model_name = f"{framework}_{model_type}_{problem_type}"
+                                if st.button("Salvar Modelo", key=f"save_dl_{model_name}"):
+                                    try:
+                                        saved_path = dl_automl.save_model(result, model_name)
+                                        st.success(f"Modelo salvo em: {saved_path}")
+                                    except Exception as exc:
+                                        st.error(f"Erro ao salvar modelo: {exc}")
+                                
+                            except ImportError as e:
+                                st.error(f"Framework não instalado: {e}")
+                                if framework == "tensorflow":
+                                    st.info("Instale com: pip install tensorflow")
+                                else:
+                                    st.info("Instale com: pip install torch")
+                            except Exception as exc:
+                                st.error(f"Erro no treinamento: {exc}")
+                
+                except Exception as exc:
+                    st.error(f"Erro ao ler dataset: {exc}")
+        
+        with dl_tabs[1]:
+            st.subheader("Modelos Deep Learning Salvos")
+            
+            models = dl_automl.list_models()
+            
+            if models:
+                models_df = pd.DataFrame(models)
+                st.dataframe(models_df, use_container_width=True)
+                
+                # Detalhes do modelo selecionado
+                selected_model = st.selectbox(
+                    "Ver detalhes do modelo",
+                    options=[m["name"] for m in models],
+                    key="dl_model_select"
+                )
+                
+                if selected_model:
+                    model_info = next((m for m in models if m["name"] == selected_model), None)
+                    if model_info:
+                        st.write("**Detalhes do Modelo:**")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Framework", model_info["framework"])
+                        col2.metric("Tipo", model_info["model_type"])
+                        col3.metric("Problema", model_info["problem_type"])
+                        
+                        st.write("**Configurações:**")
+                        st.json(model_info["validation_metrics"])
+                        
+                        st.write("**Métricas de Validação:**")
+                        st.json(model_info["validation_metrics"])
+                        
+                        # Botões de ação
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Carregar Modelo", key=f"load_dl_{selected_model}"):
+                                try:
+                                    loaded = dl_automl.load_model(model_info["path"])
+                                    st.success("Modelo carregado com sucesso!")
+                                    st.info(f"Framework: {loaded['metadata']['framework']}")
+                                except Exception as exc:
+                                    st.error(f"Erro ao carregar modelo: {exc}")
+                        
+                        with col2:
+                            if st.button("Excluir Modelo", key=f"delete_dl_{selected_model}"):
+                                try:
+                                    import shutil
+                                    shutil.rmtree(model_info["path"])
+                                    st.success("Modelo excluído com sucesso!")
+                                    st.experimental_rerun()
+                                except Exception as exc:
+                                    st.error(f"Erro ao excluir modelo: {exc}")
+            else:
+                st.info("Nenhum modelo Deep Learning salvo ainda.")
+        
+        with dl_tabs[2]:
+            st.subheader("Predições com Modelos Deep Learning")
+            
+            models = dl_automl.list_models()
+            
+            if models:
+                # Selecionar modelo
+                model_options = {m["name"]: m for m in models}
+                selected_pred_model = st.selectbox(
+                    "Modelo para predição",
+                    options=list(model_options.keys()),
+                    key="pred_model_select"
+                )
+                
+                if selected_pred_model:
+                    model_info = model_options[selected_pred_model]
+                    
+                    # Upload de dados para predição
+                    pred_file = st.file_uploader("Upload Dataset para Predição (CSV)", type=["csv"])
+                    
+                    if pred_file is not None:
+                        try:
+                            pred_df = pd.read_csv(pred_file)
+                            st.write(f"Dataset de predição: {pred_df.shape}")
+                            st.dataframe(pred_df.head(), use_container_width=True)
+                            
+                            # Preparar dados (remover target se existir)
+                            feature_cols = [c for c in pred_df.columns if c != model_info.get("target_column")]
+                            X_pred = pred_df[feature_cols].values
+                            
+                            # Preparar input shape
+                            model_type = model_info["model_type"]
+                            if model_type == "cnn":
+                                X_pred = X_pred.reshape(X_pred.shape[0], X_pred.shape[1], 1)
+                            elif model_type == "lstm":
+                                X_pred = X_pred.reshape(X_pred.shape[0], 1, X_pred.shape[1])
+                            
+                            if st.button("Realizar Predições", type="primary"):
+                                with st.spinner("Realizando predições..."):
+                                    try:
+                                        result = dl_automl.predict(model_info["path"], X_pred)
+                                        
+                                        if result["success"]:
+                                            st.success("✅ Predições realizadas com sucesso!")
+                                            
+                                            # Adicionar predições ao DataFrame
+                                            pred_df["prediction"] = result["predictions"]
+                                            
+                                            if result["probabilities"] is not None:
+                                                pred_df["probability"] = result["probabilities"]
+                                            
+                                            st.write("**Resultados:**")
+                                            st.dataframe(pred_df.head(), use_container_width=True)
+                                            
+                                            # Download dos resultados
+                                            csv = pred_df.to_csv(index=False)
+                                            st.download_button(
+                                                label="Baixar Resultados",
+                                                data=csv,
+                                                file_name=f"predictions_{selected_pred_model}.csv",
+                                                mime="text/csv",
+                                            )
+                                        else:
+                                            st.error(f"Erro na predição: {result['error']}")
+                                    
+                                    except Exception as exc:
+                                        st.error(f"Erro na predição: {exc}")
+                        
+                        except Exception as exc:
+                            st.error(f"Erro ao ler dataset: {exc}")
+            else:
+                st.info("Nenhum modelo Deep Learning disponível. Treine um modelo primeiro.")
+        
+        with dl_tabs[3]:
+            st.subheader("Configurações Padrão")
+            
+            framework_config = st.selectbox("Framework", options=["tensorflow", "pytorch"])
+            model_config = st.selectbox("Modelo", options=["mlp", "cnn", "lstm"])
+            
+            config = dl_automl.default_configs[framework_config][model_config]
+            
+            st.write("**Configurações Atuais:**")
+            st.json(config)
+            
+            st.info("Você pode personalizar estas configurações na aba de treinamento.")
+
+    with tabs[9]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
