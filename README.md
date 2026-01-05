@@ -92,41 +92,54 @@ Plataforma **Enterprise-Grade**, **100% gratuita** e **self-hosted** para criar,
 pip install -r requirements.txt
 ```
 
-### Dependências Opcionais (por funcionalidade)
-
-#### 🤖 Deep Learning
-```bash
-pip install tensorflow  # Para modelos TensorFlow
-pip install torch        # Para modelos PyTorch
-```
-
-#### 📈 Time Series
-```bash
-pip install statsmodels pmdarima  # Para ARIMA
-pip install prophet                # Para Prophet
-pip install tensorflow              # Para LSTM (já incluído acima)
-```
-
-#### 🔬 Hyperparameter Optimization
-```bash
-pip install optuna  # Para otimização avançada
-```
-
-#### 📦 Data Versioning & Validation
-```bash
-pip install dvc      # Para versionamento de dados
-pip install pandera  # Para validação de dados
-```
-
-#### 📊 Visualizações Avançadas
-```bash
-pip install plotly  # Para gráficos interativos (já incluído)
-```
-
 ### Instalação Completa (todas as funcionalidades)
 ```bash
+pip install -r requirements-full.txt
+```
+
+### Instalação Flexível (recomendado)
+
+#### 🎯 **Opção 1: Instalação Guiada**
+```bash
+# Instalar dependências essenciais
 pip install -r requirements.txt
-pip install tensorflow torch optuna statsmodels pmdarima prophet dvc pandera plotly
+
+# Instalar dependências opcionais conforme necessidade
+python install_optional.py --all                    # Todas as funcionalidades
+python install_optional.py --deep-learning          # Apenas Deep Learning
+python install_optional.py --time-series            # Apenas Time Series
+python install_optional.py --monitoring             # Apenas Monitoring
+python install_optional.py --data-validation         # Apenas Data Validation
+```
+
+#### 🎯 **Opção 2: Arquivos de Requirements**
+```bash
+# Mínimo para funcionamento básico
+pip install -r requirements-base.txt
+
+# Funcionalidades básicas + visualizações
+pip install -r requirements.txt
+
+# Todas as funcionalidades (produção completa)
+pip install -r requirements-full.txt
+```
+
+#### 🎯 **Opção 3: Manual por Funcionalidade**
+```bash
+# 🤖 Deep Learning
+pip install tensorflow torch
+
+# 📈 Time Series  
+pip install statsmodels pmdarima prophet
+
+# 🔬 Hyperparameter Optimization
+pip install optuna
+
+# 📦 Data Versioning & Validation
+pip install dvc pandera
+
+# 📊 Visualizações Avançadas
+pip install plotly
 ```
 
 ---
@@ -194,7 +207,11 @@ free-mlops/
 ├── artifacts/                      # Artefatos de experimentos
 ├── .env                            # Configurações locais
 ├── .env.example                    # Exemplo de configurações
-├── requirements.txt                # Dependências base
+├── requirements.txt                # Dependências básicas + visualizações
+├── requirements-base.txt           # Dependências mínimas essenciais
+├── requirements-full.txt           # Todas as dependências (produção completa)
+├── requirements-dev.txt            # Dependências de desenvolvimento
+├── install_optional.py             # Instalador guiado de dependências opcionais
 └── README.md                       # Este arquivo
 ```
 
