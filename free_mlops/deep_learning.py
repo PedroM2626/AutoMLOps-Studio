@@ -1209,85 +1209,6 @@ class DeepLearningAutoML:
         # Converter para float32
         return df_numeric.astype(np.float32).values
     
-    def _clean_target_data(self, data: np.ndarray, problem_type: str) -> np.ndarray:
-        """Limpa dados de target convertendo para o tipo correto."""
-        import pandas as pd
-        
-        # Converter para Series se for array
-        if isinstance(data, np.ndarray):
-            if len(data.shape) == 1:
-                series = pd.Series(data)
-            else:
-                series = pd.Series(data.flatten())
-        else:
-            series = data.copy()
-        
-        if problem_type == "classification":
-            # Para classificação, converter para int32
-            try:
-                # Tentar converter diretamente
-                return series.astype(np.int32).values
-            except (ValueError, TypeError):
-                # Se falhar, fazer encoding de labels
-                from sklearn.preprocessing import LabelEncoder
-                le = LabelEncoder()
-                encoded = le.fit_transform(series.astype(str))
-                return encoded.astype(np.int32)
-        else:
-            # Para regressão, converter para float32
-            try:
-                return pd.to_numeric(series, errors='raise').astype(np.float32).values
-            except (ValueError, TypeError):
-                raise ValueError("Para regressão, os valores de target devem ser numéricos.")
-    
-    def save_model(self, result: Dict[str, Any], model_name: str) -> str:
-        """Salva modelo treinado."""
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_dir = self.models_dir / f"{model_name}_{timestamp}"
-        model_dir.mkdir(parents=True, exist_ok=True)
-        
-        framework = result["framework"]
-        model_type = result["model_type"]
-        model = result["model"]
-        
-        if framework == "tensorflow":
-            try:
-                import tensorflow as tf
-                model.save(model_dir / "model")
-            except Exception as e:
-                raise RuntimeError(f"Erro ao salvar modelo TensorFlow: {e}")
-        
-        elif framework == "pytorch":
-            try:
-                import torch
-                torch.save(model.state_dict(), model_dir / "model.pth")
-                
-                # Salvar arquitetura
-                with open(model_dir / "architecture.txt", "w") as f:
-                    f.write(str(model))
-            except Exception as e:
-                raise RuntimeError(f"Erro ao salvar modelo PyTorch: {e}")
-        
-        # Salvar metadados
-        metadata = {
-            "framework": framework,
-            "model_type": model_type,
-            "problem_type": result["problem_type"],
-            "config": result["config"],
-            "training_time": result["training_time"],
-            "validation_metrics": result["validation_metrics"],
-            "input_shape": result["input_shape"],
-            "num_classes": result["num_classes"],
-            "saved_at": datetime.now(timezone.utc).isoformat(),
-            "model_name": model_name,
-        }
-        
-        with open(model_dir / "metadata.json", "w") as f:
-            json.dump(metadata, f, ensure_ascii=False, indent=2, default=str)
-        
-        return str(model_dir)
-    
     def load_model(self, model_path: str) -> Dict[str, Any]:
         """Carrega modelo salvo."""
         
@@ -1461,11 +1382,17 @@ class DeepLearningAutoML:
         y_train_np = y_train.values if hasattr(y_train, 'values') else y_train
         y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
         
-        # Limpar dados - remover colunas não-numéricas e converter para float32
-        X_train_clean = self._clean_numeric_data(X_train_np)
-        X_val_clean = self._clean_numeric_data(X_val_np)
-        y_train_clean = self._clean_target_data(y_train_np, problem_type)
-        y_val_clean = self._clean_target_data(y_val_np, problem_type)
+        # Detectar se temos dados de texto (NLP) ou dados tabulares
+        if self._is_text_data(X_train):
+            # Processamento para NLP
+            X_train_clean, y_train_clean = self._process_text_data(X_train, y_train, problem_type)
+            X_val_clean, y_val_clean = self._process_text_data(X_val, y_val, problem_type, is_fit=False)
+        else:
+            # Processamento para dados tabulares numéricos
+            X_train_clean = self._clean_numeric_data(X_train_np)
+            X_val_clean = self._clean_numeric_data(X_val_np)
+            y_train_clean = self._clean_target_data(y_train_np, problem_type)
+            y_val_clean = self._clean_target_data(y_val_np, problem_type)
         
         # Atualizar input_shape baseado nos dados limpos
         if model_type == "mlp":

@@ -31,6 +31,7 @@ from free_mlops.dvc_integration import get_dvc_integration
 from free_mlops.data_validation import get_data_validator
 from free_mlops.deep_learning import get_deep_learning_automl
 from free_mlops.advanced_deep_learning import get_advanced_deep_learning_automl
+from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
 from free_mlops.time_series import get_time_series_automl
 
 
@@ -50,7 +51,7 @@ def main() -> None:
     target_column = None
     problem_type = "classification"
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Advanced DL", "Time Series", "Monitoramento", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -1266,6 +1267,20 @@ def main() -> None:
                     st.write(f"Dataset carregado: {df.shape}")
                     st.dataframe(df.head(), use_container_width=True)
                     
+                    # Detectar tipo de dados
+                    text_cols = [col for col in df.columns if df[col].dtype == 'object']
+                    numeric_cols = [col for col in df.columns if df[col].dtype in ['int64', 'float64']]
+                    
+                    if text_cols and not numeric_cols:
+                        st.info("🤖 **Dados de texto detectados!** Será usado processamento NLP.")
+                        data_type = "nlp"
+                    elif numeric_cols and not text_cols:
+                        st.info("📊 **Dados numéricos detectados!** Será usado processamento padrão.")
+                        data_type = "numeric"
+                    else:
+                        st.warning("⚠️ **Dados mistos detectados!** Será usado processamento numérico (colunas de texto serão ignoradas).")
+                        data_type = "numeric"
+                    
                     # Configurações
                     target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
                     problem_type = st.radio(
@@ -1277,14 +1292,51 @@ def main() -> None:
                     # Framework e tipo de modelo
                     col1, col2 = st.columns(2)
                     with col1:
-                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
+                        if data_type == "nlp":
+                            framework = st.selectbox("Framework", options=["pytorch"], key="dl_framework", help="Para NLP, apenas PyTorch disponível")
+                        else:
+                            framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
                     with col2:
-                        model_type = st.selectbox(
-                            "Tipo de Modelo",
-                            options=["mlp", "cnn", "lstm"],
-                            help="MLP: dados tabulares, CNN: imagens, LSTM: sequências/temporal",
-                            key="dl_model_type"
-                        )
+                        if data_type == "nlp":
+                            model_type = st.selectbox(
+                                "Tipo de Modelo NLP",
+                                options=["text_cnn", "text_lstm", "bert_classifier", "roberta_classifier", "distilbert_classifier"],
+                                format_func=lambda x: {
+                                    "text_cnn": "📝 Text CNN",
+                                    "text_lstm": "🔄 Text LSTM", 
+                                    "bert_classifier": "🤖 BERT Classifier",
+                                    "roberta_classifier": "🎭 RoBERTa Classifier",
+                                    "distilbert_classifier": "⚡ DistilBERT Classifier"
+                                }[x],
+                                key="dl_model_type",
+                                help="Text CNN: rápido, LSTM: memória, BERT/RoBERTa: state-of-the-art, DistilBERT: rápido"
+                            )
+                        else:
+                            model_type = st.selectbox(
+                                "Tipo de Modelo",
+                                options=[
+                                    "mlp", "cnn", "lstm",  # Deep Learning básico
+                                    "tabtransformer", "vision_transformer",  # Advanced DL
+                                    "random_forest", "xgboost", "lightgbm",  # Clássicos potentes
+                                    "svm", "logistic_regression", "ridge", "lasso"  # Clássicos tradicionais
+                                ],
+                                format_func=lambda x: {
+                                    "mlp": "🧠 MLP (Rede Neural)",
+                                    "cnn": "👁️ CNN (Convolucional)",
+                                    "lstm": "🔄 LSTM (Recorrente)",
+                                    "tabtransformer": "🤖 TabTransformer",
+                                    "vision_transformer": "👁️ Vision Transformer",
+                                    "random_forest": "🌲 Random Forest",
+                                    "xgboost": "⚡ XGBoost",
+                                    "lightgbm": "💡 LightGBM",
+                                    "svm": "📊 SVM",
+                                    "logistic_regression": "📈 Logistic Regression",
+                                    "ridge": "📐 Ridge Regression",
+                                    "lasso": "🎯 Lasso Regression"
+                                }[x],
+                                key="dl_model_type",
+                                help="Escolha entre Deep Learning, Transformers, e modelos clássicos"
+                            )
                     
                     # Configurações avançadas
                     with st.expander("Configurações Avançadas"):
@@ -1298,7 +1350,104 @@ def main() -> None:
                             optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
                         
                         # Configurações específicas por tipo de modelo
-                        if model_type == "mlp":
+                        if data_type == "nlp":
+                            # Configurações NLP
+                            if model_type == "text_cnn":
+                                st.write("**Configurações Text CNN:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="cnn_embed_dim")
+                                    num_filters = st.number_input("Num Filters", min_value=50, max_value=200, value=100, key="cnn_num_filters")
+                                with col2:
+                                    filter_sizes = st.text_input("Filter Sizes (ex: 3,4,5)", value="3,4,5", key="cnn_filter_sizes")
+                                    try:
+                                        filter_sizes_list = [int(x.strip()) for x in filter_sizes.split(",") if x.strip().isdigit()]
+                                    except ValueError:
+                                        st.error("Formato inválido para filter sizes. Use números separados por vírgula.")
+                                        return
+                            elif model_type == "text_lstm":
+                                st.write("**Configurações Text LSTM:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="lstm_embed_dim")
+                                    hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="lstm_hidden_dim")
+                                with col2:
+                                    num_layers = st.selectbox("Num Layers", options=[1, 2, 3, 4], value=2, key="lstm_num_layers")
+                                    bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="lstm_bidirectional")
+                            elif model_type in ["bert_classifier", "roberta_classifier", "distilbert_classifier"]:
+                                st.write("**Configurações Transformers:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if model_type == "bert_classifier":
+                                        bert_model = st.selectbox(
+                                            "BERT Model",
+                                            options=["bert-base-uncased", "bert-large-uncased", "distilbert-base-uncased"],
+                                            value="bert-base-uncased",
+                                            key="bert_model_name"
+                                        )
+                                    elif model_type == "roberta_classifier":
+                                        bert_model = st.selectbox(
+                                            "RoBERTa Model",
+                                            options=["roberta-base", "roberta-large", "distilroberta-base"],
+                                            value="roberta-base",
+                                            key="roberta_model_name"
+                                        )
+                                    else:  # distilbert_classifier
+                                        bert_model = st.selectbox(
+                                            "DistilBERT Model",
+                                            options=["distilbert-base-uncased", "distilbert-base-multilingual-cased"],
+                                            value="distilbert-base-uncased",
+                                            key="distilbert_model_name"
+                                        )
+                                with col2:
+                                    freeze_bert = st.checkbox("Freeze Transformer Layers", value=False, key="bert_freeze")
+                                    max_length = st.number_input("Max Sequence Length", min_value=128, max_value=512, value=256, key="bert_max_length")
+                        elif model_type in ["tabtransformer", "vision_transformer"]:
+                                st.write("**Configurações Transformers Avançados:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if model_type == "tabtransformer":
+                                        embedding_dim = st.number_input("Embedding Dim", min_value=8, max_value=128, value=32, key="tab_embedding_dim")
+                                        num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=1, key="tab_num_heads")
+                                        num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="tab_num_layers")
+                                    else:  # vision_transformer
+                                        patch_size = st.selectbox("Patch Size", options=[2, 4, 8], index=1, key="vit_patch_size")
+                                        embedding_dim = st.number_input("Embedding Dim", min_value=32, max_value=256, value=64, key="vit_embedding_dim")
+                                        num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=1, key="vit_num_heads")
+                                        num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="vit_num_layers")
+                                with col2:
+                                    if model_type == "tabtransformer":
+                                        hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="tab_hidden_dim")
+                                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.3, value=0.1, key="tab_dropout")
+                                        scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="tab_scheduler")
+                                    else:  # vision_transformer
+                                        hidden_dim = st.number_input("Hidden Dim", min_value=64, max_value=512, value=128, key="vit_hidden_dim")
+                                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.3, value=0.1, key="vit_dropout")
+                                        scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="vit_scheduler")
+                        elif model_type in ["random_forest", "xgboost", "lightgbm"]:
+                                st.write("**Configurações Ensemble:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    n_estimators = st.number_input("Número de Estimadores", min_value=10, max_value=1000, value=100, key="rf_n_estimators")
+                                    max_depth = st.number_input("Profundidade Máxima", min_value=1, max_value=50, value=10, key="rf_max_depth")
+                                with col2:
+                                    min_samples_split = st.number_input("Min Samples Split", min_value=2, max_value=20, value=2, key="rf_min_samples_split")
+                                    min_samples_leaf = st.number_input("Min Samples Leaf", min_value=1, max_value=20, value=1, key="rf_min_samples_leaf")
+                        elif model_type in ["svm", "logistic_regression", "ridge", "lasso"]:
+                                st.write("**Configurações Modelo Clássico:**")
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if model_type == "svm":
+                                        C = st.number_input("C (Regularização)", min_value=0.01, max_value=100.0, value=1.0, format="%.2f", key="svm_C")
+                                        kernel = st.selectbox("Kernel", options=["linear", "rbf", "poly"], value="rbf", key="svm_kernel")
+                                    else:
+                                        alpha = st.number_input("Alpha (Regularização)", min_value=0.0001, max_value=10.0, value=1.0, format="%.4f", key="linear_alpha")
+                                with col2:
+                                    if model_type == "svm":
+                                        gamma = st.number_input("Gamma", min_value=0.001, max_value=10.0, value=0.1, format="%.3f", key="svm_gamma")
+                                    else:
+                                        max_iter = st.number_input("Max Iterações", min_value=100, max_value=10000, value=1000, key="linear_max_iter")
+                        elif model_type == "mlp":
                             st.write("**Configurações MLP:**")
                             hidden_layers_input = st.text_input(
                                 "Hidden Layers (ex: 128,64,32)", 
@@ -1358,26 +1507,110 @@ def main() -> None:
                     if st.button("Treinar Modelo Deep Learning", type="primary"):
                         with st.spinner("Preparando dados e treinando modelo..."):
                             try:
-                                # Preparar dados
-                                df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
-                                feature_cols = [c for c in df_clean.columns if c != target_column]
-                                X = df_clean[feature_cols].values
-                                y = df_clean[target_column].values
-                                
-                                # Para classificação, converter labels para inteiros
-                                if problem_type == "classification":
-                                    from sklearn.preprocessing import LabelEncoder
-                                    le = LabelEncoder()
-                                    y = le.fit_transform(y)
-                                    num_classes = len(le.classes_)
+                                if data_type == "nlp":
+                                    # Processamento NLP
+                                    df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                                    
+                                    # Combinar colunas de texto
+                                    text_cols = [col for col in df_clean.columns if col != target_column and df_clean[col].dtype == 'object']
+                                    if len(text_cols) == 1:
+                                        X_texts = df_clean[text_cols[0]].astype(str).tolist()
+                                    else:
+                                        X_texts = df_clean[text_cols].astype(str).apply(' '.join, axis=1).tolist()
+                                    
+                                    y_labels = df_clean[target_column].astype(str).tolist()
+                                    
+                                    # Split dados
+                                    from sklearn.model_selection import train_test_split
+                                    X_train, X_val, y_train, y_val = train_test_split(
+                                        X_texts, y_labels, test_size=0.2, random_state=42, stratify=y_labels
+                                    )
+                                    
+                                    # Configuração NLP
+                                    custom_config = {
+                                        "epochs": epochs,
+                                        "batch_size": batch_size,
+                                        "learning_rate": learning_rate,
+                                        "dropout_rate": dropout_rate,
+                                    }
+                                    
+                                    if model_type == "text_cnn":
+                                        custom_config.update({
+                                            "embed_dim": embed_dim,
+                                            "num_filters": num_filters,
+                                            "filter_sizes": filter_sizes_list,
+                                        })
+                                    elif model_type == "text_lstm":
+                                        custom_config.update({
+                                            "embed_dim": embed_dim,
+                                            "hidden_dim": hidden_dim,
+                                            "num_layers": num_layers,
+                                            "bidirectional": bidirectional,
+                                        })
+                                    elif model_type == "bert_classifier":
+                                        custom_config.update({
+                                            "model_name": bert_model,
+                                            "freeze_bert": freeze_bert,
+                                        })
+                                    
+                                    # Treinar modelo NLP
+                                    from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
+                                    nlp_automl = get_nlp_deep_learning_automl()
+                                    
+                                    if model_type == "text_cnn":
+                                        result = nlp_automl.create_text_cnn(
+                                            X_train, y_train, X_val, y_val, custom_config, problem_type
+                                        )
+                                    elif model_type == "text_lstm":
+                                        result = nlp_automl.create_text_lstm(
+                                            X_train, y_train, X_val, y_val, custom_config, problem_type
+                                        )
+                                    elif model_type == "bert_classifier":
+                                        result = nlp_automl.create_bert_classifier(
+                                            X_train, y_train, X_val, y_val, custom_config, problem_type
+                                        )
+                                    
+                                    st.success("✅ Modelo NLP treinado com sucesso!")
+                                    
+                                    # Display results
+                                    col1, col2, col3 = st.columns(3)
+                                    col1.metric("Modelo", result["model_type"].replace("_", " ").title())
+                                    col2.metric("Framework", result["framework"].title())
+                                    col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                                    
+                                    # Metrics
+                                    st.write("### 📊 Métricas de Validação")
+                                    metrics = result["validation_metrics"]
+                                    col1, col2 = st.columns(2)
+                                    col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
+                                    col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
+                                    
+                                    # Class information
+                                    st.write("### 📋 Informações das Classes")
+                                    st.write(f"**Número de classes:** {result['num_classes']}")
+                                    st.write(f"**Classes:** {', '.join(result['class_names'])}")
+                                    
                                 else:
-                                    num_classes = 1
-                                
-                                # Split treino/validação
-                                from sklearn.model_selection import train_test_split
-                                X_train, X_val, y_train, y_val = train_test_split(
-                                    X, y, test_size=0.2, random_state=42
-                                )
+                                    # Processamento normal (dados numéricos)
+                                    df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                                    feature_cols = [c for c in df_clean.columns if c != target_column]
+                                    X = df_clean[feature_cols].values
+                                    y = df_clean[target_column].values
+                                    
+                                    # Para classificação, converter labels para inteiros
+                                    if problem_type == "classification":
+                                        from sklearn.preprocessing import LabelEncoder
+                                        le = LabelEncoder()
+                                        y = le.fit_transform(y)
+                                        num_classes = len(le.classes_)
+                                    else:
+                                        num_classes = 1
+                                    
+                                    # Split treino/validação
+                                    from sklearn.model_selection import train_test_split
+                                    X_train, X_val, y_train, y_val = train_test_split(
+                                        X, y, test_size=0.2, random_state=42
+                                    )
                                 
                                 # Configuração personalizada completa
                                 custom_config = {
@@ -1638,17 +1871,16 @@ def main() -> None:
             st.info("Você pode personalizar estas configurações na aba de treinamento.")
 
     with tabs[9]:
-        st.subheader("🚀 Advanced Deep Learning (Transformers, Attention)")
         
         advanced_dl_automl = get_advanced_deep_learning_automl()
         
         if df is not None and target_column:
-            st.write("### 🎯 Modelos Avançados Disponíveis")
+            st.write("### Modelos Avançados Disponíveis")
             
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown("""
-                **🤖 TabTransformer**
+                **TabTransformer**
                 - Transformer para dados tabulares
                 - Embeddings para features categóricas
                 - Multi-head attention
@@ -1657,7 +1889,7 @@ def main() -> None:
             
             with col2:
                 st.markdown("""
-                **👁️ Vision Transformer**
+                **Vision Transformer**
                 - ViT para dados tabulares como "imagens"
                 - Patch-based approach
                 - Self-attention global
@@ -1669,8 +1901,8 @@ def main() -> None:
                 "Selecione o modelo avançado",
                 options=["tabtransformer", "vision_transformer"],
                 format_func=lambda x: {
-                    "tabtransformer": "🤖 TabTransformer",
-                    "vision_transformer": "👁️ Vision Transformer"
+                    "tabtransformer": "TabTransformer",
+                    "vision_transformer": "Vision Transformer"
                 }[x],
                 key="advanced_model_type"
             )
@@ -1684,7 +1916,7 @@ def main() -> None:
             )
             
             # Configuration
-            st.write("### ⚙️ Configurações Avançadas")
+            st.write("### Configurações Avançadas")
             
             if model_type == "tabtransformer":
                 col1, col2 = st.columns(2)
@@ -1710,7 +1942,7 @@ def main() -> None:
                 scheduler = "cosine"  # Default for Vision Transformer
             
             # Training parameters
-            st.write("### 🎯 Parâmetros de Treinamento")
+            st.write("### Parâmetros de Treinamento")
             col1, col2, col3 = st.columns(3)
             with col1:
                 epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100, key="adv_epochs")
@@ -1720,9 +1952,9 @@ def main() -> None:
                 learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, key="adv_lr")
             
             # MLflow tracking
-            enable_mlflow = st.checkbox("📊 Habilitar MLflow Tracking", value=True, key="enable_mlflow")
+            enable_mlflow = st.checkbox("Habilitar MLflow Tracking", value=True, key="enable_mlflow")
             
-            if st.button("🚀 Treinar Modelo Avançado", type="primary"):
+            if st.button("Treinar Modelo Avançado", type="primary"):
                 with st.spinner("Treinando modelo avançado..."):
                     try:
                         # Prepare data
@@ -1772,7 +2004,7 @@ def main() -> None:
                                 X_train, y_train, X_val, y_val, config, problem_type
                             )
                         
-                        st.success("✅ Modelo avançado treinado com sucesso!")
+                        st.success("Modelo avançado treinado com sucesso!")
                         
                         # Display results
                         col1, col2, col3 = st.columns(3)
@@ -1781,7 +2013,7 @@ def main() -> None:
                         col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
                         
                         # Metrics
-                        st.write("### 📊 Métricas de Validação")
+                        st.write("### Métricas de Validação")
                         metrics = result["validation_metrics"]
                         col1, col2 = st.columns(2)
                         col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
@@ -1789,8 +2021,8 @@ def main() -> None:
                             col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
                         
                         # Model explanation
-                        st.write("### 🔍 Interpretabilidade do Modelo")
-                        if st.button("🔍 Gerar Explicações SHAP", key="explain_advanced"):
+                        st.write("### Interpretabilidade do Modelo")
+                        if st.button("Gerar Explicações SHAP", key="explain_advanced"):
                             with st.spinner("Gerando explicações..."):
                                 try:
                                     explainer = result["explainer"]
@@ -1800,7 +2032,7 @@ def main() -> None:
                                     )
                                     
                                     if explanation:
-                                        st.success("✅ Explicações geradas!")
+                                        st.success("Explicações geradas!")
                                         
                                         # Plot feature importance
                                         fig = explainer.plot_feature_importance(
@@ -2479,7 +2711,7 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Erro ao ler dataset: {exc}")
 
-    with tabs[11]:
+    with tabs[10]:
         st.subheader("Monitoramento")
         
         # Selecionar modelo para monitorar
@@ -2532,7 +2764,7 @@ def main() -> None:
         except Exception as exc:
             st.error(f"Erro no monitoramento: {exc}")
 
-    with tabs[12]:
+    with tabs[11]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
