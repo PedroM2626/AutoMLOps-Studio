@@ -30,6 +30,7 @@ from free_mlops.hyperopt import get_hyperparameter_optimizer
 from free_mlops.dvc_integration import get_dvc_integration
 from free_mlops.data_validation import get_data_validator
 from free_mlops.deep_learning import get_deep_learning_automl
+from free_mlops.time_series import get_time_series_automl
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -43,7 +44,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -1586,6 +1587,654 @@ def main() -> None:
             st.info("Você pode personalizar estas configurações na aba de treinamento.")
 
     with tabs[9]:
+        st.subheader("Time Series (ARIMA, Prophet, LSTM)")
+        
+        ts_automl = get_time_series_automl()
+        
+        # Tabs de Time Series
+        ts_tabs = st.tabs(["Treinar Modelo", "Modelos Salvos", "Previsões", "Análise"])
+        
+        with ts_tabs[0]:
+            st.subheader("Treinar Modelo de Time Series")
+            
+            # Upload de dados
+            ts_file = st.file_uploader("Upload Dataset Time Series (CSV)", type=["csv"])
+            
+            if ts_file is not None:
+                try:
+                    # Ler dados
+                    df = pd.read_csv(ts_file)
+                    st.write(f"Dataset carregado: {df.shape}")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    # Configurações
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        date_column = st.selectbox("Coluna de Data", options=list(df.columns))
+                    with col2:
+                        value_column = st.selectbox("Coluna de Valor", options=[c for c in df.columns if c != date_column])
+                    
+                    # Tipo de modelo
+                    model_type = st.selectbox(
+                        "Tipo de Modelo",
+                        options=["arima", "prophet", "lstm"],
+                        help="ARIMA: estatístico tradicional, Prophet: Facebook, LSTM: Deep Learning"
+                    )
+                    
+                    # Configurações específicas
+                    with st.expander("Configurações Avançadas"):
+                        if model_type == "arima":
+                            auto_arima = st.checkbox("Auto ARIMA (recomendado)", value=True)
+                            if not auto_arima:
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    p = st.number_input("AR order (p)", min_value=0, max_value=5, value=1)
+                                with col2:
+                                    d = st.number_input("I order (d)", min_value=0, max_value=2, value=1)
+                                with col3:
+                                    q = st.number_input("MA order (q)", min_value=0, max_value=5, value=1)
+                        
+                        elif model_type == "prophet":
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                yearly_seasonality = st.selectbox("Sazonalidade Anual", options=["auto", True, False])
+                                weekly_seasonality = st.selectbox("Sazonalidade Semanal", options=["auto", True, False])
+                            with col2:
+                                daily_seasonality = st.selectbox("Sazonalidade Diária", options=["auto", True, False])
+                                changepoint_prior = st.number_input("Changepoint Prior Scale", min_value=0.01, max_value=0.5, value=0.05, format="%.3f")
+                        
+                        elif model_type == "lstm":
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                sequence_length = st.number_input("Sequence Length", min_value=5, max_value=50, value=10)
+                                epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100)
+                            with col2:
+                                batch_size = st.number_input("Batch Size", min_value=8, max_value=64, value=32)
+                                dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.2, format="%.2f")
+                    
+                    # Test size
+                    test_size = st.number_input("Período de Teste (dias)", min_value=7, max_value=365, value=30)
+                    
+                    if st.button("Treinar Modelo Time Series", type="primary"):
+                        with st.spinner("Preparando dados e treinando modelo..."):
+                            try:
+                                # Preparar dados
+                                ts_df = df[[date_column, value_column]].copy()
+                                ts_df[date_column] = pd.to_datetime(ts_df[date_column])
+                                ts_df = ts_df.sort_values(date_column)
+                                ts_df = ts_df.set_index(date_column)
+                                ts_series = ts_df[value_column].asfreq('D')  # Frequência diária
+                                
+                                # Remover NaNs
+                                ts_series = ts_series.dropna()
+                                
+                                if len(ts_series) < test_size + 50:
+                                    st.error(f"Dados insuficientes. Necessário pelo menos {test_size + 50} pontos.")
+                                    return
+                                
+                                # Configuração personalizada
+                                custom_config = {}
+                                
+                                if model_type == "arima":
+                                    if not auto_arima:
+                                        custom_config = {"order": (p, d, q)}
+                                    custom_config["auto_arima"] = auto_arima
+                                
+                                elif model_type == "prophet":
+                                    custom_config = {
+                                        "yearly_seasonality": yearly_seasonality,
+                                        "weekly_seasonality": weekly_seasonality,
+                                        "daily_seasonality": daily_seasonality,
+                                        "changepoint_prior_scale": changepoint_prior,
+                                    }
+                                
+                                elif model_type == "lstm":
+                                    custom_config = {
+                                        "sequence_length": sequence_length,
+                                        "epochs": epochs,
+                                        "batch_size": batch_size,
+                                        "dropout_rate": dropout_rate,
+                                    }
+                                
+                                # Treinar modelo
+                                if model_type == "arima":
+                                    result = ts_automl.create_arima_model(
+                                        ts_series, custom_config, test_size
+                                    )
+                                
+                                elif model_type == "prophet":
+                                    result = ts_automl.create_prophet_model(
+                                        df, date_column, value_column, custom_config, test_size
+                                    )
+                                
+                                elif model_type == "lstm":
+                                    result = ts_automl.create_lstm_model(
+                                        ts_series, custom_config, test_size
+                                    )
+                                
+                                st.success("✅ Modelo treinado com sucesso!")
+                                
+                                # Mostrar resultados
+                                col1, col2, col3 = st.columns(3)
+                                col1.metric("Modelo", result["model_type"].upper())
+                                col2.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                                col3.metric("Dados Treino", len(result["training_data"]))
+                                
+                                # Métricas
+                                if result["metrics"]:
+                                    st.write("**Métricas de Teste:**")
+                                    metrics_df = pd.DataFrame([
+                                        {"Métrica": k, "Valor": f"{v:.4f}"}
+                                        for k, v in result["metrics"].items()
+                                    ])
+                                    st.dataframe(metrics_df, use_container_width=True)
+                                
+                                # Gráfico de previsões
+                                if model_type in ["arima", "prophet"] and result.get("forecast") is not None:
+                                    import plotly.graph_objects as go
+                                    
+                                    fig = go.Figure()
+                                    
+                                    # Dados históricos
+                                    fig.add_trace(go.Scatter(
+                                        x=result["training_data"].index,
+                                        y=result["training_data"].values,
+                                        mode="lines",
+                                        name="Dados Treino",
+                                        line=dict(color="blue")
+                                    ))
+                                    
+                                    # Dados de teste
+                                    if result["test_data"] is not None:
+                                        fig.add_trace(go.Scatter(
+                                            x=result["test_data"].index,
+                                            y=result["test_data"].values,
+                                            mode="lines",
+                                            name="Dados Reais",
+                                            line=dict(color="green")
+                                        ))
+                                    
+                                    # Previsões
+                                    if model_type == "arima":
+                                        forecast_index = result["test_data"].index
+                                        forecast_values = result["forecast"].values
+                                    else:  # Prophet
+                                        forecast_df = result["test_forecast"]
+                                        forecast_index = pd.to_datetime(forecast_df["ds"])
+                                        forecast_values = forecast_df["yhat"].values
+                                    
+                                    fig.add_trace(go.Scatter(
+                                        x=forecast_index,
+                                        y=forecast_values,
+                                        mode="lines",
+                                        name="Previsão",
+                                        line=dict(color="red", dash="dash")
+                                    ))
+                                    
+                                    # Confidence intervals ( Prophet )
+                                    if model_type == "prophet" and result["test_forecast"] is not None:
+                                        fig.add_trace(go.Scatter(
+                                            x=forecast_index,
+                                            y=result["test_forecast"]["yhat_lower"],
+                                            mode="lines",
+                                            line=dict(width=0),
+                                            showlegend=False,
+                                        ))
+                                        fig.add_trace(go.Scatter(
+                                            x=forecast_index,
+                                            y=result["test_forecast"]["yhat_upper"],
+                                            mode="lines",
+                                            line=dict(width=0),
+                                            fill="tonexty",
+                                            fillcolor="rgba(255,0,0,0.2)",
+                                            name="Intervalo Confiança",
+                                        ))
+                                    
+                                    fig.update_layout(
+                                        title=f"Previsões - {model_type.upper()}",
+                                        xaxis_title="Data",
+                                        yaxis_title="Valor",
+                                        hovermode="x unified"
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                elif model_type == "lstm" and result.get("test_predictions") is not None:
+                                    import plotly.graph_objects as go
+                                    
+                                    fig = go.Figure()
+                                    
+                                    # Dados históricos
+                                    fig.add_trace(go.Scatter(
+                                        x=result["training_data"].index,
+                                        y=result["training_data"].values,
+                                        mode="lines",
+                                        name="Dados Treino",
+                                        line=dict(color="blue")
+                                    ))
+                                    
+                                    # Dados de teste e previsões
+                                    if result["test_data"] is not None:
+                                        fig.add_trace(go.Scatter(
+                                            x=result["test_data"].index,
+                                            y=result["test_data"].values,
+                                            mode="lines",
+                                            name="Dados Reais",
+                                            line=dict(color="green")
+                                        ))
+                                        
+                                        fig.add_trace(go.Scatter(
+                                            x=result["test_data"].index,
+                                            y=result["test_predictions"],
+                                            mode="lines",
+                                            name="Previsão LSTM",
+                                            line=dict(color="red", dash="dash")
+                                        ))
+                                    
+                                    fig.update_layout(
+                                        title="Previsões - LSTM",
+                                        xaxis_title="Data",
+                                        yaxis_title="Valor",
+                                        hovermode="x unified"
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Salvar modelo
+                                model_name = f"{model_type}_ts_{datetime.now().strftime('%Y%m%d')}"
+                                if st.button("Salvar Modelo", key=f"save_ts_{model_name}"):
+                                    try:
+                                        saved_path = ts_automl.save_model(result, model_name)
+                                        st.success(f"Modelo salvo em: {saved_path}")
+                                    except Exception as exc:
+                                        st.error(f"Erro ao salvar modelo: {exc}")
+                                
+                            except ImportError as e:
+                                st.error(f"Biblioteca não instalada: {e}")
+                                if model_type == "arima":
+                                    st.info("Instale com: pip install statsmodels pmdarima")
+                                elif model_type == "prophet":
+                                    st.info("Instale com: pip install prophet")
+                                elif model_type == "lstm":
+                                    st.info("Instale com: pip install tensorflow")
+                            except Exception as exc:
+                                st.error(f"Erro no treinamento: {exc}")
+                
+                except Exception as exc:
+                    st.error(f"Erro ao ler dataset: {exc}")
+        
+        with ts_tabs[1]:
+            st.subheader("Modelos Time Series Salvos")
+            
+            models = ts_automl.list_models()
+            
+            if models:
+                models_df = pd.DataFrame(models)
+                st.dataframe(models_df, use_container_width=True)
+                
+                # Detalhes do modelo selecionado
+                selected_model = st.selectbox(
+                    "Ver detalhes do modelo",
+                    options=[m["name"] for m in models],
+                    key="ts_model_select"
+                )
+                
+                if selected_model:
+                    model_info = next((m for m in models if m["name"] == selected_model), None)
+                    if model_info:
+                        st.write("**Detalhes do Modelo:**")
+                        
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Tipo", model_info["model_type"].upper())
+                        col2.metric("Treinado em", model_info["fitted_at"][:19])
+                        col3.metric("Tempo Treino", f"{model_info['training_time']:.2f}s")
+                        
+                        st.write("**Métricas:**")
+                        if model_info["metrics"]:
+                            metrics_df = pd.DataFrame([
+                                {"Métrica": k, "Valor": f"{v:.4f}"}
+                                for k, v in model_info["metrics"].items()
+                            ])
+                            st.dataframe(metrics_df, use_container_width=True)
+                        
+                        # Botões de ação
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Carregar Modelo", key=f"load_ts_{selected_model}"):
+                                try:
+                                    loaded = ts_automl.load_model(model_info["path"])
+                                    st.success("Modelo carregado com sucesso!")
+                                    st.info(f"Tipo: {loaded['metadata']['model_type']}")
+                                except Exception as exc:
+                                    st.error(f"Erro ao carregar modelo: {exc}")
+                        
+                        with col2:
+                            if st.button("Excluir Modelo", key=f"delete_ts_{selected_model}"):
+                                try:
+                                    import shutil
+                                    shutil.rmtree(model_info["path"])
+                                    st.success("Modelo excluído com sucesso!")
+                                    st.experimental_rerun()
+                                except Exception as exc:
+                                    st.error(f"Erro ao excluir modelo: {exc}")
+            else:
+                st.info("Nenhum modelo Time Series salvo ainda.")
+        
+        with ts_tabs[2]:
+            st.subheader("Previsões com Modelos Time Series")
+            
+            models = ts_automl.list_models()
+            
+            if models:
+                # Selecionar modelo
+                model_options = {m["name"]: m for m in models}
+                selected_pred_model = st.selectbox(
+                    "Modelo para previsão",
+                    options=list(model_options.keys()),
+                    key="ts_pred_model_select"
+                )
+                
+                if selected_pred_model:
+                    model_info = model_options[selected_pred_model]
+                    
+                    # Configurações de previsão
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        periods = st.number_input("Períodos para prever", min_value=1, max_value=365, value=30)
+                    with col2:
+                        frequency = st.selectbox("Frequência", options=["D", "W", "M"], help="D: Diário, W: Semanal, M: Mensal")
+                    
+                    if model_info["model_type"] == "lstm":
+                        st.warning("LSTM requer dados históricos. Faça upload dos dados abaixo.")
+                        hist_file = st.file_uploader("Upload Dados Históricos (CSV)", type=["csv"])
+                        
+                        if hist_file is not None:
+                            try:
+                                hist_df = pd.read_csv(hist_file)
+                                date_col = st.selectbox("Coluna de Data (históricos)", options=list(hist_df.columns))
+                                value_col = st.selectbox("Coluna de Valor (históricos)", options=[c for c in hist_df.columns if c != date_col])
+                                
+                                if st.button("Prever com LSTM", type="primary"):
+                                    with st.spinner("Realizando previsões..."):
+                                        try:
+                                            # Preparar dados
+                                            ts_hist_df = hist_df[[date_col, value_col]].copy()
+                                            ts_hist_df[date_col] = pd.to_datetime(ts_hist_df[date_col])
+                                            ts_hist_df = ts_hist_df.sort_values(date_col)
+                                            ts_hist_df = ts_hist_df.set_index(date_col)
+                                            ts_series = ts_hist_df[value_col].asfreq('D').dropna()
+                                            
+                                            result = ts_automl.predict_with_data(
+                                                model_info["path"], ts_series, periods
+                                            )
+                                            
+                                            if result["success"]:
+                                                st.success("✅ Previsões realizadas com sucesso!")
+                                                
+                                                # Criar DataFrame de resultados
+                                                last_date = ts_series.index[-1]
+                                                forecast_dates = pd.date_range(
+                                                    start=last_date + pd.Timedelta(days=1),
+                                                    periods=periods,
+                                                    freq=frequency
+                                                )
+                                                
+                                                results_df = pd.DataFrame({
+                                                    "data": forecast_dates,
+                                                    "previsao": result["forecast"]
+                                                })
+                                                
+                                                st.write("**Resultados da Previsão:**")
+                                                st.dataframe(results_df, use_container_width=True)
+                                                
+                                                # Gráfico
+                                                import plotly.graph_objects as go
+                                                
+                                                fig = go.Figure()
+                                                
+                                                # Dados históricos
+                                                fig.add_trace(go.Scatter(
+                                                    x=ts_series.index,
+                                                    y=ts_series.values,
+                                                    mode="lines",
+                                                    name="Dados Históricos",
+                                                    line=dict(color="blue")
+                                                ))
+                                                
+                                                # Previsões
+                                                fig.add_trace(go.Scatter(
+                                                    x=forecast_dates,
+                                                    y=result["forecast"],
+                                                    mode="lines",
+                                                    name="Previsão",
+                                                    line=dict(color="red", dash="dash")
+                                                ))
+                                                
+                                                fig.update_layout(
+                                                    title=f"Previsões - {selected_pred_model}",
+                                                    xaxis_title="Data",
+                                                    yaxis_title="Valor",
+                                                    hovermode="x unified"
+                                                )
+                                                
+                                                st.plotly_chart(fig, use_container_width=True)
+                                                
+                                                # Download
+                                                csv = results_df.to_csv(index=False)
+                                                st.download_button(
+                                                    label="Baixar Previsões",
+                                                    data=csv,
+                                                    file_name=f"previsoes_{selected_pred_model}.csv",
+                                                    mime="text/csv",
+                                                )
+                                            else:
+                                                st.error(f"Erro na previsão: {result['error']}")
+                                        
+                                        except Exception as exc:
+                                            st.error(f"Erro na previsão: {exc}")
+                                
+                            except Exception as exc:
+                                st.error(f"Erro ao ler dados históricos: {exc}")
+                    
+                    else:
+                        # ARIMA e Prophet - não precisam de dados históricos
+                        if st.button("Realizar Previsões", type="primary"):
+                            with st.spinner("Realizando previsões..."):
+                                try:
+                                    result = ts_automl.forecast(
+                                        model_info["path"], periods, frequency
+                                    )
+                                    
+                                    if result["success"]:
+                                        st.success("✅ Previsões realizadas com sucesso!")
+                                        
+                                        # Criar DataFrame de resultados
+                                        if model_info["model_type"] == "prophet":
+                                            results_df = pd.DataFrame({
+                                                "data": result["dates"],
+                                                "previsao": result["forecast"],
+                                                "limite_inferior": result["forecast_lower"],
+                                                "limite_superior": result["forecast_upper"],
+                                            })
+                                        else:
+                                            # ARIMA
+                                            last_date = pd.Timestamp.now()
+                                            forecast_dates = pd.date_range(
+                                                start=last_date + pd.Timedelta(days=1),
+                                                periods=periods,
+                                                freq=frequency
+                                            )
+                                            
+                                            results_df = pd.DataFrame({
+                                                "data": forecast_dates,
+                                                "previsao": result["forecast"],
+                                            })
+                                            
+                                            if result["forecast_ci"] is not None:
+                                                results_df["limite_inferior"] = [ci[0] for ci in result["forecast_ci"]]
+                                                results_df["limite_superior"] = [ci[1] for ci in result["forecast_ci"]]
+                                        
+                                        st.write("**Resultados da Previsão:**")
+                                        st.dataframe(results_df, use_container_width=True)
+                                        
+                                        # Download
+                                        csv = results_df.to_csv(index=False)
+                                        st.download_button(
+                                            label="Baixar Previsões",
+                                            data=csv,
+                                            file_name=f"previsoes_{selected_pred_model}.csv",
+                                            mime="text/csv",
+                                        )
+                                    else:
+                                        st.error(f"Erro na previsão: {result['error']}")
+                                
+                                except Exception as exc:
+                                    st.error(f"Erro na previsão: {exc}")
+            else:
+                st.info("Nenhum modelo Time Series disponível. Treine um modelo primeiro.")
+        
+        with ts_tabs[3]:
+            st.subheader("Análise de Séries Temporais")
+            
+            # Upload de dados para análise
+            analysis_file = st.file_uploader("Upload Dataset para Análise (CSV)", type=["csv"])
+            
+            if analysis_file is not None:
+                try:
+                    df = pd.read_csv(analysis_file)
+                    st.write(f"Dataset carregado: {df.shape}")
+                    st.dataframe(df.head(), use_container_width=True)
+                    
+                    # Selecionar colunas
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        date_column = st.selectbox("Coluna de Data", options=list(df.columns))
+                    with col2:
+                        value_column = st.selectbox("Coluna de Valor", options=[c for c in df.columns if c != date_column])
+                    
+                    if st.button("Analisar Série Temporal", type="primary"):
+                        with st.spinner("Realizando análise..."):
+                            try:
+                                # Preparar dados
+                                ts_df = df[[date_column, value_column]].copy()
+                                ts_df[date_column] = pd.to_datetime(ts_df[date_column])
+                                ts_df = ts_df.sort_values(date_column)
+                                ts_df = ts_df.set_index(date_column)
+                                ts_series = ts_df[value_column].asfreq('D').dropna()
+                                
+                                if len(ts_series) < 30:
+                                    st.error("Dados insuficientes para análise (mínimo 30 pontos).")
+                                    return
+                                
+                                # Estatísticas básicas
+                                st.write("**Estatísticas Básicas:**")
+                                col1, col2, col3, col4 = st.columns(4)
+                                col1.metric("Observações", len(ts_series))
+                                col2.metric("Média", f"{ts_series.mean():.4f}")
+                                col3.metric("Desvio Padrão", f"{ts_series.std():.4f}")
+                                col4.metric("Range", f"{ts_series.max() - ts_series.min():.4f}")
+                                
+                                # Gráfico da série
+                                import plotly.graph_objects as go
+                                
+                                fig = go.Figure()
+                                fig.add_trace(go.Scatter(
+                                    x=ts_series.index,
+                                    y=ts_series.values,
+                                    mode="lines",
+                                    name="Série Temporal",
+                                    line=dict(color="blue")
+                                ))
+                                
+                                fig.update_layout(
+                                    title="Série Temporal",
+                                    xaxis_title="Data",
+                                    yaxis_title="Valor",
+                                    hovermode="x unified"
+                                )
+                                
+                                st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Decomposição (se dados suficientes)
+                                if len(ts_series) >= 24:
+                                    try:
+                                        from statsmodels.tsa.seasonal import seasonal_decompose
+                                        
+                                        decomposition = seasonal_decompose(ts_series, model='additive', period=12)
+                                        
+                                        st.write("**Decomposição Sazonal:**")
+                                        
+                                        fig = go.Figure()
+                                        
+                                        # Trend
+                                        fig.add_trace(go.Scatter(
+                                            x=decomposition.trend.index,
+                                            y=decomposition.trend.values,
+                                            mode="lines",
+                                            name="Trend",
+                                            line=dict(color="orange")
+                                        ))
+                                        
+                                        # Seasonal
+                                        fig.add_trace(go.Scatter(
+                                            x=decomposition.seasonal.index,
+                                            y=decomposition.seasonal.values,
+                                            mode="lines",
+                                            name="Sazonalidade",
+                                            line=dict(color="green")
+                                        ))
+                                        
+                                        # Residual
+                                        fig.add_trace(go.Scatter(
+                                            x=decomposition.resid.index,
+                                            y=decomposition.resid.values,
+                                            mode="lines",
+                                            name="Residual",
+                                            line=dict(color="red")
+                                        ))
+                                        
+                                        fig.update_layout(
+                                            title="Decomposição da Série Temporal",
+                                            xaxis_title="Data",
+                                            yaxis_title="Valor",
+                                            hovermode="x unified"
+                                        )
+                                        
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        
+                                    except Exception as e:
+                                        st.warning(f"Não foi possível realizar decomposição: {e}")
+                                
+                                # Teste de estacionariedade
+                                try:
+                                    from statsmodels.tsa.stattools import adfuller
+                                    
+                                    adf_result = adfuller(ts_series.dropna())
+                                    
+                                    st.write("**Teste de Estacionariedade (ADF):**")
+                                    col1, col2 = st.columns(2)
+                                    col1.metric("Estatística ADF", f"{adf_result[0]:.4f}")
+                                    col2.metric("p-value", f"{adf_result[1]:.4f}")
+                                    
+                                    if adf_result[1] < 0.05:
+                                        st.success("✅ A série é estacionária (p < 0.05)")
+                                    else:
+                                        st.warning("⚠️ A série não é estacionária (p ≥ 0.05)")
+                                    
+                                    st.info("Valores críticos:")
+                                    for key, value in adf_result[4].items():
+                                        st.write(f"- {key}: {value:.4f}")
+                                
+                                except Exception as e:
+                                    st.warning(f"Não foi possível realizar teste ADF: {e}")
+                                
+                            except Exception as exc:
+                                st.error(f"Erro na análise: {exc}")
+                
+                except Exception as exc:
+                    st.error(f"Erro ao ler dataset: {exc}")
+
+    with tabs[10]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
