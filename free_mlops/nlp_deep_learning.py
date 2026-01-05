@@ -339,11 +339,11 @@ class NLPDeepLearningAutoML:
         X_train, y_train = processor.fit_transform(texts, labels)
         X_val, y_val = processor.transform(val_texts), processor.transform(val_texts)
         
-        # Convert to tensors
+        # Convert to tensors - ensure proper shapes
         X_train_tensor = torch.FloatTensor(X_train)
-        y_train_tensor = torch.LongTensor(y_train)
+        y_train_tensor = torch.LongTensor(y_train.flatten())
         X_val_tensor = torch.FloatTensor(X_val)
-        y_val_tensor = torch.LongTensor(y_val)
+        y_val_tensor = torch.LongTensor(y_val.flatten())
         
         # Create model
         model = TextCNN(
@@ -441,11 +441,11 @@ class NLPDeepLearningAutoML:
         X_train, y_train = processor.fit_transform(texts, labels)
         X_val, y_val = processor.transform(val_texts), processor.transform(val_texts)
         
-        # Convert to tensors
+        # Convert to tensors - ensure proper shapes
         X_train_tensor = torch.FloatTensor(X_train)
-        y_train_tensor = torch.LongTensor(y_train)
+        y_train_tensor = torch.LongTensor(y_train.flatten())
         X_val_tensor = torch.FloatTensor(X_val)
-        y_val_tensor = torch.LongTensor(y_val)
+        y_val_tensor = torch.LongTensor(y_val.flatten())
         
         # Create model
         model = TextLSTM(

@@ -231,9 +231,9 @@ class DeepLearningAutoML:
         y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
         
         X_train_tensor = torch.FloatTensor(X_train_clean)
-        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_train_clean.flatten())
         X_val_tensor = torch.FloatTensor(X_val_clean)
-        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_val_clean.flatten())
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -297,6 +297,7 @@ class DeepLearningAutoML:
         
         best_val_loss = float('inf')
         patience_counter = 0
+        best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
             # Training
@@ -379,7 +380,8 @@ class DeepLearningAutoML:
                     break
         
         # Load best model
-        model.load_state_dict(best_model_state)
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
         training_time = time.time() - start_time
         
         # Final evaluation
@@ -721,9 +723,9 @@ class DeepLearningAutoML:
         y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
         
         X_train_tensor = torch.FloatTensor(X_train_clean)
-        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_train_clean.flatten())
         X_val_tensor = torch.FloatTensor(X_val_clean)
-        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_val_clean.flatten())
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -797,6 +799,7 @@ class DeepLearningAutoML:
         
         best_val_loss = float('inf')
         patience_counter = 0
+        best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
             # Training
@@ -879,7 +882,8 @@ class DeepLearningAutoML:
                     break
         
         # Load best model
-        model.load_state_dict(best_model_state)
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
         training_time = time.time() - start_time
         
         # Final evaluation
@@ -968,9 +972,9 @@ class DeepLearningAutoML:
         y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
         
         X_train_tensor = torch.FloatTensor(X_train_clean)
-        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_train_clean.flatten())
         X_val_tensor = torch.FloatTensor(X_val_clean)
-        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean.flatten()) if problem_type == "classification" else torch.FloatTensor(y_val_clean.flatten())
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -1047,6 +1051,7 @@ class DeepLearningAutoML:
         
         best_val_loss = float('inf')
         patience_counter = 0
+        best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
             # Training
@@ -1129,7 +1134,8 @@ class DeepLearningAutoML:
                     break
         
         # Load best model
-        model.load_state_dict(best_model_state)
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
         training_time = time.time() - start_time
         
         # Final evaluation
@@ -1208,6 +1214,153 @@ class DeepLearningAutoML:
         
         # Converter para float32
         return df_numeric.astype(np.float32).values
+    
+    def _clean_target_data(self, data: np.ndarray, problem_type: str) -> np.ndarray:
+        """Clean target data."""
+        import pandas as pd
+        
+        if isinstance(data, np.ndarray):
+            if len(data.shape) == 1:
+                series = pd.Series(data)
+            else:
+                series = pd.Series(data.flatten())
+        else:
+            series = data.copy()
+        
+        if problem_type == "classification":
+            try:
+                return series.astype(np.int32).values
+            except (ValueError, TypeError):
+                from sklearn.preprocessing import LabelEncoder
+                le = LabelEncoder()
+                encoded = le.fit_transform(series.astype(str))
+                return encoded.astype(np.int32)
+        else:
+            try:
+                return pd.to_numeric(series, errors='raise').astype(np.float32).values
+            except (ValueError, TypeError):
+                raise ValueError("Para regressão, os valores de target devem ser numéricos.")
+    
+    def _is_text_data(self, X: pd.DataFrame) -> bool:
+        """Detect if data is primarily text (NLP task)."""
+        import pandas as pd
+        
+        # Check if we have string columns
+        text_cols = []
+        if hasattr(X, 'columns'):
+            for col in X.columns:
+                if X[col].dtype == 'object':
+                    # Check if it's actually text (not categorical codes)
+                    sample_values = X[col].dropna().head(10).astype(str)
+                    avg_length = sample_values.str.len().mean()
+                    if avg_length > 10:  # Likely text, not categorical codes
+                        text_cols.append(col)
+        
+        # If we have text columns and they contain substantial text, treat as NLP
+        if text_cols:
+            return True
+        
+        # Also check if all columns are non-numeric (likely text data)
+        if hasattr(X, 'select_dtypes'):
+            numeric_cols = X.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) == 0:
+                return True
+        else:
+            # Se for numpy array, verificar se todos os dados são numéricos
+            try:
+                np.array(X, dtype=np.float64)
+                return False  # Se conseguir converter para float, é numérico
+            except (ValueError, TypeError):
+                return True  # Se não conseguir, é texto
+        
+        return False
+    
+    def _process_text_data(self, X: pd.DataFrame, y: pd.Series, problem_type: str, is_fit: bool = True):
+        """Process text data for NLP tasks."""
+        try:
+            from .nlp_deep_learning import NLPProcessor
+            
+            # Get text columns
+            text_cols = []
+            if hasattr(X, 'columns'):
+                for col in X.columns:
+                    if X[col].dtype == 'object':
+                        text_cols.append(col)
+            
+            if not text_cols:
+                raise ValueError("Nenhuma coluna de texto encontrada para processamento NLP.")
+            
+            # Combine text columns (if multiple)
+            if len(text_cols) == 1:
+                texts = X[text_cols[0]].astype(str).tolist()
+            else:
+                # Combine multiple text columns with spaces
+                texts = X[text_cols].astype(str).apply(' '.join, axis=1).tolist()
+            
+            # Get labels
+            labels = y.astype(str).tolist()
+            
+            # Process with NLP processor
+            if is_fit:
+                processor = NLPProcessor(method="tfidf")
+                X_processed, y_processed = processor.fit_transform(texts, labels)
+                # Store processor for later use
+                self.nlp_processor = processor
+                # Ensure y_processed is 1D array
+                if len(y_processed.shape) > 1 and y_processed.shape[1] == 1:
+                    y_processed = y_processed.flatten()
+            else:
+                if not hasattr(self, 'nlp_processor'):
+                    raise ValueError("NLP processor not fitted. Call with is_fit=True first.")
+                X_processed = self.nlp_processor.transform(texts)
+                y_processed = self.nlp_processor.transform(labels) if hasattr(labels, '__iter__') else self.nlp_processor.transform([labels])
+                # Ensure y_processed is 1D array
+                if len(y_processed.shape) > 1 and y_processed.shape[1] == 1:
+                    y_processed = y_processed.flatten()
+            
+            return X_processed, y_processed
+            
+        except ImportError:
+            # Fallback: simple text processing
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.preprocessing import LabelEncoder
+            
+            # Get text columns
+            if hasattr(X, 'columns'):
+                text_cols = [col for col in X.columns if X[col].dtype == 'object']
+            else:
+                text_cols = []
+            if not text_cols:
+                raise ValueError("Nenhuma coluna de texto encontrada.")
+            
+            # Combine text
+            if len(text_cols) == 1:
+                texts = X[text_cols[0]].astype(str).tolist()
+            else:
+                texts = X[text_cols].astype(str).apply(' '.join, axis=1).tolist()
+            
+            # Process labels
+            labels = y.astype(str).tolist()
+            
+            if is_fit:
+                self.text_vectorizer = TfidfVectorizer(max_features=10000)
+                X_processed = self.text_vectorizer.fit_transform(texts).toarray()
+                
+                self.label_encoder = LabelEncoder()
+                y_processed = self.label_encoder.fit_transform(labels)
+                # Ensure y_processed is 1D array
+                if len(y_processed.shape) > 1 and y_processed.shape[1] == 1:
+                    y_processed = y_processed.flatten()
+            else:
+                if not hasattr(self, 'text_vectorizer'):
+                    raise ValueError("Text processor not fitted.")
+                X_processed = self.text_vectorizer.transform(texts).toarray()
+                y_processed = self.label_encoder.transform(labels)
+                # Ensure y_processed is 1D array
+                if len(y_processed.shape) > 1 and y_processed.shape[1] == 1:
+                    y_processed = y_processed.flatten()
+            
+            return X_processed, y_processed
     
     def load_model(self, model_path: str) -> Dict[str, Any]:
         """Carrega modelo salvo."""
@@ -1372,7 +1525,12 @@ class DeepLearningAutoML:
         
         # Determinar número de classes
         if problem_type == "classification":
-            num_classes = len(y_train.unique())
+            if hasattr(y_train, 'unique'):
+                num_classes = len(y_train.unique())
+            else:
+                # Se for numpy array, converter para pandas Series
+                import pandas as pd
+                num_classes = len(pd.Series(y_train).unique())
         else:
             num_classes = 1
         

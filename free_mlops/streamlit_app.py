@@ -51,7 +51,7 @@ def main() -> None:
     target_column = None
     problem_type = "classification"
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Monitoramento", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -183,6 +183,310 @@ def main() -> None:
                         st.success(f"Modelo registrado: {new_record['id']}")
                     except Exception as exc:
                         st.error(f"Erro ao registrar modelo: {exc}")
+        
+        # Seção Deep Learning integrada
+        st.divider()
+        st.subheader("🚀 Treinar Modelos Avançados (Deep Learning)")
+        
+        dl_automl = get_deep_learning_automl()
+        
+        # Upload de dados específico para DL
+        dl_file = st.file_uploader("Upload Dataset para Deep Learning (CSV)", type=["csv"], key="dl_upload")
+        
+        if dl_file is not None:
+            try:
+                # Ler dados
+                dl_df = pd.read_csv(dl_file)
+                st.write(f"Dataset DL carregado: {dl_df.shape}")
+                st.dataframe(dl_df.head(), use_container_width=True)
+                
+                # Detectar tipo de dados
+                text_cols = [col for col in dl_df.columns if dl_df[col].dtype == 'object']
+                numeric_cols = [col for col in dl_df.columns if dl_df[col].dtype in ['int64', 'float64']]
+                
+                if text_cols and not numeric_cols:
+                    st.info("🤖 **Dados de texto detectados!** Será usado processamento NLP.")
+                    data_type = "nlp"
+                elif numeric_cols and not text_cols:
+                    st.info("📊 **Dados numéricos detectados!** Será usado processamento padrão.")
+                    data_type = "numeric"
+                else:
+                    st.warning("⚠️ **Dados mistos detectados!** Será usado processamento numérico (colunas de texto serão ignoradas).")
+                    data_type = "numeric"
+                
+                # Configurações
+                dl_target = st.selectbox("Target (coluna alvo)", options=list(dl_df.columns), key="dl_target")
+                dl_problem_type = st.radio(
+                    "Tipo do problema",
+                    options=["classification", "regression"],
+                    horizontal=True,
+                    key="dl_problem_type"
+                )
+                
+                # Framework e tipo de modelo
+                col1, col2 = st.columns(2)
+                with col1:
+                    if data_type == "nlp":
+                        framework = st.selectbox("Framework", options=["pytorch"], key="dl_framework", help="Para NLP, apenas PyTorch disponível")
+                    else:
+                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
+                with col2:
+                    if data_type == "nlp":
+                        model_type = st.selectbox(
+                            "Tipo de Modelo NLP",
+                            options=["text_cnn", "text_lstm", "bert_classifier"],
+                            format_func=lambda x: {
+                                "text_cnn": "📝 Text CNN",
+                                "text_lstm": "🔄 Text LSTM", 
+                                "bert_classifier": "🤖 BERT Classifier"
+                            }[x],
+                            key="dl_model_type",
+                            help="Text CNN: rápido, LSTM: memória, BERT: state-of-the-art"
+                        )
+                    else:
+                        model_type = st.selectbox(
+                            "Tipo de Modelo",
+                            options=[
+                                "mlp", "cnn", "lstm",  # Deep Learning básico
+                                "random_forest", "xgboost", "lightgbm",  # Clássicos potentes
+                                "svm", "logistic_regression", "ridge", "lasso"  # Clássicos tradicionais
+                            ],
+                            format_func=lambda x: {
+                                "mlp": "🧠 MLP (Rede Neural)",
+                                "cnn": "👁️ CNN (Convolucional)",
+                                "lstm": "🔄 LSTM (Recorrente)",
+                                "random_forest": "🌲 Random Forest",
+                                "xgboost": "⚡ XGBoost",
+                                "lightgbm": "💡 LightGBM",
+                                "svm": "📊 SVM",
+                                "logistic_regression": "📈 Logistic Regression",
+                                "ridge": "📐 Ridge Regression",
+                                "lasso": "🎯 Lasso Regression"
+                            }[x],
+                            key="dl_model_type",
+                            help="Escolha entre Deep Learning e modelos clássicos"
+                        )
+                
+                # Configurações avançadas
+                with st.expander("Configurações Avançadas"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="dl_epochs")
+                        batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="dl_batch_size")
+                        learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="dl_lr")
+                    with col2:
+                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dl_dropout")
+                        optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
+                    
+                    # Configurações específicas por tipo de modelo
+                    if model_type == "mlp":
+                        st.write("**Configurações MLP:**")
+                        hidden_layers_input = st.text_input(
+                            "Hidden Layers (ex: 128,64,32)", 
+                            value="128,64,32",
+                            help="Lista de neurônios em cada camada oculta, separada por vírgula",
+                            key="mlp_hidden_layers"
+                        )
+                        try:
+                            hidden_layers = [int(x.strip()) for x in hidden_layers_input.split(",") if x.strip().isdigit()]
+                        except ValueError:
+                            st.error("Formato inválido para hidden layers. Use números separados por vírgula.")
+                            hidden_layers = [128, 64, 32]
+                    elif model_type == "cnn":
+                        st.write("**Configurações CNN:**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            conv_filters_input = st.text_input(
+                                "Conv Layers Filters (ex: 32,64)", 
+                                value="32,64",
+                                help="Número de filtros em cada camada convolucional, separado por vírgula",
+                                key="cnn_conv_filters"
+                            )
+                            try:
+                                conv_filters = [int(x.strip()) for x in conv_filters_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para conv filters. Use números separados por vírgula.")
+                                conv_filters = [32, 64]
+                        with col2:
+                            dense_layers_input = st.text_input(
+                                "Dense Layers (ex: 128,64)", 
+                                value="128,64",
+                                help="Número de neurônios em cada camada densa, separado por vírgula",
+                                key="cnn_dense_layers"
+                            )
+                            try:
+                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
+                                dense_layers = [128, 64]
+                    elif model_type == "lstm":
+                        st.write("**Configurações LSTM:**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="lstm_hidden_dim")
+                            num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="lstm_num_layers")
+                        with col2:
+                            bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="lstm_bidirectional")
+                            sequence_length = st.number_input("Sequence Length", min_value=5, max_value=100, value=10, key="lstm_seq_length")
+                    elif model_type in ["text_cnn", "text_lstm"]:
+                        st.write("**Configurações NLP:**")
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if model_type == "text_cnn":
+                                embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_cnn_embed_dim")
+                                num_filters = st.number_input("Num Filters", min_value=50, max_value=200, value=100, key="text_cnn_num_filters")
+                                filter_sizes = st.text_input("Filter Sizes (ex: 3,4,5)", value="3,4,5", key="text_cnn_filter_sizes")
+                                try:
+                                    filter_sizes_list = [int(x.strip()) for x in filter_sizes.split(",") if x.strip().isdigit()]
+                                except ValueError:
+                                    filter_sizes_list = [3, 4, 5]
+                            else:  # text_lstm
+                                embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_lstm_embed_dim")
+                                hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="text_lstm_hidden_dim")
+                                num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="text_lstm_num_layers")
+                                bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="text_lstm_bidirectional")
+                        with col2:
+                            max_features = st.number_input("Max Features", min_value=1000, max_value=50000, value=10000, key="nlp_max_features")
+                            max_length = st.number_input("Max Sequence Length", min_value=50, max_value=500, value=256, key="nlp_max_length")
+                
+                if st.button("🚀 Treinar Modelo Avançado", type="primary"):
+                    with st.spinner("Treinando modelo avançado..."):
+                        try:
+                            # Preparar dados
+                            dl_df_clean = dl_df.dropna(subset=[dl_target]).reset_index(drop=True)
+                            feature_cols = [c for c in dl_df_clean.columns if c != dl_target]
+                            X = dl_df_clean[feature_cols]
+                            y = dl_df_clean[dl_target]
+                            
+                            # Detectar se é dados de texto
+                            if hasattr(X, 'columns'):
+                                text_cols = [col for col in X.columns if X[col].dtype == 'object']
+                            else:
+                                # Se for numpy array, não tem colunas de texto
+                                text_cols = []
+                            
+                            if text_cols and model_type in ["text_cnn", "text_lstm"]:
+                                # Processamento NLP
+                                from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
+                                nlp_automl = get_nlp_deep_learning_automl()
+                                
+                                # Combinar colunas de texto
+                                if len(text_cols) == 1:
+                                    X_texts = X[text_cols[0]].astype(str).tolist()
+                                else:
+                                    X_texts = X[text_cols].astype(str).apply(' '.join, axis=1).tolist()
+                                
+                                y_labels = y.astype(str).tolist()
+                                
+                                # Split dados
+                                from sklearn.model_selection import train_test_split
+                                X_train, X_val, y_train, y_val = train_test_split(
+                                    X_texts, y_labels, test_size=0.2, random_state=42, stratify=y_labels
+                                )
+                                
+                                # Configuração NLP
+                                nlp_config = {
+                                    "epochs": epochs,
+                                    "batch_size": batch_size,
+                                    "learning_rate": learning_rate,
+                                    "dropout_rate": dropout_rate,
+                                    "max_features": max_features,
+                                    "max_length": max_length
+                                }
+                                
+                                if model_type == "text_cnn":
+                                    nlp_config.update({
+                                        "embed_dim": embed_dim,
+                                        "num_filters": num_filters,
+                                        "filter_sizes": filter_sizes_list,
+                                    })
+                                    result = nlp_automl.create_text_cnn(
+                                        X_train, y_train, X_val, y_val, nlp_config, dl_problem_type
+                                    )
+                                elif model_type == "text_lstm":
+                                    nlp_config.update({
+                                        "embed_dim": embed_dim,
+                                        "hidden_dim": hidden_dim,
+                                        "num_layers": num_layers,
+                                        "bidirectional": bidirectional,
+                                    })
+                                    result = nlp_automl.create_text_lstm(
+                                        X_train, y_train, X_val, y_val, nlp_config, dl_problem_type
+                                    )
+                            else:
+                                # Processamento normal (dados numéricos)
+                                # Converter para numérico se necessário
+                                if hasattr(X, 'columns'):
+                                    for col in X.columns:
+                                        if X[col].dtype == 'object':
+                                            X[col] = pd.to_numeric(X[col], errors='coerce')
+                                # Se for numpy array, já deve ser numérico
+                                
+                                X = X.fillna(X.mean())
+                                
+                                # Para classificação, converter labels para inteiros
+                                if dl_problem_type == "classification":
+                                    from sklearn.preprocessing import LabelEncoder
+                                    le = LabelEncoder()
+                                    y = le.fit_transform(y)
+                                    num_classes = len(le.classes_)
+                                else:
+                                    num_classes = 1
+                                
+                                # Split dados
+                                from sklearn.model_selection import train_test_split
+                                X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+                                
+                                # Configuração personalizada completa
+                                custom_config = {
+                                    "epochs": epochs,
+                                    "batch_size": batch_size,
+                                    "learning_rate": learning_rate,
+                                    "dropout_rate": dropout_rate,
+                                    "optimizer": optimizer,
+                                }
+                                
+                                # Adicionar configurações específicas
+                                if model_type == "mlp":
+                                    custom_config["hidden_layers"] = hidden_layers
+                                elif model_type == "cnn":
+                                    custom_config["conv_filters"] = conv_filters
+                                    custom_config["dense_layers"] = dense_layers
+                                elif model_type == "lstm":
+                                    custom_config["hidden_dim"] = hidden_dim
+                                    custom_config["num_layers"] = num_layers
+                                    custom_config["bidirectional"] = bidirectional
+                                    custom_config["sequence_length"] = sequence_length
+                                
+                                # Treinar modelo
+                                result = dl_automl.create_model(
+                                    X_train.values, y_train, X_val.values, y_val,
+                                    model_type=model_type,
+                                    framework=framework,
+                                    problem_type=dl_problem_type,
+                                    config=custom_config
+                                )
+                            
+                            st.success("✅ Modelo avançado treinado com sucesso!")
+                            
+                            # Display results
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Modelo", result["model_type"].replace("_", " ").title())
+                            col2.metric("Framework", result["framework"].title())
+                            col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                            
+                            # Metrics
+                            st.write("### 📊 Métricas de Validação")
+                            metrics = result["validation_metrics"]
+                            col1, col2 = st.columns(2)
+                            col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
+                            col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Erro no treinamento: {str(e)}")
+                            
+            except Exception as exc:
+                st.error(f"Erro ao ler dataset: {exc}")
 
     with tabs[1]:
         st.subheader("Experimentos")
@@ -1247,822 +1551,6 @@ def main() -> None:
                 st.info("É necessário ter pelo menos 2 schemas para comparar.")
 
     with tabs[8]:
-        st.subheader("Deep Learning (TensorFlow/PyTorch)")
-        
-        dl_automl = get_deep_learning_automl()
-        
-        # Tabs de Deep Learning
-        dl_tabs = st.tabs(["Treinar Modelo", "Modelos Salvos", "Predições", "Configurações"])
-        
-        with dl_tabs[0]:
-            st.subheader("Treinar Modelo Deep Learning")
-            
-            # Upload de dados
-            dl_file = st.file_uploader("Upload Dataset para Deep Learning (CSV)", type=["csv"])
-            
-            if dl_file is not None:
-                try:
-                    # Ler dados
-                    df = pd.read_csv(dl_file)
-                    st.write(f"Dataset carregado: {df.shape}")
-                    st.dataframe(df.head(), use_container_width=True)
-                    
-                    # Detectar tipo de dados
-                    text_cols = [col for col in df.columns if df[col].dtype == 'object']
-                    numeric_cols = [col for col in df.columns if df[col].dtype in ['int64', 'float64']]
-                    
-                    if text_cols and not numeric_cols:
-                        st.info("🤖 **Dados de texto detectados!** Será usado processamento NLP.")
-                        data_type = "nlp"
-                    elif numeric_cols and not text_cols:
-                        st.info("📊 **Dados numéricos detectados!** Será usado processamento padrão.")
-                        data_type = "numeric"
-                    else:
-                        st.warning("⚠️ **Dados mistos detectados!** Será usado processamento numérico (colunas de texto serão ignoradas).")
-                        data_type = "numeric"
-                    
-                    # Configurações
-                    target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
-                    problem_type = st.radio(
-                        "Tipo do problema",
-                        options=["classification", "regression"],
-                        horizontal=True,
-                    )
-                    
-                    # Framework e tipo de modelo
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if data_type == "nlp":
-                            framework = st.selectbox("Framework", options=["pytorch"], key="dl_framework", help="Para NLP, apenas PyTorch disponível")
-                        else:
-                            framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
-                    with col2:
-                        if data_type == "nlp":
-                            model_type = st.selectbox(
-                                "Tipo de Modelo NLP",
-                                options=["text_cnn", "text_lstm", "bert_classifier", "roberta_classifier", "distilbert_classifier"],
-                                format_func=lambda x: {
-                                    "text_cnn": "📝 Text CNN",
-                                    "text_lstm": "🔄 Text LSTM", 
-                                    "bert_classifier": "🤖 BERT Classifier",
-                                    "roberta_classifier": "🎭 RoBERTa Classifier",
-                                    "distilbert_classifier": "⚡ DistilBERT Classifier"
-                                }[x],
-                                key="dl_model_type",
-                                help="Text CNN: rápido, LSTM: memória, BERT/RoBERTa: state-of-the-art, DistilBERT: rápido"
-                            )
-                        else:
-                            model_type = st.selectbox(
-                                "Tipo de Modelo",
-                                options=[
-                                    "mlp", "cnn", "lstm",  # Deep Learning básico
-                                    "tabtransformer", "vision_transformer",  # Advanced DL
-                                    "random_forest", "xgboost", "lightgbm",  # Clássicos potentes
-                                    "svm", "logistic_regression", "ridge", "lasso"  # Clássicos tradicionais
-                                ],
-                                format_func=lambda x: {
-                                    "mlp": "🧠 MLP (Rede Neural)",
-                                    "cnn": "👁️ CNN (Convolucional)",
-                                    "lstm": "🔄 LSTM (Recorrente)",
-                                    "tabtransformer": "🤖 TabTransformer",
-                                    "vision_transformer": "👁️ Vision Transformer",
-                                    "random_forest": "🌲 Random Forest",
-                                    "xgboost": "⚡ XGBoost",
-                                    "lightgbm": "💡 LightGBM",
-                                    "svm": "📊 SVM",
-                                    "logistic_regression": "📈 Logistic Regression",
-                                    "ridge": "📐 Ridge Regression",
-                                    "lasso": "🎯 Lasso Regression"
-                                }[x],
-                                key="dl_model_type",
-                                help="Escolha entre Deep Learning, Transformers, e modelos clássicos"
-                            )
-                    
-                    # Configurações avançadas
-                    with st.expander("Configurações Avançadas"):
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="dl_epochs")
-                            batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="dl_batch_size")
-                            learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="dl_lr")
-                        with col2:
-                            dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dl_dropout")
-                            optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
-                        
-                        # Configurações específicas por tipo de modelo
-                        if data_type == "nlp":
-                            # Configurações NLP
-                            if model_type == "text_cnn":
-                                st.write("**Configurações Text CNN:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="cnn_embed_dim")
-                                    num_filters = st.number_input("Num Filters", min_value=50, max_value=200, value=100, key="cnn_num_filters")
-                                with col2:
-                                    filter_sizes = st.text_input("Filter Sizes (ex: 3,4,5)", value="3,4,5", key="cnn_filter_sizes")
-                                    try:
-                                        filter_sizes_list = [int(x.strip()) for x in filter_sizes.split(",") if x.strip().isdigit()]
-                                    except ValueError:
-                                        st.error("Formato inválido para filter sizes. Use números separados por vírgula.")
-                                        return
-                            elif model_type == "text_lstm":
-                                st.write("**Configurações Text LSTM:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="lstm_embed_dim")
-                                    hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="lstm_hidden_dim")
-                                with col2:
-                                    num_layers = st.selectbox("Num Layers", options=[1, 2, 3, 4], value=2, key="lstm_num_layers")
-                                    bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="lstm_bidirectional")
-                            elif model_type in ["bert_classifier", "roberta_classifier", "distilbert_classifier"]:
-                                st.write("**Configurações Transformers:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if model_type == "bert_classifier":
-                                        bert_model = st.selectbox(
-                                            "BERT Model",
-                                            options=["bert-base-uncased", "bert-large-uncased", "distilbert-base-uncased"],
-                                            value="bert-base-uncased",
-                                            key="bert_model_name"
-                                        )
-                                    elif model_type == "roberta_classifier":
-                                        bert_model = st.selectbox(
-                                            "RoBERTa Model",
-                                            options=["roberta-base", "roberta-large", "distilroberta-base"],
-                                            value="roberta-base",
-                                            key="roberta_model_name"
-                                        )
-                                    else:  # distilbert_classifier
-                                        bert_model = st.selectbox(
-                                            "DistilBERT Model",
-                                            options=["distilbert-base-uncased", "distilbert-base-multilingual-cased"],
-                                            value="distilbert-base-uncased",
-                                            key="distilbert_model_name"
-                                        )
-                                with col2:
-                                    freeze_bert = st.checkbox("Freeze Transformer Layers", value=False, key="bert_freeze")
-                                    max_length = st.number_input("Max Sequence Length", min_value=128, max_value=512, value=256, key="bert_max_length")
-                        elif model_type in ["tabtransformer", "vision_transformer"]:
-                                st.write("**Configurações Transformers Avançados:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if model_type == "tabtransformer":
-                                        embedding_dim = st.number_input("Embedding Dim", min_value=8, max_value=128, value=32, key="tab_embedding_dim")
-                                        num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=1, key="tab_num_heads")
-                                        num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="tab_num_layers")
-                                    else:  # vision_transformer
-                                        patch_size = st.selectbox("Patch Size", options=[2, 4, 8], index=1, key="vit_patch_size")
-                                        embedding_dim = st.number_input("Embedding Dim", min_value=32, max_value=256, value=64, key="vit_embedding_dim")
-                                        num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=1, key="vit_num_heads")
-                                        num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="vit_num_layers")
-                                with col2:
-                                    if model_type == "tabtransformer":
-                                        hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="tab_hidden_dim")
-                                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.3, value=0.1, key="tab_dropout")
-                                        scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="tab_scheduler")
-                                    else:  # vision_transformer
-                                        hidden_dim = st.number_input("Hidden Dim", min_value=64, max_value=512, value=128, key="vit_hidden_dim")
-                                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.3, value=0.1, key="vit_dropout")
-                                        scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="vit_scheduler")
-                        elif model_type in ["random_forest", "xgboost", "lightgbm"]:
-                                st.write("**Configurações Ensemble:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    n_estimators = st.number_input("Número de Estimadores", min_value=10, max_value=1000, value=100, key="rf_n_estimators")
-                                    max_depth = st.number_input("Profundidade Máxima", min_value=1, max_value=50, value=10, key="rf_max_depth")
-                                with col2:
-                                    min_samples_split = st.number_input("Min Samples Split", min_value=2, max_value=20, value=2, key="rf_min_samples_split")
-                                    min_samples_leaf = st.number_input("Min Samples Leaf", min_value=1, max_value=20, value=1, key="rf_min_samples_leaf")
-                        elif model_type in ["svm", "logistic_regression", "ridge", "lasso"]:
-                                st.write("**Configurações Modelo Clássico:**")
-                                col1, col2 = st.columns(2)
-                                with col1:
-                                    if model_type == "svm":
-                                        C = st.number_input("C (Regularização)", min_value=0.01, max_value=100.0, value=1.0, format="%.2f", key="svm_C")
-                                        kernel = st.selectbox("Kernel", options=["linear", "rbf", "poly"], value="rbf", key="svm_kernel")
-                                    else:
-                                        alpha = st.number_input("Alpha (Regularização)", min_value=0.0001, max_value=10.0, value=1.0, format="%.4f", key="linear_alpha")
-                                with col2:
-                                    if model_type == "svm":
-                                        gamma = st.number_input("Gamma", min_value=0.001, max_value=10.0, value=0.1, format="%.3f", key="svm_gamma")
-                                    else:
-                                        max_iter = st.number_input("Max Iterações", min_value=100, max_value=10000, value=1000, key="linear_max_iter")
-                        elif model_type == "mlp":
-                            st.write("**Configurações MLP:**")
-                            hidden_layers_input = st.text_input(
-                                "Hidden Layers (ex: 128,64,32)", 
-                                value="128,64,32",
-                                help="Lista de neurônios em cada camada oculta, separada por vírgula"
-                            )
-                            try:
-                                hidden_layers = [int(x.strip()) for x in hidden_layers_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para hidden layers. Use números separados por vírgula.")
-                                return
-                        elif model_type == "cnn":
-                            st.write("**Configurações CNN:**")
-                            conv_filters_input = st.text_input(
-                                "Conv Layers Filters (ex: 32,64)", 
-                                value="32,64",
-                                help="Número de filtros em cada camada convolucional, separado por vírgula"
-                            )
-                            try:
-                                conv_filters = [int(x.strip()) for x in conv_filters_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para conv filters. Use números separados por vírgula.")
-                                return
-                            dense_layers_input = st.text_input(
-                                "Dense Layers (ex: 128,64)", 
-                                value="128,64",
-                                help="Número de neurônios nas camadas densas, separado por vírgula"
-                            )
-                            try:
-                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
-                                return
-                        elif model_type == "lstm":
-                            st.write("**Configurações LSTM:**")
-                            lstm_layers_input = st.text_input(
-                                "LSTM Layers (ex: 64,32)", 
-                                value="64,32",
-                                help="Número de neurônios em cada camada LSTM, separado por vírgula"
-                            )
-                            try:
-                                lstm_layers = [int(x.strip()) for x in lstm_layers_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para LSTM layers. Use números separados por vírgula.")
-                                return
-                            dense_layers_input = st.text_input(
-                                "Dense Layers (ex: 32)", 
-                                value="32",
-                                help="Número de neurônios nas camadas densas, separado por vírgula"
-                            )
-                            try:
-                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
-                                return
-                    
-                    if st.button("Treinar Modelo Deep Learning", type="primary"):
-                        with st.spinner("Preparando dados e treinando modelo..."):
-                            try:
-                                if data_type == "nlp":
-                                    # Processamento NLP
-                                    df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
-                                    
-                                    # Combinar colunas de texto
-                                    text_cols = [col for col in df_clean.columns if col != target_column and df_clean[col].dtype == 'object']
-                                    if len(text_cols) == 1:
-                                        X_texts = df_clean[text_cols[0]].astype(str).tolist()
-                                    else:
-                                        X_texts = df_clean[text_cols].astype(str).apply(' '.join, axis=1).tolist()
-                                    
-                                    y_labels = df_clean[target_column].astype(str).tolist()
-                                    
-                                    # Split dados
-                                    from sklearn.model_selection import train_test_split
-                                    X_train, X_val, y_train, y_val = train_test_split(
-                                        X_texts, y_labels, test_size=0.2, random_state=42, stratify=y_labels
-                                    )
-                                    
-                                    # Configuração NLP
-                                    custom_config = {
-                                        "epochs": epochs,
-                                        "batch_size": batch_size,
-                                        "learning_rate": learning_rate,
-                                        "dropout_rate": dropout_rate,
-                                    }
-                                    
-                                    if model_type == "text_cnn":
-                                        custom_config.update({
-                                            "embed_dim": embed_dim,
-                                            "num_filters": num_filters,
-                                            "filter_sizes": filter_sizes_list,
-                                        })
-                                    elif model_type == "text_lstm":
-                                        custom_config.update({
-                                            "embed_dim": embed_dim,
-                                            "hidden_dim": hidden_dim,
-                                            "num_layers": num_layers,
-                                            "bidirectional": bidirectional,
-                                        })
-                                    elif model_type == "bert_classifier":
-                                        custom_config.update({
-                                            "model_name": bert_model,
-                                            "freeze_bert": freeze_bert,
-                                        })
-                                    
-                                    # Treinar modelo NLP
-                                    from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
-                                    nlp_automl = get_nlp_deep_learning_automl()
-                                    
-                                    if model_type == "text_cnn":
-                                        result = nlp_automl.create_text_cnn(
-                                            X_train, y_train, X_val, y_val, custom_config, problem_type
-                                        )
-                                    elif model_type == "text_lstm":
-                                        result = nlp_automl.create_text_lstm(
-                                            X_train, y_train, X_val, y_val, custom_config, problem_type
-                                        )
-                                    elif model_type == "bert_classifier":
-                                        result = nlp_automl.create_bert_classifier(
-                                            X_train, y_train, X_val, y_val, custom_config, problem_type
-                                        )
-                                    
-                                    st.success("✅ Modelo NLP treinado com sucesso!")
-                                    
-                                    # Display results
-                                    col1, col2, col3 = st.columns(3)
-                                    col1.metric("Modelo", result["model_type"].replace("_", " ").title())
-                                    col2.metric("Framework", result["framework"].title())
-                                    col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
-                                    
-                                    # Metrics
-                                    st.write("### 📊 Métricas de Validação")
-                                    metrics = result["validation_metrics"]
-                                    col1, col2 = st.columns(2)
-                                    col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
-                                    col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
-                                    
-                                    # Class information
-                                    st.write("### 📋 Informações das Classes")
-                                    st.write(f"**Número de classes:** {result['num_classes']}")
-                                    st.write(f"**Classes:** {', '.join(result['class_names'])}")
-                                    
-                                else:
-                                    # Processamento normal (dados numéricos)
-                                    df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
-                                    feature_cols = [c for c in df_clean.columns if c != target_column]
-                                    X = df_clean[feature_cols].values
-                                    y = df_clean[target_column].values
-                                    
-                                    # Para classificação, converter labels para inteiros
-                                    if problem_type == "classification":
-                                        from sklearn.preprocessing import LabelEncoder
-                                        le = LabelEncoder()
-                                        y = le.fit_transform(y)
-                                        num_classes = len(le.classes_)
-                                    else:
-                                        num_classes = 1
-                                    
-                                    # Split treino/validação
-                                    from sklearn.model_selection import train_test_split
-                                    X_train, X_val, y_train, y_val = train_test_split(
-                                        X, y, test_size=0.2, random_state=42
-                                    )
-                                
-                                # Configuração personalizada completa
-                                custom_config = {
-                                    "epochs": epochs,
-                                    "batch_size": batch_size,
-                                    "learning_rate": learning_rate,
-                                    "dropout_rate": dropout_rate,
-                                    "optimizer": optimizer,
-                                }
-                                
-                                # Adicionar configurações específicas do modelo
-                                if model_type == "mlp":
-                                    custom_config["hidden_layers"] = hidden_layers
-                                    custom_config["activation"] = "relu"
-                                elif model_type == "cnn":
-                                    custom_config["conv_layers"] = [{"filters": f, "kernel_size": 3} for f in conv_filters]
-                                    custom_config["dense_layers"] = dense_layers
-                                    custom_config["activation"] = "relu"
-                                elif model_type == "lstm":
-                                    custom_config["lstm_layers"] = lstm_layers
-                                    custom_config["dense_layers"] = dense_layers
-                                    custom_config["activation"] = "tanh"
-                                
-                                # Converter para DataFrames
-                                X_train_df = pd.DataFrame(X_train)
-                                X_val_df = pd.DataFrame(X_val)
-                                y_train_series = pd.Series(y_train)
-                                y_val_series = pd.Series(y_val)
-                                
-                                # Treinar modelo usando o método unificado
-                                result = dl_automl.create_model(
-                                    X_train_df, y_train_series, X_val_df, y_val_series,
-                                    model_type, framework, problem_type, custom_config
-                                )
-                                
-                                st.success("✅ Modelo treinado com sucesso!")
-                                
-                                # Mostrar resultados
-                                col1, col2, col3 = st.columns(3)
-                                col1.metric("Framework", result["framework"])
-                                col2.metric("Modelo", result["model_type"])
-                                col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
-                                
-                                # Métricas de validação
-                                st.write("**Métricas de Validação:**")
-                                st.json(result["validation_metrics"])
-                                
-                                # Gráfico de treinamento
-                                if result["history"]:
-                                    import plotly.express as px
-                                    import plotly.graph_objects as go
-                                    
-                                    fig = go.Figure()
-                                    
-                                    # Loss
-                                    fig.add_trace(go.Scatter(
-                                        y=result["history"]["loss"],
-                                        mode="lines",
-                                        name="Training Loss",
-                                    ))
-                                    fig.add_trace(go.Scatter(
-                                        y=result["history"]["val_loss"],
-                                        mode="lines",
-                                        name="Validation Loss",
-                                    ))
-                                    
-                                    # Accuracy (se disponível)
-                                    if result["history"].get("accuracy"):
-                                        fig.add_trace(go.Scatter(
-                                            y=result["history"]["accuracy"],
-                                            mode="lines",
-                                            name="Training Accuracy",
-                                            yaxis="y2",
-                                        ))
-                                        fig.add_trace(go.Scatter(
-                                            y=result["history"]["val_accuracy"],
-                                            mode="lines",
-                                            name="Validation Accuracy",
-                                            yaxis="y2",
-                                        ))
-                                        
-                                        fig.update_layout(
-                                            yaxis2=dict(
-                                                title="Accuracy",
-                                                overlaying="y",
-                                                side="right"
-                                            )
-                                        )
-                                    
-                                    fig.update_layout(
-                                        title=f"Training History - {result['framework']} {result['model_type']}",
-                                        xaxis_title="Epoch",
-                                        yaxis_title="Loss",
-                                    )
-                                    
-                                    st.plotly_chart(fig, use_container_width=True)
-                                
-                                # Salvar modelo
-                                model_name = f"{framework}_{model_type}_{problem_type}"
-                                if st.button("Salvar Modelo", key=f"save_dl_{model_name}"):
-                                    try:
-                                        saved_path = dl_automl.save_model(result, model_name)
-                                        st.success(f"Modelo salvo em: {saved_path}")
-                                    except Exception as exc:
-                                        st.error(f"Erro ao salvar modelo: {exc}")
-                                
-                            except ImportError as e:
-                                st.error(f"Framework não instalado: {e}")
-                                if framework == "tensorflow":
-                                    st.info("Instale com: pip install tensorflow")
-                                else:
-                                    st.info("Instale com: pip install torch")
-                            except Exception as exc:
-                                st.error(f"Erro no treinamento: {exc}")
-                
-                except Exception as exc:
-                    st.error(f"Erro ao ler dataset: {exc}")
-        
-        with dl_tabs[1]:
-            st.subheader("Modelos Deep Learning Salvos")
-            
-            models = dl_automl.list_models()
-            
-            if models:
-                models_df = pd.DataFrame(models)
-                st.dataframe(models_df, use_container_width=True)
-                
-                # Detalhes do modelo selecionado
-                selected_model = st.selectbox(
-                    "Ver detalhes do modelo",
-                    options=[m["name"] for m in models],
-                    key="dl_model_select"
-                )
-                
-                if selected_model:
-                    model_info = next((m for m in models if m["name"] == selected_model), None)
-                    if model_info:
-                        st.write("**Detalhes do Modelo:**")
-                        
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Framework", model_info["framework"])
-                        col2.metric("Tipo", model_info["model_type"])
-                        col3.metric("Problema", model_info["problem_type"])
-                        
-                        st.write("**Configurações:**")
-                        st.json(model_info["validation_metrics"])
-                        
-                        st.write("**Métricas de Validação:**")
-                        st.json(model_info["validation_metrics"])
-                        
-                        # Botões de ação
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if st.button("Carregar Modelo", key=f"load_dl_{selected_model}"):
-                                try:
-                                    loaded = dl_automl.load_model(model_info["path"])
-                                    st.success("Modelo carregado com sucesso!")
-                                    st.info(f"Framework: {loaded['metadata']['framework']}")
-                                except Exception as exc:
-                                    st.error(f"Erro ao carregar modelo: {exc}")
-                        
-                        with col2:
-                            if st.button("Excluir Modelo", key=f"delete_dl_{selected_model}"):
-                                try:
-                                    import shutil
-                                    shutil.rmtree(model_info["path"])
-                                    st.success("Modelo excluído com sucesso!")
-                                    st.experimental_rerun()
-                                except Exception as exc:
-                                    st.error(f"Erro ao excluir modelo: {exc}")
-            else:
-                st.info("Nenhum modelo Deep Learning salvo ainda.")
-        
-        with dl_tabs[2]:
-            st.subheader("Predições com Modelos Deep Learning")
-            
-            models = dl_automl.list_models()
-            
-            if models:
-                # Selecionar modelo
-                model_options = {m["name"]: m for m in models}
-                selected_pred_model = st.selectbox(
-                    "Modelo para predição",
-                    options=list(model_options.keys()),
-                    key="pred_model_select"
-                )
-                
-                if selected_pred_model:
-                    model_info = model_options[selected_pred_model]
-                    
-                    # Upload de dados para predição
-                    pred_file = st.file_uploader("Upload Dataset para Predição (CSV)", type=["csv"])
-                    
-                    if pred_file is not None:
-                        try:
-                            pred_df = pd.read_csv(pred_file)
-                            st.write(f"Dataset de predição: {pred_df.shape}")
-                            st.dataframe(pred_df.head(), use_container_width=True)
-                            
-                            # Preparar dados (remover target se existir)
-                            feature_cols = [c for c in pred_df.columns if c != model_info.get("target_column")]
-                            X_pred = pred_df[feature_cols].values
-                            
-                            # Preparar input shape
-                            model_type = model_info["model_type"]
-                            if model_type == "cnn":
-                                X_pred = X_pred.reshape(X_pred.shape[0], X_pred.shape[1], 1)
-                            elif model_type == "lstm":
-                                X_pred = X_pred.reshape(X_pred.shape[0], 1, X_pred.shape[1])
-                            
-                            if st.button("Realizar Predições", type="primary"):
-                                with st.spinner("Realizando predições..."):
-                                    try:
-                                        result = dl_automl.predict(model_info["path"], X_pred)
-                                        
-                                        if result["success"]:
-                                            st.success("✅ Predições realizadas com sucesso!")
-                                            
-                                            # Adicionar predições ao DataFrame
-                                            pred_df["prediction"] = result["predictions"]
-                                            
-                                            if result["probabilities"] is not None:
-                                                pred_df["probability"] = result["probabilities"]
-                                            
-                                            st.write("**Resultados:**")
-                                            st.dataframe(pred_df.head(), use_container_width=True)
-                                            
-                                            # Download dos resultados
-                                            csv = pred_df.to_csv(index=False)
-                                            st.download_button(
-                                                label="Baixar Resultados",
-                                                data=csv,
-                                                file_name=f"predictions_{selected_pred_model}.csv",
-                                                mime="text/csv",
-                                            )
-                                        else:
-                                            st.error(f"Erro na predição: {result['error']}")
-                                    
-                                    except Exception as exc:
-                                        st.error(f"Erro na predição: {exc}")
-                        
-                        except Exception as exc:
-                            st.error(f"Erro ao ler dataset: {exc}")
-            else:
-                st.info("Nenhum modelo Deep Learning disponível. Treine um modelo primeiro.")
-        
-        with dl_tabs[3]:
-            st.subheader("Configurações Padrão")
-            
-            framework_config = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="default_framework")
-            model_config = st.selectbox("Modelo", options=["mlp", "cnn", "lstm"], key="default_model")
-            
-            config = dl_automl.default_configs[framework_config][model_config]
-            
-            st.write("**Configurações Atuais:**")
-            st.json(config)
-            
-            st.info("Você pode personalizar estas configurações na aba de treinamento.")
-
-    with tabs[9]:
-        
-        advanced_dl_automl = get_advanced_deep_learning_automl()
-        
-        if df is not None and target_column:
-            st.write("### Modelos Avançados Disponíveis")
-            
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("""
-                **TabTransformer**
-                - Transformer para dados tabulares
-                - Embeddings para features categóricas
-                - Multi-head attention
-                - Performance superior em dados mistos
-                """)
-            
-            with col2:
-                st.markdown("""
-                **Vision Transformer**
-                - ViT para dados tabulares como "imagens"
-                - Patch-based approach
-                - Self-attention global
-                - Excelente para padrões complexos
-                """)
-            
-            # Model selection
-            model_type = st.selectbox(
-                "Selecione o modelo avançado",
-                options=["tabtransformer", "vision_transformer"],
-                format_func=lambda x: {
-                    "tabtransformer": "TabTransformer",
-                    "vision_transformer": "Vision Transformer"
-                }[x],
-                key="advanced_model_type"
-            )
-            
-            # Framework selection
-            framework = st.selectbox(
-                "Framework",
-                options=["pytorch"],
-                key="advanced_framework",
-                help="Atualmente apenas PyTorch disponível para modelos avançados"
-            )
-            
-            # Configuration
-            st.write("### Configurações Avançadas")
-            
-            if model_type == "tabtransformer":
-                col1, col2 = st.columns(2)
-                with col1:
-                    embedding_dim = st.number_input("Embedding Dim", min_value=4, max_value=64, value=8, key="tab_embedding_dim")
-                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=3, key="tab_num_heads")
-                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=2, key="tab_num_layers")
-                with col2:
-                    hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="tab_hidden_dim")
-                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, key="tab_dropout")
-                    scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="tab_scheduler")
-            
-            elif model_type == "vision_transformer":
-                col1, col2 = st.columns(2)
-                with col1:
-                    patch_size = st.selectbox("Patch Size", options=[2, 4, 8], index=1, key="vit_patch_size")
-                    embedding_dim = st.number_input("Embedding Dim", min_value=32, max_value=128, value=64, key="vit_embedding_dim")
-                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8], index=1, key="vit_num_heads")
-                with col2:
-                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="vit_num_layers")
-                    hidden_dim = st.number_input("Hidden Dim", min_value=64, max_value=256, value=128, key="vit_hidden_dim")
-                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, key="vit_dropout")
-                scheduler = "cosine"  # Default for Vision Transformer
-            
-            # Training parameters
-            st.write("### Parâmetros de Treinamento")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100, key="adv_epochs")
-            with col2:
-                batch_size = st.number_input("Batch Size", min_value=8, max_value=128, value=32, key="adv_batch_size")
-            with col3:
-                learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, key="adv_lr")
-            
-            # MLflow tracking
-            enable_mlflow = st.checkbox("Habilitar MLflow Tracking", value=True, key="enable_mlflow")
-            
-            if st.button("Treinar Modelo Avançado", type="primary"):
-                with st.spinner("Treinando modelo avançado..."):
-                    try:
-                        # Prepare data
-                        df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
-                        feature_cols = [c for c in df_clean.columns if c != target_column]
-                        X = df_clean[feature_cols]
-                        y = df_clean[target_column]
-                        
-                        # Split data
-                        from sklearn.model_selection import train_test_split
-                        X_train, X_val, y_train, y_val = train_test_split(
-                            X, y, test_size=0.2, random_state=42
-                        )
-                        
-                        # Prepare configuration
-                        config = {
-                            "epochs": epochs,
-                            "batch_size": batch_size,
-                            "learning_rate": learning_rate,
-                            "dropout_rate": dropout_rate,
-                            "scheduler": scheduler if model_type == "tabtransformer" else "cosine",
-                        }
-                        
-                        if model_type == "tabtransformer":
-                            config.update({
-                                "embedding_dim": embedding_dim,
-                                "num_heads": num_heads,
-                                "num_layers": num_layers,
-                                "hidden_dim": hidden_dim,
-                            })
-                        elif model_type == "vision_transformer":
-                            config.update({
-                                "patch_size": patch_size,
-                                "embedding_dim": embedding_dim,
-                                "num_heads": num_heads,
-                                "num_layers": num_layers,
-                                "hidden_dim": hidden_dim,
-                            })
-                        
-                        # Train model
-                        if model_type == "tabtransformer":
-                            result = advanced_dl_automl.create_tabtransformer(
-                                X_train, y_train, X_val, y_val, config, problem_type
-                            )
-                        elif model_type == "vision_transformer":
-                            result = advanced_dl_automl.create_vision_transformer(
-                                X_train, y_train, X_val, y_val, config, problem_type
-                            )
-                        
-                        st.success("Modelo avançado treinado com sucesso!")
-                        
-                        # Display results
-                        col1, col2, col3 = st.columns(3)
-                        col1.metric("Modelo", result["model_type"].replace("_", " ").title())
-                        col2.metric("Framework", result["framework"].title())
-                        col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
-                        
-                        # Metrics
-                        st.write("### Métricas de Validação")
-                        metrics = result["validation_metrics"]
-                        col1, col2 = st.columns(2)
-                        col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
-                        if metrics['val_accuracy'] > 0:
-                            col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
-                        
-                        # Model explanation
-                        st.write("### Interpretabilidade do Modelo")
-                        if st.button("Gerar Explicações SHAP", key="explain_advanced"):
-                            with st.spinner("Gerando explicações..."):
-                                try:
-                                    explainer = result["explainer"]
-                                    explanation = explainer.explain_pytorch_model(
-                                        X_val.iloc[:100],  # Sample for performance
-                                        feature_names=feature_cols
-                                    )
-                                    
-                                    if explanation:
-                                        st.success("Explicações geradas!")
-                                        
-                                        # Plot feature importance
-                                        fig = explainer.plot_feature_importance(
-                                            explanation["shap_values"],
-                                            explanation["feature_names"],
-                                            max_features=15
-                                        )
-                                        
-                                        if fig:
-                                            st.pyplot(fig)
-                                            st.caption("Importância das Features (SHAP Values)")
-                                    else:
-                                        st.warning("Não foi possível gerar explicações.")
-                                except Exception as e:
-                                    st.error(f"Erro ao gerar explicações: {e}")
-                        
-                        # Configuration display
-                        st.write("### ⚙️ Configurações Utilizadas")
-                        st.json(config)
-                        
-                        # MLflow info
-                        if enable_mlflow:
-                            st.info("📊 Experimento registrado no MLflow! Use `mlflow ui` para visualizar.")
-                        
-                    except Exception as e:
-                        st.error(f"❌ Erro no treinamento: {str(e)}")
-        else:
-            st.info("👆 Por favor, faça upload dos dados e selecione a coluna target primeiro.")
-
-    with tabs[10]:
         st.subheader("Time Series (ARIMA, Prophet, LSTM)")
         
         ts_automl = get_time_series_automl()
@@ -2083,7 +1571,7 @@ def main() -> None:
                     st.write(f"Dataset carregado: {df.shape}")
                     st.dataframe(df.head(), use_container_width=True)
                     
-                    # Configurações
+                    # Selecionar colunas
                     col1, col2 = st.columns(2)
                     with col1:
                         date_column = st.selectbox("Coluna de Data", options=list(df.columns), key="ts_date_col")
@@ -2094,39 +1582,42 @@ def main() -> None:
                     model_type = st.selectbox(
                         "Tipo de Modelo",
                         options=["arima", "prophet", "lstm"],
-                        help="ARIMA: estatístico tradicional, Prophet: Facebook, LSTM: Deep Learning",
+                        format_func=lambda x: {
+                            "arima": "📊 ARIMA",
+                            "prophet": "🔮 Prophet", 
+                            "lstm": "🔄 LSTM"
+                        }[x],
                         key="ts_model_type"
                     )
                     
-                    # Configurações específicas
+                    # Configurações específicas por modelo
                     with st.expander("Configurações Avançadas"):
                         if model_type == "arima":
-                            auto_arima = st.checkbox("Auto ARIMA (recomendado)", value=True)
-                            if not auto_arima:
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    p = st.number_input("AR order (p)", min_value=0, max_value=5, value=1)
-                                with col2:
-                                    d = st.number_input("I order (d)", min_value=0, max_value=2, value=1)
-                                with col3:
-                                    q = st.number_input("MA order (q)", min_value=0, max_value=5, value=1)
-                        
+                            st.write("**Configurações ARIMA:**")
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                p = st.number_input("AR (p)", min_value=0, max_value=5, value=1, key="arima_p")
+                                d = st.number_input("I (d)", min_value=0, max_value=2, value=1, key="arima_d")
+                            with col2:
+                                q = st.number_input("MA (q)", min_value=0, max_value=5, value=1, key="arima_q")
+                                seasonal = st.checkbox("Seasonal ARIMA", value=False, key="arima_seasonal")
                         elif model_type == "prophet":
+                            st.write("**Configurações Prophet:**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                yearly_seasonality = st.selectbox("Sazonalidade Anual", options=["auto", True, False])
-                                weekly_seasonality = st.selectbox("Sazonalidade Semanal", options=["auto", True, False])
+                                yearly_seasonality = st.checkbox("Sazonalidade Anual", value=True, key="prophet_yearly")
+                                weekly_seasonality = st.checkbox("Sazonalidade Semanal", value=False, key="prophet_weekly")
                             with col2:
-                                daily_seasonality = st.selectbox("Sazonalidade Diária", options=["auto", True, False])
-                                changepoint_prior = st.number_input("Changepoint Prior Scale", min_value=0.01, max_value=0.5, value=0.05, key="changepoint_prior")
-                        
+                                daily_seasonality = st.checkbox("Sazonalidade Diária", value=False, key="prophet_daily")
+                                changepoint_prior_scale = st.number_input("Changepoint Prior Scale", min_value=0.01, max_value=1.0, value=0.05, format="%.2f", key="prophet_changepoint")
                         elif model_type == "lstm":
+                            st.write("**Configurações LSTM:**")
                             col1, col2 = st.columns(2)
                             with col1:
-                                sequence_length = st.number_input("Sequence Length", min_value=5, max_value=50, value=10)
-                                epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100)
+                                sequence_length = st.number_input("Sequence Length", min_value=5, max_value=50, value=10, key="lstm_seq_len")
+                                hidden_units = st.number_input("Hidden Units", min_value=32, max_value=256, value=64, key="lstm_hidden")
                             with col2:
-                                batch_size = st.number_input("Batch Size", min_value=8, max_value=64, value=32)
+                                num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="lstm_layers")
                                 dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.2, key="lstm_dropout")
                     
                     # Test size
@@ -2140,176 +1631,94 @@ def main() -> None:
                                 ts_df[date_column] = pd.to_datetime(ts_df[date_column])
                                 ts_df = ts_df.sort_values(date_column)
                                 ts_df = ts_df.set_index(date_column)
-                                ts_series = ts_df[value_column].asfreq('D')  # Frequência diária
+                                ts_series = ts_df[value_column].asfreq('D').dropna()
                                 
-                                # Remover NaNs
-                                ts_series = ts_series.dropna()
-                                
-                                if len(ts_series) < test_size + 50:
-                                    st.error(f"Dados insuficientes. Necessário pelo menos {test_size + 50} pontos.")
+                                if len(ts_series) < test_size + 30:
+                                    st.error("Dados insuficientes para treinamento.")
                                     return
                                 
-                                # Configuração personalizada
-                                custom_config = {}
-                                
+                                # Configuração do modelo
+                                config = {}
                                 if model_type == "arima":
-                                    if not auto_arima:
-                                        custom_config = {"order": (p, d, q)}
-                                    custom_config["auto_arima"] = auto_arima
-                                
+                                    config = {
+                                        "p": p, "d": d, "q": q,
+                                        "seasonal": seasonal
+                                    }
                                 elif model_type == "prophet":
-                                    custom_config = {
+                                    config = {
                                         "yearly_seasonality": yearly_seasonality,
                                         "weekly_seasonality": weekly_seasonality,
                                         "daily_seasonality": daily_seasonality,
-                                        "changepoint_prior_scale": changepoint_prior,
+                                        "changepoint_prior_scale": changepoint_prior_scale
                                     }
-                                
                                 elif model_type == "lstm":
-                                    custom_config = {
+                                    config = {
                                         "sequence_length": sequence_length,
-                                        "epochs": epochs,
-                                        "batch_size": batch_size,
+                                        "hidden_units": hidden_units,
+                                        "num_layers": num_layers,
                                         "dropout_rate": dropout_rate,
+                                        "epochs": 100,
+                                        "batch_size": 32
                                     }
                                 
                                 # Treinar modelo
-                                if model_type == "arima":
-                                    result = ts_automl.create_arima_model(
-                                        ts_series, custom_config, test_size
-                                    )
+                                result = ts_automl.create_model(
+                                    ts_series, model_type, test_size, config
+                                )
                                 
-                                elif model_type == "prophet":
-                                    result = ts_automl.create_prophet_model(
-                                        df, date_column, value_column, custom_config, test_size
-                                    )
+                                st.success("✅ Modelo Time Series treinado com sucesso!")
                                 
-                                elif model_type == "lstm":
-                                    result = ts_automl.create_lstm_model(
-                                        ts_series, custom_config, test_size
-                                    )
-                                
-                                st.success("✅ Modelo treinado com sucesso!")
-                                
-                                # Mostrar resultados
+                                # Display results
                                 col1, col2, col3 = st.columns(3)
-                                col1.metric("Modelo", result["model_type"].upper())
-                                col2.metric("Tempo Treino", f"{result['training_time']:.2f}s")
-                                col3.metric("Dados Treino", len(result["training_data"]))
+                                col1.metric("Modelo", result["model_type"].title())
+                                col2.metric("RMSE", f"{result['rmse']:.4f}")
+                                col3.metric("MAE", f"{result['mae']:.4f}")
                                 
-                                # Métricas
-                                if result["metrics"]:
-                                    st.write("**Métricas de Teste:**")
-                                    metrics_df = pd.DataFrame([
-                                        {"Métrica": k, "Valor": f"{v:.4f}"}
-                                        for k, v in result["metrics"].items()
-                                    ])
-                                    st.dataframe(metrics_df, use_container_width=True)
-                                
-                                # Gráfico de previsões
-                                if model_type in ["arima", "prophet"] and result.get("forecast") is not None:
+                                # Plot forecast
+                                if result.get("forecast"):
                                     import plotly.graph_objects as go
                                     
                                     fig = go.Figure()
                                     
-                                    # Dados históricos
+                                    # Historical data
                                     fig.add_trace(go.Scatter(
-                                        x=result["training_data"].index,
-                                        y=result["training_data"].values,
+                                        x=result["historical_dates"],
+                                        y=result["historical_values"],
                                         mode="lines",
-                                        name="Dados Treino",
+                                        name="Dados Históricos",
                                         line=dict(color="blue")
                                     ))
                                     
-                                    # Dados de teste
-                                    if result["test_data"] is not None:
-                                        fig.add_trace(go.Scatter(
-                                            x=result["test_data"].index,
-                                            y=result["test_data"].values,
-                                            mode="lines",
-                                            name="Dados Reais",
-                                            line=dict(color="green")
-                                        ))
-                                    
-                                    # Previsões
-                                    if model_type == "arima":
-                                        forecast_index = result["test_data"].index
-                                        forecast_values = result["forecast"].values
-                                    else:  # Prophet
-                                        forecast_df = result["test_forecast"]
-                                        forecast_index = pd.to_datetime(forecast_df["ds"])
-                                        forecast_values = forecast_df["yhat"].values
-                                    
+                                    # Forecast
                                     fig.add_trace(go.Scatter(
-                                        x=forecast_index,
-                                        y=forecast_values,
+                                        x=result["forecast_dates"],
+                                        y=result["forecast"],
                                         mode="lines",
                                         name="Previsão",
-                                        line=dict(color="red", dash="dash")
+                                        line=dict(color="red")
                                     ))
                                     
-                                    # Confidence intervals ( Prophet )
-                                    if model_type == "prophet" and result["test_forecast"] is not None:
+                                    # Confidence intervals (se disponível)
+                                    if result.get("forecast_lower") and result.get("forecast_upper"):
                                         fig.add_trace(go.Scatter(
-                                            x=forecast_index,
-                                            y=result["test_forecast"]["yhat_lower"],
+                                            x=result["forecast_dates"],
+                                            y=result["forecast_upper"],
                                             mode="lines",
                                             line=dict(width=0),
-                                            showlegend=False,
+                                            showlegend=False
                                         ))
                                         fig.add_trace(go.Scatter(
-                                            x=forecast_index,
-                                            y=result["test_forecast"]["yhat_upper"],
+                                            x=result["forecast_dates"],
+                                            y=result["forecast_lower"],
                                             mode="lines",
                                             line=dict(width=0),
                                             fill="tonexty",
                                             fillcolor="rgba(255,0,0,0.2)",
-                                            name="Intervalo Confiança",
+                                            name="Intervalo de Confiança"
                                         ))
                                     
                                     fig.update_layout(
-                                        title=f"Previsões - {model_type.upper()}",
-                                        xaxis_title="Data",
-                                        yaxis_title="Valor",
-                                        hovermode="x unified"
-                                    )
-                                    
-                                    st.plotly_chart(fig, use_container_width=True)
-                                
-                                elif model_type == "lstm" and result.get("test_predictions") is not None:
-                                    import plotly.graph_objects as go
-                                    
-                                    fig = go.Figure()
-                                    
-                                    # Dados históricos
-                                    fig.add_trace(go.Scatter(
-                                        x=result["training_data"].index,
-                                        y=result["training_data"].values,
-                                        mode="lines",
-                                        name="Dados Treino",
-                                        line=dict(color="blue")
-                                    ))
-                                    
-                                    # Dados de teste e previsões
-                                    if result["test_data"] is not None:
-                                        fig.add_trace(go.Scatter(
-                                            x=result["test_data"].index,
-                                            y=result["test_data"].values,
-                                            mode="lines",
-                                            name="Dados Reais",
-                                            line=dict(color="green")
-                                        ))
-                                        
-                                        fig.add_trace(go.Scatter(
-                                            x=result["test_data"].index,
-                                            y=result["test_predictions"],
-                                            mode="lines",
-                                            name="Previsão LSTM",
-                                            line=dict(color="red", dash="dash")
-                                        ))
-                                    
-                                    fig.update_layout(
-                                        title="Previsões - LSTM",
+                                        title=f"Previsão - {result['model_type'].title()}",
                                         xaxis_title="Data",
                                         yaxis_title="Valor",
                                         hovermode="x unified"
@@ -2318,7 +1727,7 @@ def main() -> None:
                                     st.plotly_chart(fig, use_container_width=True)
                                 
                                 # Salvar modelo
-                                model_name = f"{model_type}_ts_{datetime.now().strftime('%Y%m%d')}"
+                                model_name = f"{model_type}_ts_model"
                                 if st.button("Salvar Modelo", key=f"save_ts_{model_name}"):
                                     try:
                                         saved_path = ts_automl.save_model(result, model_name)
@@ -2326,14 +1735,6 @@ def main() -> None:
                                     except Exception as exc:
                                         st.error(f"Erro ao salvar modelo: {exc}")
                                 
-                            except ImportError as e:
-                                st.error(f"Biblioteca não instalada: {e}")
-                                if model_type == "arima":
-                                    st.info("Instale com: pip install statsmodels pmdarima")
-                                elif model_type == "prophet":
-                                    st.info("Instale com: pip install prophet")
-                                elif model_type == "lstm":
-                                    st.info("Instale com: pip install tensorflow")
                             except Exception as exc:
                                 st.error(f"Erro no treinamento: {exc}")
                 
@@ -2362,17 +1763,9 @@ def main() -> None:
                         st.write("**Detalhes do Modelo:**")
                         
                         col1, col2, col3 = st.columns(3)
-                        col1.metric("Tipo", model_info["model_type"].upper())
-                        col2.metric("Treinado em", model_info["fitted_at"][:19])
-                        col3.metric("Tempo Treino", f"{model_info['training_time']:.2f}s")
-                        
-                        st.write("**Métricas:**")
-                        if model_info["metrics"]:
-                            metrics_df = pd.DataFrame([
-                                {"Métrica": k, "Valor": f"{v:.4f}"}
-                                for k, v in model_info["metrics"].items()
-                            ])
-                            st.dataframe(metrics_df, use_container_width=True)
+                        col1.metric("Modelo", model_info["model_type"].title())
+                        col2.metric("RMSE", f"{model_info['rmse']:.4f}")
+                        col3.metric("MAE", f"{model_info['mae']:.4f}")
                         
                         # Botões de ação
                         col1, col2 = st.columns(2)
@@ -2381,7 +1774,6 @@ def main() -> None:
                                 try:
                                     loaded = ts_automl.load_model(model_info["path"])
                                     st.success("Modelo carregado com sucesso!")
-                                    st.info(f"Tipo: {loaded['metadata']['model_type']}")
                                 except Exception as exc:
                                     st.error(f"Erro ao carregar modelo: {exc}")
                         
@@ -2414,159 +1806,108 @@ def main() -> None:
                 if selected_pred_model:
                     model_info = model_options[selected_pred_model]
                     
-                    # Configurações de previsão
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        periods = st.number_input("Períodos para prever", min_value=1, max_value=365, value=30)
-                    with col2:
-                        frequency = st.selectbox("Frequência", options=["D", "W", "M"], help="D: Diário, W: Semanal, M: Mensal")
+                    # Upload de dados para previsão
+                    pred_file = st.file_uploader("Upload Dataset para Previsão (CSV)", type=["csv"])
                     
-                    if model_info["model_type"] == "lstm":
-                        st.warning("LSTM requer dados históricos. Faça upload dos dados abaixo.")
-                        hist_file = st.file_uploader("Upload Dados Históricos (CSV)", type=["csv"])
-                        
-                        if hist_file is not None:
-                            try:
-                                hist_df = pd.read_csv(hist_file)
-                                date_col = st.selectbox("Coluna de Data (históricos)", options=list(hist_df.columns))
-                                value_col = st.selectbox("Coluna de Valor (históricos)", options=[c for c in hist_df.columns if c != date_col])
+                    if pred_file is not None:
+                        try:
+                            pred_df = pd.read_csv(pred_file)
+                            st.write(f"Dataset de previsão: {pred_df.shape}")
+                            st.dataframe(pred_df.head(), use_container_width=True)
+                            
+                            # Configurações de previsão
+                            periods = st.number_input("Período de Previsão (dias)", min_value=1, max_value=365, value=30)
+                            frequency = st.selectbox("Frequência", options=["D", "W", "M"], index=0)
+                            
+                            # Upload de dados históricos (opcional para LSTM)
+                            if model_info["model_type"] == "lstm":
+                                st.write("**Dados Históricos (para LSTM):**")
+                                hist_file = st.file_uploader("Upload Dataset Histórico (CSV)", type=["csv"])
                                 
-                                if st.button("Prever com LSTM", type="primary"):
-                                    with st.spinner("Realizando previsões..."):
-                                        try:
-                                            # Preparar dados
-                                            ts_hist_df = hist_df[[date_col, value_col]].copy()
-                                            ts_hist_df[date_col] = pd.to_datetime(ts_hist_df[date_col])
-                                            ts_hist_df = ts_hist_df.sort_values(date_col)
-                                            ts_hist_df = ts_hist_df.set_index(date_col)
-                                            ts_series = ts_hist_df[value_col].asfreq('D').dropna()
-                                            
-                                            result = ts_automl.predict_with_data(
-                                                model_info["path"], ts_series, periods
-                                            )
-                                            
-                                            if result["success"]:
-                                                st.success("✅ Previsões realizadas com sucesso!")
-                                                
-                                                # Criar DataFrame de resultados
-                                                last_date = ts_series.index[-1]
-                                                forecast_dates = pd.date_range(
-                                                    start=last_date + pd.Timedelta(days=1),
-                                                    periods=periods,
-                                                    freq=frequency
-                                                )
-                                                
-                                                results_df = pd.DataFrame({
-                                                    "data": forecast_dates,
-                                                    "previsao": result["forecast"]
-                                                })
-                                                
-                                                st.write("**Resultados da Previsão:**")
-                                                st.dataframe(results_df, use_container_width=True)
-                                                
-                                                # Gráfico
-                                                import plotly.graph_objects as go
-                                                
-                                                fig = go.Figure()
-                                                
-                                                # Dados históricos
-                                                fig.add_trace(go.Scatter(
-                                                    x=ts_series.index,
-                                                    y=ts_series.values,
-                                                    mode="lines",
-                                                    name="Dados Históricos",
-                                                    line=dict(color="blue")
-                                                ))
-                                                
-                                                # Previsões
-                                                fig.add_trace(go.Scatter(
-                                                    x=forecast_dates,
-                                                    y=result["forecast"],
-                                                    mode="lines",
-                                                    name="Previsão",
-                                                    line=dict(color="red", dash="dash")
-                                                ))
-                                                
-                                                fig.update_layout(
-                                                    title=f"Previsões - {selected_pred_model}",
-                                                    xaxis_title="Data",
-                                                    yaxis_title="Valor",
-                                                    hovermode="x unified"
-                                                )
-                                                
-                                                st.plotly_chart(fig, use_container_width=True)
-                                                
-                                                # Download
-                                                csv = results_df.to_csv(index=False)
-                                                st.download_button(
-                                                    label="Baixar Previsões",
-                                                    data=csv,
-                                                    file_name=f"previsoes_{selected_pred_model}.csv",
-                                                    mime="text/csv",
-                                                )
-                                            else:
-                                                st.error(f"Erro na previsão: {result['error']}")
+                                if hist_file is not None:
+                                    try:
+                                        hist_df = pd.read_csv(hist_file)
+                                        st.write(f"Dataset histórico: {hist_df.shape}")
+                                        st.dataframe(hist_df.head(), use_container_width=True)
                                         
-                                        except Exception as exc:
-                                            st.error(f"Erro na previsão: {exc}")
-                                
-                            except Exception as exc:
-                                st.error(f"Erro ao ler dados históricos: {exc}")
+                                        # Selecionar colunas
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            hist_date_col = st.selectbox("Coluna de Data Histórica", options=list(hist_df.columns))
+                                        with col2:
+                                            hist_value_col = st.selectbox("Coluna de Valor Histórica", options=[c for c in hist_df.columns if c != hist_date_col])
+                                    except Exception as exc:
+                                        st.error(f"Erro ao ler dataset histórico: {exc}")
+                        except Exception as exc:
+                            st.error(f"Erro ao ler dataset de previsão: {exc}")
                     
-                    else:
-                        # ARIMA e Prophet - não precisam de dados históricos
-                        if st.button("Realizar Previsões", type="primary"):
-                            with st.spinner("Realizando previsões..."):
-                                try:
+                    if st.button("Realizar Previsões", type="primary"):
+                        with st.spinner("Realizando previsões..."):
+                            try:
+                                if model_info["model_type"] == "lstm" and 'hist_df' in locals():
+                                    # Preparar dados históricos
+                                    hist_ts_df = hist_df[[hist_date_col, hist_value_col]].copy()
+                                    hist_ts_df[hist_date_col] = pd.to_datetime(hist_ts_df[hist_date_col])
+                                    hist_ts_df = hist_ts_df.sort_values(hist_date_col)
+                                    hist_ts_df = hist_ts_df.set_index(hist_date_col)
+                                    hist_series = hist_ts_df[hist_value_col].asfreq('D').dropna()
+                                    
+                                    result = ts_automl.forecast(
+                                        model_info["path"], periods, frequency, hist_series
+                                    )
+                                else:
+                                    # ARIMA e Prophet - não precisam de dados históricos
                                     result = ts_automl.forecast(
                                         model_info["path"], periods, frequency
                                     )
-                                    
-                                    if result["success"]:
-                                        st.success("✅ Previsões realizadas com sucesso!")
-                                        
-                                        # Criar DataFrame de resultados
-                                        if model_info["model_type"] == "prophet":
-                                            results_df = pd.DataFrame({
-                                                "data": result["dates"],
-                                                "previsao": result["forecast"],
-                                                "limite_inferior": result["forecast_lower"],
-                                                "limite_superior": result["forecast_upper"],
-                                            })
-                                        else:
-                                            # ARIMA
-                                            last_date = pd.Timestamp.now()
-                                            forecast_dates = pd.date_range(
-                                                start=last_date + pd.Timedelta(days=1),
-                                                periods=periods,
-                                                freq=frequency
-                                            )
-                                            
-                                            results_df = pd.DataFrame({
-                                                "data": forecast_dates,
-                                                "previsao": result["forecast"],
-                                            })
-                                            
-                                            if result["forecast_ci"] is not None:
-                                                results_df["limite_inferior"] = [ci[0] for ci in result["forecast_ci"]]
-                                                results_df["limite_superior"] = [ci[1] for ci in result["forecast_ci"]]
-                                        
-                                        st.write("**Resultados da Previsão:**")
-                                        st.dataframe(results_df, use_container_width=True)
-                                        
-                                        # Download
-                                        csv = results_df.to_csv(index=False)
-                                        st.download_button(
-                                            label="Baixar Previsões",
-                                            data=csv,
-                                            file_name=f"previsoes_{selected_pred_model}.csv",
-                                            mime="text/csv",
-                                        )
-                                    else:
-                                        st.error(f"Erro na previsão: {result['error']}")
                                 
-                                except Exception as exc:
-                                    st.error(f"Erro na previsão: {exc}")
+                                if result["success"]:
+                                    st.success("✅ Previsões realizadas com sucesso!")
+                                    
+                                    # Criar DataFrame de resultados
+                                    if model_info["model_type"] == "prophet":
+                                        results_df = pd.DataFrame({
+                                            "data": result["dates"],
+                                            "previsao": result["forecast"],
+                                            "limite_inferior": result["forecast_lower"],
+                                            "limite_superior": result["forecast_upper"],
+                                        })
+                                    else:
+                                        # ARIMA
+                                        last_date = pd.Timestamp.now()
+                                        forecast_dates = pd.date_range(
+                                            start=last_date + pd.Timedelta(days=1),
+                                            periods=periods,
+                                            freq=frequency
+                                        )
+                                        
+                                        results_df = pd.DataFrame({
+                                            "data": forecast_dates,
+                                            "previsao": result["forecast"],
+                                        })
+                                        
+                                        if result["forecast_ci"] is not None:
+                                            results_df["limite_inferior"] = [ci[0] for ci in result["forecast_ci"]]
+                                            results_df["limite_superior"] = [ci[1] for ci in result["forecast_ci"]]
+                                    
+                                    st.write("**Resultados da Previsão:**")
+                                    st.dataframe(results_df, use_container_width=True)
+                                    
+                                    # Download
+                                    csv = results_df.to_csv(index=False)
+                                    st.download_button(
+                                        label="Baixar Previsões",
+                                        data=csv,
+                                        file_name=f"previsoes_{selected_pred_model}.csv",
+                                        mime="text/csv",
+                                    )
+                                else:
+                                    st.error(f"Erro na previsão: {result['error']}")
+                                
+                            except Exception as exc:
+                                st.error(f"Erro na previsão: {exc}")
+                    else:
+                        st.info("👆 Por favor, faça upload dos dados e selecione a coluna target primeiro.")
             else:
                 st.info("Nenhum modelo Time Series disponível. Treine um modelo primeiro.")
         
@@ -2632,86 +1973,13 @@ def main() -> None:
                                 
                                 st.plotly_chart(fig, use_container_width=True)
                                 
-                                # Decomposição (se dados suficientes)
-                                if len(ts_series) >= 24:
-                                    try:
-                                        from statsmodels.tsa.seasonal import seasonal_decompose
-                                        
-                                        decomposition = seasonal_decompose(ts_series, model='additive', period=12)
-                                        
-                                        st.write("**Decomposição Sazonal:**")
-                                        
-                                        fig = go.Figure()
-                                        
-                                        # Trend
-                                        fig.add_trace(go.Scatter(
-                                            x=decomposition.trend.index,
-                                            y=decomposition.trend.values,
-                                            mode="lines",
-                                            name="Trend",
-                                            line=dict(color="orange")
-                                        ))
-                                        
-                                        # Seasonal
-                                        fig.add_trace(go.Scatter(
-                                            x=decomposition.seasonal.index,
-                                            y=decomposition.seasonal.values,
-                                            mode="lines",
-                                            name="Sazonalidade",
-                                            line=dict(color="green")
-                                        ))
-                                        
-                                        # Residual
-                                        fig.add_trace(go.Scatter(
-                                            x=decomposition.resid.index,
-                                            y=decomposition.resid.values,
-                                            mode="lines",
-                                            name="Residual",
-                                            line=dict(color="red")
-                                        ))
-                                        
-                                        fig.update_layout(
-                                            title="Decomposição da Série Temporal",
-                                            xaxis_title="Data",
-                                            yaxis_title="Valor",
-                                            hovermode="x unified"
-                                        )
-                                        
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        
-                                    except Exception as e:
-                                        st.warning(f"Não foi possível realizar decomposição: {e}")
-                                
-                                # Teste de estacionariedade
-                                try:
-                                    from statsmodels.tsa.stattools import adfuller
-                                    
-                                    adf_result = adfuller(ts_series.dropna())
-                                    
-                                    st.write("**Teste de Estacionariedade (ADF):**")
-                                    col1, col2 = st.columns(2)
-                                    col1.metric("Estatística ADF", f"{adf_result[0]:.4f}")
-                                    col2.metric("p-value", f"{adf_result[1]:.4f}")
-                                    
-                                    if adf_result[1] < 0.05:
-                                        st.success("✅ A série é estacionária (p < 0.05)")
-                                    else:
-                                        st.warning("⚠️ A série não é estacionária (p ≥ 0.05)")
-                                    
-                                    st.info("Valores críticos:")
-                                    for key, value in adf_result[4].items():
-                                        st.write(f"- {key}: {value:.4f}")
-                                
-                                except Exception as e:
-                                    st.warning(f"Não foi possível realizar teste ADF: {e}")
-                                
                             except Exception as exc:
                                 st.error(f"Erro na análise: {exc}")
                 
                 except Exception as exc:
                     st.error(f"Erro ao ler dataset: {exc}")
 
-    with tabs[10]:
+    with tabs[9]:
         st.subheader("Monitoramento")
         
         # Selecionar modelo para monitorar
@@ -2764,7 +2032,7 @@ def main() -> None:
         except Exception as exc:
             st.error(f"Erro no monitoramento: {exc}")
 
-    with tabs[11]:
+    with tabs[10]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")

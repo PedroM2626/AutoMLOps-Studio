@@ -415,11 +415,25 @@ class AdvancedDeepLearningAutoML:
             categorical_cols = []
             continuous_cols = []
             
-            for col in X_train.columns:
-                if X_train[col].dtype == 'object' or X_train[col].dtype.name == 'category':
-                    categorical_cols.append(col)
-                else:
-                    continuous_cols.append(col)
+            if hasattr(X_train, 'columns'):
+                for col in X_train.columns:
+                    if X_train[col].dtype == 'object' or X_train[col].dtype.name == 'category':
+                        categorical_cols.append(col)
+                    else:
+                        continuous_cols.append(col)
+            else:
+                # Se for numpy array, verificar tipos de dados
+                try:
+                    # Tentar converter para diferentes tipos
+                    for i in range(X_train.shape[1]):
+                        col_data = X_train[:, i]
+                        if col_data.dtype == 'object':
+                            categorical_cols.append(f'col_{i}')
+                        else:
+                            continuous_cols.append(f'col_{i}')
+                except:
+                    # Se falhar, assumir que todas são contínuas
+                    continuous_cols = [f'col_{i}' for i in range(X_train.shape[1])]
             
             # Prepare data
             X_train_processed = X_train.copy()
@@ -447,7 +461,14 @@ class AdvancedDeepLearningAutoML:
             y_val_tensor = torch.LongTensor(y_val.values) if problem_type == "classification" else torch.FloatTensor(y_val.values)
             
             # Create model
-            num_classes = len(y_train.unique()) if problem_type == "classification" else 1
+            if problem_type == "classification":
+                if hasattr(y_train, 'unique'):
+                    num_classes = len(y_train.unique())
+                else:
+                    import pandas as pd
+                    num_classes = len(pd.Series(y_train).unique())
+            else:
+                num_classes = 1
             model = TabTransformer(
                 continuous_features=len(continuous_cols),
                 categorical_features=len(categorical_cols),
@@ -599,7 +620,14 @@ class AdvancedDeepLearningAutoML:
             y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
             
             # Create model
-            num_classes = len(y_train.unique()) if problem_type == "classification" else 1
+            if problem_type == "classification":
+                if hasattr(y_train, 'unique'):
+                    num_classes = len(y_train.unique())
+                else:
+                    import pandas as pd
+                    num_classes = len(pd.Series(y_train).unique())
+            else:
+                num_classes = 1
             model = VisionTransformer(
                 input_dim=X_train_clean.shape[1],
                 patch_size=config["patch_size"],

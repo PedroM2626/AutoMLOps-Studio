@@ -270,7 +270,7 @@ class DataValidator:
             raise FileNotFoundError(f"Schema {schema_name} não encontrado")
         
         schema_dict = json.loads(schema_file.read_text(encoding="utf-8"))
-        schema = pa.DataFrameSchema.from_schema(schema_dict)
+        schema = pa.DataFrameSchema(**schema_dict)
         
         # Validar
         validation_result = self._validate_dataframe(df, schema, lazy)

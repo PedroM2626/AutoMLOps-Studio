@@ -51,11 +51,12 @@ def _infer_columns(X: pd.DataFrame) -> tuple[list[str], list[str]]:
     numeric_cols: list[str] = []
     categorical_cols: list[str] = []
 
-    for col in X.columns:
-        if pd.api.types.is_numeric_dtype(X[col]):
-            numeric_cols.append(col)
-        else:
-            categorical_cols.append(col)
+    if hasattr(X, 'columns'):
+        for col in X.columns:
+            if pd.api.types.is_numeric_dtype(X[col]):
+                numeric_cols.append(col)
+            else:
+                categorical_cols.append(col)
 
     return numeric_cols, categorical_cols
 
@@ -118,7 +119,10 @@ def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.n
             pass
 
         try:
-            unique = pd.Series(y_true).unique()
+            if hasattr(y_true, 'unique'):
+                unique = y_true.unique()
+            else:
+                unique = pd.Series(y_true).unique()
             n_classes = len(unique)
             if n_classes == 2:
                 positive_proba = y_proba[:, 1]
