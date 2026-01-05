@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -15,6 +16,7 @@ from free_mlops.finetune import run_finetune
 from free_mlops.registry import list_registered_models
 from free_mlops.registry import register_model
 from free_mlops.registry import download_model_package
+from free_mlops.db_delete import delete_experiment
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -65,9 +67,43 @@ def main() -> None:
             target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
             problem_type = st.radio(
                 "Tipo do problema",
-                options=["classification", "regression"],
+                options=["classification", "regression", "multiclass_classification", "binary_classification"],
                 horizontal=True,
             )
+
+            # Gerar ID do experimento antes de treinar
+            if "experiment_id" not in st.session_state:
+                st.session_state["experiment_id"] = uuid4().hex
+
+            st.info(f"ID do experimento: {st.session_state['experiment_id']}")
+
+            # Personalização do treinamento
+            with st.expander("Personalizar treinamento"):
+                all_models = [
+                    "logistic_regression",
+                    "linear_svc",
+                    "random_forest",
+                    "extra_trees",
+                    "gradient_boosting",
+                    "decision_tree",
+                    "knn",
+                    "ridge",
+                    "lasso",
+                    "elastic_net",
+                    "svr",
+                ]
+                selected_models = st.multiselect(
+                    "Algoritmos para treinar",
+                    options=all_models,
+                    default=all_models,
+                )
+                max_time = st.number_input(
+                    "Tempo máximo de treinamento (segundos, 0 = ilimitado)",
+                    min_value=0,
+                    value=0,
+                    step=30,
+                )
+                max_time_seconds = None if max_time == 0 else max_time
 
             st.subheader("3) Treinar (AutoML)")
             train_clicked = st.button("Treinar", type="primary")
@@ -80,8 +116,11 @@ def main() -> None:
                             target_column=target_column,
                             problem_type=problem_type,
                             settings=settings,
+                            selected_models=selected_models,
+                            max_time_seconds=max_time_seconds,
                         )
                         st.session_state["last_experiment"] = record
+                        st.session_state.pop("experiment_id", None)  # Limpar ID para novo experimento
                     except Exception as exc:
                         st.error(str(exc))
 
@@ -92,15 +131,10 @@ def main() -> None:
                 col1, col2, col3 = st.columns(3)
                 col1.metric("Experiment ID", record["id"])
                 col2.metric("Melhor modelo", record["best_model_name"])
+                col3.metric("Tipo", record["problem_type"])
 
-                best_metrics = record.get("best_metrics", {})
-                if problem_type == "classification":
-                    col3.metric("F1 (weighted)", f"{best_metrics.get('f1_weighted', 'n/a')}")
-                else:
-                    col3.metric("RMSE", f"{best_metrics.get('rmse', 'n/a')}")
-
-                st.write("Métricas do melhor modelo")
-                st.json(best_metrics)
+                st.write("Métricas detalhadas")
+                st.json(record["best_metrics"])
 
                 st.write("Leaderboard")
                 st.dataframe(pd.DataFrame(record.get("leaderboard", [])), use_container_width=True)
@@ -114,6 +148,19 @@ def main() -> None:
                         mime="application/octet-stream",
                         key=f"download_{record['id']}",
                     )
+
+                # Botão para registrar modelo
+                if st.button("Registrar modelo no Model Registry", key=f"register_{record['id']}"):
+                    try:
+                        new_record = register_model(
+                            settings=settings,
+                            experiment_id=record["id"],
+                            new_version="v1.1.0",
+                            description="Modelo registrado via UI",
+                        )
+                        st.success(f"Modelo registrado: {new_record['id']}")
+                    except Exception as exc:
+                        st.error(f"Erro ao registrar modelo: {exc}")
 
     with tabs[1]:
         st.subheader("Experimentos")
@@ -159,6 +206,15 @@ def main() -> None:
                         mime="application/octet-stream",
                         key=f"download_selected_{selected['id']}",
                     )
+
+                # Botão para excluir experimento
+                if st.button("Excluir experimento", key=f"delete_{selected['id']}"):
+                    try:
+                        delete_experiment(settings.db_path, selected['id'])
+                        st.success(f"Experimento {selected['id']} excluído")
+                        st.experimental_rerun()
+                    except Exception as exc:
+                        st.error(f"Erro ao excluir experimento: {exc}")
 
     with tabs[2]:
         st.subheader("Model Registry")

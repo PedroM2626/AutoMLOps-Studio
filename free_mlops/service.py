@@ -20,6 +20,7 @@ from free_mlops.db import get_experiment
 from free_mlops.db import get_latest_experiment
 from free_mlops.db import insert_experiment
 from free_mlops.db import list_experiments
+from free_mlops.db_delete import delete_experiment
 
 
 def save_uploaded_bytes(file_bytes: bytes, original_filename: str, settings: Settings) -> Path:
@@ -72,6 +73,8 @@ def run_experiment(
     target_column: str,
     problem_type: ProblemType,
     settings: Settings,
+    selected_models: list[str] | None = None,
+    max_time_seconds: int | None = None,
 ) -> dict[str, Any]:
     df = load_csv(dataset_path)
 
@@ -122,6 +125,8 @@ def run_experiment(
         y_test=y_test,
         problem_type=problem_type,
         random_state=settings.random_state,
+        selected_models=selected_models,
+        max_time_seconds=max_time_seconds,
     )
 
     automl_result.best_pipeline.fit(X, y)

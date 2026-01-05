@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -34,7 +35,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import StandardScaler
 
-ProblemType = Literal["classification", "regression"]
+ProblemType = Literal["classification", "regression", "multiclass_classification", "binary_classification"]
 
 
 @dataclass
@@ -86,10 +87,28 @@ def _build_preprocessor(numeric_cols: list[str], categorical_cols: list[str]) ->
 
 
 def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.ndarray | None) -> dict[str, Any]:
+    from sklearn.metrics import precision_score
+    from sklearn.metrics import recall_score
+    from sklearn.metrics import confusion_matrix
+    from sklearn.metrics import matthews_corrcoef
+
     metrics: dict[str, Any] = {
         "accuracy": float(accuracy_score(y_true, y_pred)),
         "f1_weighted": float(f1_score(y_true, y_pred, average="weighted")),
+        "precision_weighted": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "recall_weighted": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
     }
+
+    try:
+        metrics["matthews_corrcoef"] = float(matthews_corrcoef(y_true, y_pred))
+    except Exception:
+        pass
+
+    try:
+        cm = confusion_matrix(y_true, y_pred)
+        metrics["confusion_matrix"] = cm.tolist()
+    except Exception:
+        pass
 
     if y_proba is not None:
         try:
@@ -114,11 +133,18 @@ def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.n
 
 
 def _regression_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, Any]:
+    from sklearn.metrics import mean_absolute_percentage_error
+    from sklearn.metrics import explained_variance_score
+    from sklearn.metrics import max_error
+
     rmse = float(np.sqrt(mean_squared_error(y_true, y_pred)))
     return {
         "rmse": rmse,
         "mae": float(mean_absolute_error(y_true, y_pred)),
+        "mape": float(mean_absolute_percentage_error(y_true, y_pred)),
         "r2": float(r2_score(y_true, y_pred)),
+        "explained_variance": float(explained_variance_score(y_true, y_pred)),
+        "max_error": float(max_error(y_true, y_pred)),
     }
 
 
@@ -129,6 +155,8 @@ def run_automl(
     y_test: pd.Series,
     problem_type: ProblemType,
     random_state: int,
+    selected_models: list[str] | None = None,
+    max_time_seconds: int | None = None,
 ) -> AutoMLResult:
     numeric_cols, categorical_cols = _infer_columns(X_train)
     preprocessor = _build_preprocessor(numeric_cols, categorical_cols)
@@ -139,7 +167,7 @@ def run_automl(
     candidates: dict[str, Any]
 
     if problem_type == "classification":
-        candidates = {
+        all_candidates = {
             "logistic_regression": LogisticRegression(max_iter=2000),
             "linear_svc": LinearSVC(max_iter=5000, dual=False),
             "random_forest": RandomForestClassifier(
@@ -153,7 +181,7 @@ def run_automl(
             "knn": KNeighborsClassifier(),
         }
     elif problem_type == "regression":
-        candidates = {
+        all_candidates = {
             "ridge": Ridge(),
             "lasso": Lasso(max_iter=5000),
             "elastic_net": ElasticNet(max_iter=5000),
@@ -171,9 +199,15 @@ def run_automl(
     else:
         raise ValueError(f"Unsupported problem_type: {problem_type}")
 
+    candidates = {k: v for k, v in all_candidates.items() if selected_models is None or k in selected_models}
+
     leaderboard: list[dict[str, Any]] = []
+    start_time = time.time()
 
     for model_name, model in candidates.items():
+        if max_time_seconds and (time.time() - start_time) > max_time_seconds:
+            break
+
         try:
             model.fit(X_train_pre, y_train)
 
