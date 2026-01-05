@@ -18,6 +18,10 @@ from free_mlops.registry import register_model
 from free_mlops.registry import download_model_package
 from free_mlops.db_delete import delete_experiment
 from free_mlops.registry_delete import delete_registered_model
+from free_mlops.test_models import test_single_prediction
+from free_mlops.test_models import test_batch_prediction
+from free_mlops.test_models import load_test_data_from_uploaded_file
+from free_mlops.test_models import save_test_results
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -31,7 +35,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -294,6 +298,133 @@ def main() -> None:
                         st.error(f"Erro ao excluir modelo registrado: {exc}")
 
     with tabs[3]:
+        st.subheader("Testar Modelos")
+
+        # Carregar todos os modelos disponíveis
+        try:
+            experiments = list_experiment_records(settings=settings, limit=200, offset=0)
+            registered = list_registered_models(settings=settings, limit=200, offset=0)
+        except Exception as exc:
+            st.error(f"Falha ao carregar modelos: {exc}")
+            experiments = []
+            registered = []
+
+        all_models = experiments + registered
+        if not all_models:
+            st.info("Nenhum modelo encontrado para testar.")
+        else:
+            # Selecionar modelo
+            model_options = {
+                f"{m['id']} – {m['best_model_name']} ({'Registrado' if m in registered else 'Experimento'})": m 
+                for m in all_models
+            }
+            selected_label = st.selectbox("Escolha um modelo para testar", options=list(model_options.keys()))
+            selected_model = model_options[selected_label]
+
+            model_path = Path(selected_model["model_path"])
+            if not model_path.exists():
+                st.error(f"Modelo não encontrado: {model_path}")
+            else:
+                st.info(f"Modelo carregado: {selected_model['best_model_name']}")
+
+                # Tabs para teste único vs em lote
+                test_tabs = st.tabs(["Teste Único", "Teste em Lote"])
+
+                with test_tabs[0]:
+                    st.subheader("Teste Único")
+                    
+                    # Obter feature columns do metadados
+                    feature_columns = selected_model.get("model_metadata", {}).get("feature_columns", [])
+                    
+                    if not feature_columns:
+                        st.warning("Não foi possível determinar as colunas de features do modelo.")
+                    else:
+                        st.write("Preencha os valores para cada feature:")
+                        input_data = {}
+                        
+                        for col in feature_columns:
+                            # Tentar inferir tipo da coluna
+                            input_data[col] = st.text_input(f"{col}", value="0")
+                        
+                        if st.button("Realizar Predição Única", type="primary"):
+                            try:
+                                # Converter strings para números quando possível
+                                processed_input = {}
+                                for k, v in input_data.items():
+                                    try:
+                                        if '.' in v:
+                                            processed_input[k] = float(v)
+                                        else:
+                                            processed_input[k] = int(v)
+                                    except ValueError:
+                                        processed_input[k] = v
+                                
+                                result = test_single_prediction(model_path, processed_input)
+                                
+                                if result["success"]:
+                                    st.success("Predição realizada com sucesso!")
+                                    col1, col2 = st.columns(2)
+                                    col1.metric("Predição", result["prediction"])
+                                    if result["probabilities"]:
+                                        col2.write("Probabilidades:")
+                                        col2.json(result["probabilities"])
+                                    
+                                    # Botão para salvar resultado
+                                    if st.button("Salvar Resultado", key="save_single"):
+                                        output_path = settings.artifacts_dir / f"test_single_{selected_model['id']}.json"
+                                        save_test_results(result, output_path)
+                                        st.success(f"Resultado salvo em: {output_path}")
+                                else:
+                                    st.error(f"Erro na predição: {result['error']}")
+                            except Exception as exc:
+                                st.error(f"Erro ao processar: {exc}")
+
+                with test_tabs[1]:
+                    st.subheader("Teste em Lote")
+                    
+                    # Upload de CSV para teste em lote
+                    batch_file = st.file_uploader("Upload CSV para teste em lote", type=["csv"])
+                    
+                    if batch_file is not None:
+                        try:
+                            # Ler CSV do upload
+                            batch_data = load_test_data_from_uploaded_file(
+                                batch_file, 
+                                sample_size=st.number_input("Tamanho da amostra (0 = todos)", min_value=0, value=10, step=1) or None
+                            )
+                            
+                            st.write(f"Carregados {len(batch_data)} registros para teste")
+                            st.dataframe(pd.DataFrame(batch_data).head(), use_container_width=True)
+                            
+                            if st.button("Realizar Predição em Lote", type="primary"):
+                                with st.spinner("Processando lote..."):
+                                    result = test_batch_prediction(model_path, batch_data)
+                                    
+                                    if result["success"]:
+                                        st.success(f"Predições realizadas para {result['batch_size']} registros!")
+                                        
+                                        # Mostrar resultados
+                                        results_df = pd.DataFrame({
+                                            "input": [str(record) for record in result["input_data"]],
+                                            "prediction": result["predictions"]
+                                        })
+                                        
+                                        if result["probabilities"]:
+                                            results_df["probabilities"] = result["probabilities"]
+                                        
+                                        st.dataframe(results_df, use_container_width=True)
+                                        
+                                        # Botão para salvar resultados
+                                        if st.button("Salvar Resultados em Lote", key="save_batch"):
+                                            output_path = settings.artifacts_dir / f"test_batch_{selected_model['id']}.json"
+                                            save_test_results(result, output_path)
+                                            st.success(f"Resultados salvos em: {output_path}")
+                                    else:
+                                        st.error(f"Erro na predição em lote: {result['error']}")
+                        except Exception as exc:
+                            st.error(f"Erro ao processar arquivo: {exc}")
+
+    with tabs[4]:
         st.subheader("Fine-Tune (ajuste de hiperparâmetros)")
 
         try:
