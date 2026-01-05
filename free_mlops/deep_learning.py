@@ -107,6 +107,10 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["tensorflow"]["mlp"]
         
+        # Garantir que config tem as chaves necessárias
+        if "hidden_layers" not in config:
+            config = self.default_configs["tensorflow"]["mlp"]
+        
         # Criar modelo
         model = models.Sequential()
         
@@ -216,11 +220,20 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["pytorch"]["mlp"]
         
-        # Converter para tensores
-        X_train_tensor = torch.FloatTensor(X_train)
-        y_train_tensor = torch.LongTensor(y_train) if problem_type == "classification" else torch.FloatTensor(y_train)
-        X_val_tensor = torch.FloatTensor(X_val)
-        y_val_tensor = torch.LongTensor(y_val) if problem_type == "classification" else torch.FloatTensor(y_val)
+        # Garantir que config tem as chaves necessárias
+        if "hidden_layers" not in config:
+            config = self.default_configs["pytorch"]["mlp"]
+        
+        # Converter para tensores com tipos corretos
+        X_train_clean = X_train.astype(np.float32)
+        y_train_clean = y_train.astype(np.int32) if problem_type == "classification" else y_train.astype(np.float32)
+        X_val_clean = X_val.astype(np.float32)
+        y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
+        
+        X_train_tensor = torch.FloatTensor(X_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        X_val_tensor = torch.FloatTensor(X_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -437,6 +450,10 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["tensorflow"]["cnn"]
         
+        # Garantir que config tem as chaves necessárias
+        if "conv_layers" not in config:
+            config = self.default_configs["tensorflow"]["cnn"]
+        
         # Verificar se input_shape é adequado para CNN
         if len(input_shape) < 2:
             raise ValueError("CNN requer input_shape com pelo menos 2 dimensões (height, width)")
@@ -564,6 +581,10 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["tensorflow"]["lstm"]
         
+        # Garantir que config tem as chaves necessárias
+        if "lstm_layers" not in config:
+            config = self.default_configs["tensorflow"]["lstm"]
+        
         # Verificar se input_shape é adequado para LSTM
         if len(input_shape) != 2:
             raise ValueError("LSTM requer input_shape com 2 dimensões (timesteps, features)")
@@ -684,16 +705,25 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["pytorch"]["cnn"]
         
+        # Garantir que config tem as chaves necessárias
+        if "conv_layers" not in config:
+            config = self.default_configs["pytorch"]["cnn"]
+        
         # Para CNN, precisamos reshape os dados para (batch, channels, height, width)
         # Para dados tabulares, vamos tratar como (batch, channels, 1, features)
         X_train_reshaped = X_train.reshape(X_train.shape[0], 1, 1, X_train.shape[1])
         X_val_reshaped = X_val.reshape(X_val.shape[0], 1, 1, X_val.shape[1])
         
-        # Converter para tensores
-        X_train_tensor = torch.FloatTensor(X_train_reshaped)
-        y_train_tensor = torch.LongTensor(y_train) if problem_type == "classification" else torch.FloatTensor(y_train)
-        X_val_tensor = torch.FloatTensor(X_val_reshaped)
-        y_val_tensor = torch.LongTensor(y_val) if problem_type == "classification" else torch.FloatTensor(y_val)
+        # Converter para tensores com tipos corretos
+        X_train_clean = X_train_reshaped.astype(np.float32)
+        y_train_clean = y_train.astype(np.int32) if problem_type == "classification" else y_train.astype(np.float32)
+        X_val_clean = X_val_reshaped.astype(np.float32)
+        y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
+        
+        X_train_tensor = torch.FloatTensor(X_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        X_val_tensor = torch.FloatTensor(X_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -922,16 +952,25 @@ class DeepLearningAutoML:
         
         config = config or self.default_configs["pytorch"]["lstm"]
         
+        # Garantir que config tem as chaves necessárias
+        if "lstm_layers" not in config:
+            config = self.default_configs["pytorch"]["lstm"]
+        
         # Para LSTM, precisamos reshape para (batch, sequence_length, features)
         sequence_length = 1  # Simplificado para dados tabulares
         X_train_reshaped = X_train.reshape(X_train.shape[0], sequence_length, X_train.shape[1])
         X_val_reshaped = X_val.reshape(X_val.shape[0], sequence_length, X_val.shape[1])
         
-        # Converter para tensores
-        X_train_tensor = torch.FloatTensor(X_train_reshaped)
-        y_train_tensor = torch.LongTensor(y_train) if problem_type == "classification" else torch.FloatTensor(y_train)
-        X_val_tensor = torch.FloatTensor(X_val_reshaped)
-        y_val_tensor = torch.LongTensor(y_val) if problem_type == "classification" else torch.FloatTensor(y_val)
+        # Converter para tensores com tipos corretos
+        X_train_clean = X_train_reshaped.astype(np.float32)
+        y_train_clean = y_train.astype(np.int32) if problem_type == "classification" else y_train.astype(np.float32)
+        X_val_clean = X_val_reshaped.astype(np.float32)
+        y_val_clean = y_val.astype(np.int32) if problem_type == "classification" else y_val.astype(np.float32)
+        
+        X_train_tensor = torch.FloatTensor(X_train_clean)
+        y_train_tensor = torch.LongTensor(y_train_clean) if problem_type == "classification" else torch.FloatTensor(y_train_clean)
+        X_val_tensor = torch.FloatTensor(X_val_clean)
+        y_val_tensor = torch.LongTensor(y_val_clean) if problem_type == "classification" else torch.FloatTensor(y_val_clean)
         
         # Data loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -1140,6 +1179,67 @@ class DeepLearningAutoML:
         
         return result
     
+    def _clean_numeric_data(self, data: np.ndarray) -> np.ndarray:
+        """Limpa dados numéricos removendo colunas não-numéricas e convertendo para float32."""
+        import pandas as pd
+        
+        # Converter para DataFrame se for array
+        if isinstance(data, np.ndarray):
+            df = pd.DataFrame(data)
+        else:
+            df = data.copy()
+        
+        # Identificar colunas numéricas
+        numeric_cols = []
+        for col in df.columns:
+            try:
+                # Tentar converter para numérico
+                pd.to_numeric(df[col], errors='raise')
+                numeric_cols.append(col)
+            except (ValueError, TypeError):
+                # Pular colunas não-numéricas
+                continue
+        
+        if not numeric_cols:
+            raise ValueError("Nenhuma coluna numérica encontrada nos dados. Para Deep Learning, todos os features devem ser numéricos.")
+        
+        # Manter apenas colunas numéricas
+        df_numeric = df[numeric_cols]
+        
+        # Converter para float32
+        return df_numeric.astype(np.float32).values
+    
+    def _clean_target_data(self, data: np.ndarray, problem_type: str) -> np.ndarray:
+        """Limpa dados de target convertendo para o tipo correto."""
+        import pandas as pd
+        
+        # Converter para Series se for array
+        if isinstance(data, np.ndarray):
+            if len(data.shape) == 1:
+                series = pd.Series(data)
+            else:
+                series = pd.Series(data.flatten())
+        else:
+            series = data.copy()
+        
+        if problem_type == "classification":
+            # Para classificação, converter para int32
+            try:
+                # Tentar converter diretamente
+                return series.astype(np.int32).values
+            except (ValueError, TypeError):
+                # Se falhar, fazer encoding de labels
+                from sklearn.preprocessing import LabelEncoder
+                le = LabelEncoder()
+                encoded = le.fit_transform(series.astype(str))
+                return encoded.astype(np.int32)
+        else:
+            # Para regressão, converter para float32
+            try:
+                return pd.to_numeric(series, errors='raise').astype(np.float32).values
+            except (ValueError, TypeError):
+                raise ValueError("Para regressão, os valores de target devem ser numéricos.")
+    
     def save_model(self, result: Dict[str, Any], model_name: str) -> str:
         """Salva modelo treinado."""
         
@@ -1339,17 +1439,13 @@ class DeepLearningAutoML:
         ) -> Dict[str, Any]:
         """Método wrapper para criar modelos de forma simplificada."""
         
-        # Preparar input shape
+        # Preparar input shape inicial (será atualizado após limpeza)
         if model_type == "mlp":
             input_shape = (X_train.shape[1],)
         elif model_type == "cnn":
             input_shape = (X_train.shape[1], 1)
-            X_train = X_train.values.reshape(X_train.shape[0], X_train.shape[1], 1)
-            X_val = X_val.values.reshape(X_val.shape[0], X_val.shape[1], 1)
         elif model_type == "lstm":
             input_shape = (1, X_train.shape[1])
-            X_train = X_train.values.reshape(X_train.shape[0], 1, X_train.shape[1])
-            X_val = X_val.values.reshape(X_val.shape[0], 1, X_val.shape[1])
         else:
             raise ValueError(f"Model type not supported: {model_type}")
         
@@ -1359,43 +1455,61 @@ class DeepLearningAutoML:
         else:
             num_classes = 1
         
-        # Converter para arrays numpy
+        # Converter para arrays numpy e limpar dados
         X_train_np = X_train.values if hasattr(X_train, 'values') else X_train
         X_val_np = X_val.values if hasattr(X_val, 'values') else X_val
         y_train_np = y_train.values if hasattr(y_train, 'values') else y_train
         y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
         
+        # Limpar dados - remover colunas não-numéricas e converter para float32
+        X_train_clean = self._clean_numeric_data(X_train_np)
+        X_val_clean = self._clean_numeric_data(X_val_np)
+        y_train_clean = self._clean_target_data(y_train_np, problem_type)
+        y_val_clean = self._clean_target_data(y_val_np, problem_type)
+        
+        # Atualizar input_shape baseado nos dados limpos
+        if model_type == "mlp":
+            input_shape = (X_train_clean.shape[1],)
+        elif model_type == "cnn":
+            input_shape = (X_train_clean.shape[1], 1)
+        elif model_type == "lstm":
+            input_shape = (1, X_train_clean.shape[1])
+        
+        # Usar configurações padrão se custom_config for None
+        if config is None:
+            config = self.default_configs[framework][model_type]
+        
         # Chamar método específico
         if framework == "tensorflow":
             if model_type == "mlp":
                 return self.create_tensorflow_mlp(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
             elif model_type == "cnn":
                 return self.create_tensorflow_cnn(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
             elif model_type == "lstm":
                 return self.create_tensorflow_lstm(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
         elif framework == "pytorch":
             if model_type == "mlp":
                 return self.create_pytorch_mlp(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
             elif model_type == "cnn":
                 return self.create_pytorch_cnn(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
             elif model_type == "lstm":
                 return self.create_pytorch_lstm(
-                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    X_train_clean, y_train_clean, X_val_clean, y_val_clean,
                     input_shape, num_classes, config, problem_type
                 )
         

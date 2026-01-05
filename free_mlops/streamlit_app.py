@@ -1286,9 +1286,68 @@ def main() -> None:
                         with col1:
                             epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100)
                             batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32)
-                        with col2:
                             learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, format="%.4f")
+                        with col2:
                             dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, format="%.2f")
+                            optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
+                        
+                        # Configurações específicas por tipo de modelo
+                        if model_type == "mlp":
+                            st.write("**Configurações MLP:**")
+                            hidden_layers_input = st.text_input(
+                                "Hidden Layers (ex: 128,64,32)", 
+                                value="128,64,32",
+                                help="Lista de neurônios em cada camada oculta, separada por vírgula"
+                            )
+                            try:
+                                hidden_layers = [int(x.strip()) for x in hidden_layers_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para hidden layers. Use números separados por vírgula.")
+                                return
+                        elif model_type == "cnn":
+                            st.write("**Configurações CNN:**")
+                            conv_filters_input = st.text_input(
+                                "Conv Layers Filters (ex: 32,64)", 
+                                value="32,64",
+                                help="Número de filtros em cada camada convolucional, separado por vírgula"
+                            )
+                            try:
+                                conv_filters = [int(x.strip()) for x in conv_filters_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para conv filters. Use números separados por vírgula.")
+                                return
+                            dense_layers_input = st.text_input(
+                                "Dense Layers (ex: 128,64)", 
+                                value="128,64",
+                                help="Número de neurônios nas camadas densas, separado por vírgula"
+                            )
+                            try:
+                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
+                                return
+                        elif model_type == "lstm":
+                            st.write("**Configurações LSTM:**")
+                            lstm_layers_input = st.text_input(
+                                "LSTM Layers (ex: 64,32)", 
+                                value="64,32",
+                                help="Número de neurônios em cada camada LSTM, separado por vírgula"
+                            )
+                            try:
+                                lstm_layers = [int(x.strip()) for x in lstm_layers_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para LSTM layers. Use números separados por vírgula.")
+                                return
+                            dense_layers_input = st.text_input(
+                                "Dense Layers (ex: 32)", 
+                                value="32",
+                                help="Número de neurônios nas camadas densas, separado por vírgula"
+                            )
+                            try:
+                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
+                            except ValueError:
+                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
+                                return
                     
                     if st.button("Treinar Modelo Deep Learning", type="primary"):
                         with st.spinner("Preparando dados e treinando modelo..."):
@@ -1314,55 +1373,39 @@ def main() -> None:
                                     X, y, test_size=0.2, random_state=42
                                 )
                                 
-                                # Preparar input shape
-                                if model_type == "mlp":
-                                    input_shape = (X_train.shape[1],)
-                                elif model_type == "cnn":
-                                    # Para CNN, precisamos reshape adequado (simplificado)
-                                    # Aqui estamos tratando como 1D CNN para dados tabulares
-                                    input_shape = (X_train.shape[1], 1)
-                                    X_train = X_train.reshape(X_train.shape[0], X_train.shape[1], 1)
-                                    X_val = X_val.reshape(X_val.shape[0], X_val.shape[1], 1)
-                                elif model_type == "lstm":
-                                    # Para LSTM, tratamos como sequência
-                                    input_shape = (1, X_train.shape[1])
-                                    X_train = X_train.reshape(X_train.shape[0], 1, X_train.shape[1])
-                                    X_val = X_val.reshape(X_val.shape[0], 1, X_val.shape[1])
-                                
-                                # Configuração personalizada
+                                # Configuração personalizada completa
                                 custom_config = {
                                     "epochs": epochs,
                                     "batch_size": batch_size,
                                     "learning_rate": learning_rate,
                                     "dropout_rate": dropout_rate,
+                                    "optimizer": optimizer,
                                 }
                                 
-                                # Treinar modelo
-                                if framework == "tensorflow":
-                                    if model_type == "mlp":
-                                        result = dl_automl.create_tensorflow_mlp(
-                                            X_train, y_train, X_val, y_val,
-                                            input_shape, num_classes, custom_config, problem_type
-                                        )
-                                    elif model_type == "cnn":
-                                        result = dl_automl.create_tensorflow_cnn(
-                                            X_train, y_train, X_val, y_val,
-                                            input_shape, num_classes, custom_config, problem_type
-                                        )
-                                    elif model_type == "lstm":
-                                        result = dl_automl.create_tensorflow_lstm(
-                                            X_train, y_train, X_val, y_val,
-                                            input_shape, num_classes, custom_config, problem_type
-                                        )
-                                else:  # pytorch
-                                    if model_type == "mlp":
-                                        result = dl_automl.create_pytorch_mlp(
-                                            X_train, y_train, X_val, y_val,
-                                            input_shape, num_classes, custom_config, problem_type
-                                        )
-                                    else:
-                                        st.error("PyTorch CNN/LSTM não implementado ainda. Use TensorFlow.")
-                                        return
+                                # Adicionar configurações específicas do modelo
+                                if model_type == "mlp":
+                                    custom_config["hidden_layers"] = hidden_layers
+                                    custom_config["activation"] = "relu"
+                                elif model_type == "cnn":
+                                    custom_config["conv_layers"] = [{"filters": f, "kernel_size": 3} for f in conv_filters]
+                                    custom_config["dense_layers"] = dense_layers
+                                    custom_config["activation"] = "relu"
+                                elif model_type == "lstm":
+                                    custom_config["lstm_layers"] = lstm_layers
+                                    custom_config["dense_layers"] = dense_layers
+                                    custom_config["activation"] = "tanh"
+                                
+                                # Converter para DataFrames
+                                X_train_df = pd.DataFrame(X_train)
+                                X_val_df = pd.DataFrame(X_val)
+                                y_train_series = pd.Series(y_train)
+                                y_val_series = pd.Series(y_val)
+                                
+                                # Treinar modelo usando o método unificado
+                                result = dl_automl.create_model(
+                                    X_train_df, y_train_series, X_val_df, y_val_series,
+                                    model_type, framework, problem_type, custom_config
+                                )
                                 
                                 st.success("✅ Modelo treinado com sucesso!")
                                 
