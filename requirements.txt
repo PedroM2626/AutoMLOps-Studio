@@ -15,6 +15,10 @@ plotly>=5.15,<6
 # Deep Learning
 tensorflow>=2.13,<3
 torch>=2.0,<3
+transformers>=4.30,<5
+mlflow>=2.5,<3
+shap>=0.42,<1
+captum>=0.6,<1
 
 # Time Series
 statsmodels>=0.14,<1

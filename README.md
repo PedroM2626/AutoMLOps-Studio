@@ -26,9 +26,12 @@ Plataforma **Enterprise-Grade**, **100% gratuita** e **self-hosted** para criar,
 
 #### 🤖 **Extended AutoML** ✅
 - **Deep Learning:** TensorFlow e PyTorch (MLP, CNN, LSTM)
+- **Advanced DL:** TabTransformer, Vision Transformer, Attention mechanisms
 - **Time Series:** ARIMA, Prophet, LSTM para séries temporais
 - **Multi-framework:** suporte a múltiplos frameworks de ML/DL
 - **Auto-tuning:** configuração automática de hiperparâmetros
+- **MLflow Tracking:** experiment tracking profissional
+- **Model Explainability:** SHAP e Captum para interpretabilidade
 
 ---
 
@@ -38,6 +41,7 @@ Plataforma **Enterprise-Grade**, **100% gratuita** e **self-hosted** para criar,
 |---|---|---|---|---|---|
 | **AutoML Clássico** | ✅ Scikit-learn | ✅ | ✅ | ✅ | ✅ |
 | **Deep Learning** | ✅ TF/PyTorch | ✅ | ✅ | ✅ | ✅ |
+| **Advanced DL** | ✅ Transformers | ❌ | ❌ | ✅ | ✅ |
 | **Time Series** | ✅ ARIMA/Prophet/LSTM | ✅ | ✅ | ✅ | ✅ |
 | **Hyperparameter Opt** | ✅ Optuna | ✅ | ✅ | ✅ | ✅ |
 | **Model Monitoring** | ✅ Performance/Drift | ✅ | ✅ | ✅ | ✅ |
@@ -129,6 +133,9 @@ pip install -r requirements-full.txt
 # 🤖 Deep Learning
 pip install tensorflow torch
 
+# 🚀 Advanced Deep Learning (Transformers)
+pip install transformers mlflow shap captum
+
 # 📈 Time Series  
 pip install statsmodels pmdarima prophet
 
@@ -152,6 +159,14 @@ streamlit run free_mlops/streamlit_app.py
 ```
 
 Acesse: `http://localhost:8501`
+
+### 🚀 MLflow Tracking (Opcional)
+```bash
+# Iniciar MLflow UI para experiment tracking
+python start_mlflow.py
+```
+
+Acesse: `http://localhost:5000`
 
 ### API REST
 ```bash
@@ -189,7 +204,8 @@ free-mlops/
 │   │   └── data_validation.py     # Data validation com Pandera
 │   │
 │   ├── 🤖 Extended AutoML
-│   │   ├── deep_learning.py       # TensorFlow/PyTorch
+│   │   ├── deep_learning.py       # TensorFlow/PyTorch (MLP, CNN, LSTM)
+│   │   ├── advanced_deep_learning.py  # Transformers, Attention, ViT
 │   │   └── time_series.py         # ARIMA/Prophet/LSTM
 │   │
 │   ├── 🔧 Infrastructure
@@ -212,6 +228,7 @@ free-mlops/
 ├── requirements-full.txt           # Todas as dependências (produção completa)
 ├── requirements-dev.txt            # Dependências de desenvolvimento
 ├── install_optional.py             # Instalador guiado de dependências opcionais
+├── start_mlflow.py                 # Script para iniciar MLflow UI
 └── README.md                       # Este arquivo
 ```
 
@@ -261,6 +278,65 @@ pytest tests/unit/          # Testes unitários
 pytest tests/integration/    # Testes de integração
 pytest tests/acceptance/     # Testes de aceitação
 ```
+
+---
+
+## 🚀 Advanced Deep Learning
+
+### **🤖 TabTransformer**
+Modelo Transformer especializado para dados tabulares com:
+- **Embeddings automáticos** para features categóricas
+- **Multi-head attention** para capturar relações complexas
+- **Layer normalization** para treinamento estável
+- **Performance superior** em dados mistos (numéricos + categóricos)
+
+**Casos de uso:**
+- Dados com muitas features categóricas
+- Features com alta cardinalidade
+- Relações complexas entre variáveis
+- Dados tabulares estruturados
+
+### **👁️ Vision Transformer (ViT)**
+Adaptação do Vision Transformer para dados tabulares:
+- **Patch-based approach** - divide features em "patches"
+- **Global self-attention** - captura padrões globais
+- **Position embeddings** - mantém informação posicional
+- **Hierarchical features** - aprende representações em múltiplos níveis
+
+**Casos de uso:**
+- Dados com padrões espaciais/temporais
+- Features altamente correlacionadas
+- Problemas não-lineares complexos
+- Dados de séries temporais
+
+### **📊 MLflow Integration**
+Experiment tracking profissional com:
+- **Automatic logging** de parâmetros e métricas
+- **Model registry** integrado
+- **Artifact management** para modelos e logs
+- **Web UI** para visualização de experimentos
+
+**Como usar:**
+```bash
+# Iniciar MLflow UI
+python start_mlflow.py
+
+# Acessar interface web
+http://localhost:5000
+```
+
+### **🔍 Model Explainability**
+Interpretação de modelos com SHAP e Captum:
+- **SHAP values** para feature importance
+- **DeepLift** para modelos PyTorch
+- **Gradient attribution** para entender decisões
+- **Visualizações interativas** de importância
+
+**Benefícios:**
+- Transparência nas decisões do modelo
+- Identificação de features importantes
+- Conformidade regulatória (GDPR, etc.)
+- Debugging e melhoria de modelos
 
 ---
 

@@ -30,6 +30,7 @@ from free_mlops.hyperopt import get_hyperparameter_optimizer
 from free_mlops.dvc_integration import get_dvc_integration
 from free_mlops.data_validation import get_data_validator
 from free_mlops.deep_learning import get_deep_learning_automl
+from free_mlops.advanced_deep_learning import get_advanced_deep_learning_automl
 from free_mlops.time_series import get_time_series_automl
 
 
@@ -44,7 +45,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Time Series", "Monitoramento", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Advanced DL", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -1632,6 +1633,199 @@ def main() -> None:
             st.info("Você pode personalizar estas configurações na aba de treinamento.")
 
     with tabs[9]:
+        st.subheader("🚀 Advanced Deep Learning (Transformers, Attention)")
+        
+        advanced_dl_automl = get_advanced_deep_learning_automl()
+        
+        if df is not None and target_column:
+            st.write("### 🎯 Modelos Avançados Disponíveis")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("""
+                **🤖 TabTransformer**
+                - Transformer para dados tabulares
+                - Embeddings para features categóricas
+                - Multi-head attention
+                - Performance superior em dados mistos
+                """)
+            
+            with col2:
+                st.markdown("""
+                **👁️ Vision Transformer**
+                - ViT para dados tabulares como "imagens"
+                - Patch-based approach
+                - Self-attention global
+                - Excelente para padrões complexos
+                """)
+            
+            # Model selection
+            model_type = st.selectbox(
+                "Selecione o modelo avançado",
+                options=["tabtransformer", "vision_transformer"],
+                format_func=lambda x: {
+                    "tabtransformer": "🤖 TabTransformer",
+                    "vision_transformer": "👁️ Vision Transformer"
+                }[x],
+                key="advanced_model_type"
+            )
+            
+            # Framework selection
+            framework = st.selectbox(
+                "Framework",
+                options=["pytorch"],
+                key="advanced_framework",
+                help="Atualmente apenas PyTorch disponível para modelos avançados"
+            )
+            
+            # Configuration
+            st.write("### ⚙️ Configurações Avançadas")
+            
+            if model_type == "tabtransformer":
+                col1, col2 = st.columns(2)
+                with col1:
+                    embedding_dim = st.number_input("Embedding Dim", min_value=4, max_value=64, value=8, key="tab_embedding_dim")
+                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], value=8, key="tab_num_heads")
+                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], value=6, key="tab_num_layers")
+                with col2:
+                    hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="tab_hidden_dim")
+                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, format="%.2f", key="tab_dropout")
+                    scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], value="cosine", key="tab_scheduler")
+            
+            elif model_type == "vision_transformer":
+                col1, col2 = st.columns(2)
+                with col1:
+                    patch_size = st.selectbox("Patch Size", options=[2, 4, 8], value=4, key="vit_patch_size")
+                    embedding_dim = st.number_input("Embedding Dim", min_value=32, max_value=128, value=64, key="vit_embedding_dim")
+                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8], value=4, key="vit_num_heads")
+                with col2:
+                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], value=4, key="vit_num_layers")
+                    hidden_dim = st.number_input("Hidden Dim", min_value=64, max_value=256, value=128, key="vit_hidden_dim")
+                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, format="%.2f", key="vit_dropout")
+                scheduler = "cosine"  # Default for Vision Transformer
+            
+            # Training parameters
+            st.write("### 🎯 Parâmetros de Treinamento")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100, key="adv_epochs")
+            with col2:
+                batch_size = st.number_input("Batch Size", min_value=8, max_value=128, value=32, key="adv_batch_size")
+            with col3:
+                learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, format="%.4f", key="adv_lr")
+            
+            # MLflow tracking
+            enable_mlflow = st.checkbox("📊 Habilitar MLflow Tracking", value=True, key="enable_mlflow")
+            
+            if st.button("🚀 Treinar Modelo Avançado", type="primary"):
+                with st.spinner("Treinando modelo avançado..."):
+                    try:
+                        # Prepare data
+                        df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                        feature_cols = [c for c in df_clean.columns if c != target_column]
+                        X = df_clean[feature_cols]
+                        y = df_clean[target_column]
+                        
+                        # Split data
+                        from sklearn.model_selection import train_test_split
+                        X_train, X_val, y_train, y_val = train_test_split(
+                            X, y, test_size=0.2, random_state=42
+                        )
+                        
+                        # Prepare configuration
+                        config = {
+                            "epochs": epochs,
+                            "batch_size": batch_size,
+                            "learning_rate": learning_rate,
+                            "dropout_rate": dropout_rate,
+                            "scheduler": scheduler if model_type == "tabtransformer" else "cosine",
+                        }
+                        
+                        if model_type == "tabtransformer":
+                            config.update({
+                                "embedding_dim": embedding_dim,
+                                "num_heads": num_heads,
+                                "num_layers": num_layers,
+                                "hidden_dim": hidden_dim,
+                            })
+                        elif model_type == "vision_transformer":
+                            config.update({
+                                "patch_size": patch_size,
+                                "embedding_dim": embedding_dim,
+                                "num_heads": num_heads,
+                                "num_layers": num_layers,
+                                "hidden_dim": hidden_dim,
+                            })
+                        
+                        # Train model
+                        if model_type == "tabtransformer":
+                            result = advanced_dl_automl.create_tabtransformer(
+                                X_train, y_train, X_val, y_val, config, problem_type
+                            )
+                        elif model_type == "vision_transformer":
+                            result = advanced_dl_automl.create_vision_transformer(
+                                X_train, y_train, X_val, y_val, config, problem_type
+                            )
+                        
+                        st.success("✅ Modelo avançado treinado com sucesso!")
+                        
+                        # Display results
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Modelo", result["model_type"].replace("_", " ").title())
+                        col2.metric("Framework", result["framework"].title())
+                        col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                        
+                        # Metrics
+                        st.write("### 📊 Métricas de Validação")
+                        metrics = result["validation_metrics"]
+                        col1, col2 = st.columns(2)
+                        col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
+                        if metrics['val_accuracy'] > 0:
+                            col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
+                        
+                        # Model explanation
+                        st.write("### 🔍 Interpretabilidade do Modelo")
+                        if st.button("🔍 Gerar Explicações SHAP", key="explain_advanced"):
+                            with st.spinner("Gerando explicações..."):
+                                try:
+                                    explainer = result["explainer"]
+                                    explanation = explainer.explain_pytorch_model(
+                                        X_val.iloc[:100],  # Sample for performance
+                                        feature_names=feature_cols
+                                    )
+                                    
+                                    if explanation:
+                                        st.success("✅ Explicações geradas!")
+                                        
+                                        # Plot feature importance
+                                        fig = explainer.plot_feature_importance(
+                                            explanation["shap_values"],
+                                            explanation["feature_names"],
+                                            max_features=15
+                                        )
+                                        
+                                        if fig:
+                                            st.pyplot(fig)
+                                            st.caption("Importância das Features (SHAP Values)")
+                                    else:
+                                        st.warning("Não foi possível gerar explicações.")
+                                except Exception as e:
+                                    st.error(f"Erro ao gerar explicações: {e}")
+                        
+                        # Configuration display
+                        st.write("### ⚙️ Configurações Utilizadas")
+                        st.json(config)
+                        
+                        # MLflow info
+                        if enable_mlflow:
+                            st.info("📊 Experimento registrado no MLflow! Use `mlflow ui` para visualizar.")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Erro no treinamento: {str(e)}")
+        else:
+            st.info("👆 Por favor, faça upload dos dados e selecione a coluna target primeiro.")
+
+    with tabs[10]:
         st.subheader("Time Series (ARIMA, Prophet, LSTM)")
         
         ts_automl = get_time_series_automl()
