@@ -145,6 +145,17 @@ class HyperparameterOptimizer:
             "knn_classifier": KNeighborsClassifier,
             "knn_regressor": KNeighborsRegressor,
             "svr": SVR,
+            # Nomes alternativos para compatibilidade
+            "random_forest": RandomForestClassifier,
+            "RandomForestClassifier": RandomForestClassifier,
+            "gradient_boosting": GradientBoostingClassifier,
+            "GradientBoostingClassifier": GradientBoostingClassifier,
+            "decision_tree": DecisionTreeClassifier,
+            "DecisionTreeClassifier": DecisionTreeClassifier,
+            "knn": KNeighborsClassifier,
+            "KNeighborsClassifier": KNeighborsClassifier,
+            "logistic": LogisticRegression,
+            "LogisticRegression": LogisticRegression,
         }
     
     def optimize_hyperparameters(
@@ -236,7 +247,7 @@ class HyperparameterOptimizer:
         best_pipeline.fit(X_train, y_train)
         
         # Avaliar em validação
-        y_pred = best_pipeline.predict(X_val_processed)
+        y_pred = best_pipeline.predict(X_val)
         
         if problem_type in ["classification", "multiclass_classification", "binary_classification"]:
             metrics = {

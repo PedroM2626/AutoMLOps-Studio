@@ -13,8 +13,10 @@ from free_mlops.test_models import save_test_results
 def test_single_prediction_success(tmp_path):
     # Criar modelo mock
     mock_model = Mock()
-    mock_model.predict.return_value = [1]
-    mock_model.predict_proba.return_value = [[0.2, 0.8]]
+    # Retornar numpy array que tem método tolist()
+    import numpy as np
+    mock_model.predict.return_value = np.array([1])
+    mock_model.predict_proba.return_value = np.array([[0.2, 0.8]])
     mock_model.classes_ = [0, 1]
     
     model_path = tmp_path / "model.pkl"
@@ -52,8 +54,10 @@ def test_single_prediction_error(tmp_path):
 def test_batch_prediction_success(tmp_path):
     # Criar modelo mock
     mock_model = Mock()
-    mock_model.predict.return_value = [1, 0, 1]
-    mock_model.predict_proba.return_value = [[0.2, 0.8], [0.9, 0.1], [0.3, 0.7]]
+    # Retornar numpy array que tem método tolist()
+    import numpy as np
+    mock_model.predict.return_value = np.array([1, 0, 1])
+    mock_model.predict_proba.return_value = np.array([[0.2, 0.8], [0.9, 0.1], [0.3, 0.7]])
     mock_model.classes_ = [0, 1]
     
     model_path = tmp_path / "model.pkl"

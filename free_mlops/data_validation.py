@@ -33,7 +33,7 @@ class DataValidator:
         """Cria schema Pandera a partir de um DataFrame."""
         
         try:
-            import pandera as pa
+            import pandera.pandas as pa
         except ImportError:
             raise ImportError("Pandera não está instalado. Instale com: pip install pandera")
         
@@ -69,7 +69,10 @@ class DataValidator:
             checks = []
             
             if col_info.get("unique_values", False):
-                checks.append(pa.Check.unique())
+                # Para verificar unicidade, usamos uma função customizada
+                def check_unique(series):
+                    return len(series) == len(series.unique())
+                checks.append(pa.Check(check_unique, error="Values must be unique"))
             
             if "min_value" in col_info:
                 checks.append(pa.Check.ge(col_info["min_value"]))
@@ -102,17 +105,41 @@ class DataValidator:
         
         # Salvar schema
         schema_file = self.schemas_dir / f"{schema_name}.json"
-        schema_dict = schema.to_schema()
         
-        schema_dict["metadata"] = schema_info
+        # Preparar dados para salvar (sem o objeto schema)
+        save_data = {
+            "metadata": schema_info,
+            "columns": {}
+        }
+        
+        for col_name, col_schema in schema.columns.items():
+            col_data = {
+                "dtype": str(col_schema.dtype),
+                "nullable": bool(col_schema.nullable),
+                "coerce": bool(col_schema.coerce),
+                "required": bool(col_schema.required),
+                "checks": []
+            }
+            
+            # Adicionar informações dos checks
+            for check in col_schema.checks:
+                check_info = {
+                    "name": check.name if hasattr(check, 'name') else str(check),
+                    "error": check.error if hasattr(check, 'error') else str(check)
+                }
+                col_data["checks"].append(check_info)
+            
+            save_data["columns"][col_name] = col_data
+        
         schema_file.write_text(
-            json.dumps(schema_dict, ensure_ascii=False, indent=2, default=str),
+            json.dumps(save_data, ensure_ascii=False, indent=2, default=str),
             encoding="utf-8"
         )
         
         return {
             "schema_name": schema_name,
             "schema_file": str(schema_file),
+            "schema": schema,
             "schema_info": schema_info,
             "validation_results": self._validate_dataframe(df, schema),
         }

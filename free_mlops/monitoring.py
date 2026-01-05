@@ -93,16 +93,33 @@ class PerformanceMonitor:
                 y_true = [p["ground_truth"] for p in with_truth]
                 y_pred = [p["prediction"] for p in with_truth]
                 
-                # Tentar determinar se é classificação ou regressão
-                if all(isinstance(val, (int, np.integer)) for val in y_true + y_pred):
-                    # Classificação
+                # Calcular métricas de regressão sempre
+                summary["rmse"] = float(np.sqrt(mean_squared_error(y_true, y_pred)))
+                summary["r2"] = float(r2_score(y_true, y_pred))
+                
+                # Tentar determinar se é classificação para accuracy
+                # Considerar classificação se valores são 0/1 ou inteiros pequenos
+                unique_true = set(y_true)
+                unique_pred = set(y_pred)
+                
+                is_classification = (
+                    all(isinstance(val, (int, np.integer)) for val in y_true + y_pred) and
+                    len(unique_true) <= 10 and len(unique_pred) <= 10 and
+                    all(val in range(-10, 11) for val in list(unique_true) + list(unique_pred))
+                )
+                
+                if is_classification:
                     summary["accuracy"] = float(accuracy_score(y_true, y_pred))
-                else:
-                    # Regressão
+                    
+            except Exception as e:
+                # Em caso de erro, tentar apenas regressão
+                try:
+                    y_true = [p["ground_truth"] for p in with_truth]
+                    y_pred = [p["prediction"] for p in with_truth]
                     summary["rmse"] = float(np.sqrt(mean_squared_error(y_true, y_pred)))
                     summary["r2"] = float(r2_score(y_true, y_pred))
-            except Exception:
-                pass
+                except Exception:
+                    pass
         
         # Throughput (predições por hora)
         if len(predictions) > 1:
@@ -114,8 +131,15 @@ class PerformanceMonitor:
         return summary
     
     def get_metrics(self) -> Dict[str, Any]:
-        """Retorna métricas atuais."""
-        return self._load_metrics()
+        """Retorna métricas atuais calculadas."""
+        metrics = self._load_metrics()
+        predictions = metrics.get("predictions", [])
+        
+        if not predictions:
+            return {"predictions": [], "summary": {}}
+        
+        # Calcular métricas atualizadas
+        return self._calculate_summary_metrics(predictions)
     
     def get_recent_predictions(self, limit: int = 100) -> List[Dict[str, Any]]:
         """Retorna predições recentes."""
