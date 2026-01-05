@@ -847,6 +847,81 @@ class DeepLearningAutoML:
                 "metadata": metadata,
             }
 
+    def create_model(
+            self,
+            X_train: pd.DataFrame,
+            y_train: pd.Series,
+            X_val: pd.DataFrame,
+            y_val: pd.Series,
+            model_type: str,
+            framework: str,
+            problem_type: str = "classification",
+            config: Optional[Dict[str, Any]] = None,
+        ) -> Dict[str, Any]:
+        """Método wrapper para criar modelos de forma simplificada."""
+        
+        # Preparar input shape
+        if model_type == "mlp":
+            input_shape = (X_train.shape[1],)
+        elif model_type == "cnn":
+            input_shape = (X_train.shape[1], 1)
+            X_train = X_train.values.reshape(X_train.shape[0], X_train.shape[1], 1)
+            X_val = X_val.values.reshape(X_val.shape[0], X_val.shape[1], 1)
+        elif model_type == "lstm":
+            input_shape = (1, X_train.shape[1])
+            X_train = X_train.values.reshape(X_train.shape[0], 1, X_train.shape[1])
+            X_val = X_val.values.reshape(X_val.shape[0], 1, X_val.shape[1])
+        else:
+            raise ValueError(f"Model type not supported: {model_type}")
+        
+        # Determinar número de classes
+        if problem_type == "classification":
+            num_classes = len(y_train.unique())
+        else:
+            num_classes = 1
+        
+        # Converter para arrays numpy
+        X_train_np = X_train.values if hasattr(X_train, 'values') else X_train
+        X_val_np = X_val.values if hasattr(X_val, 'values') else X_val
+        y_train_np = y_train.values if hasattr(y_train, 'values') else y_train
+        y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
+        
+        # Chamar método específico
+        if framework == "tensorflow":
+            if model_type == "mlp":
+                return self.create_tensorflow_mlp(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+            elif model_type == "cnn":
+                return self.create_tensorflow_cnn(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+            elif model_type == "lstm":
+                return self.create_tensorflow_lstm(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+        elif framework == "pytorch":
+            if model_type == "mlp":
+                return self.create_pytorch_mlp(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+            elif model_type == "cnn":
+                return self.create_pytorch_cnn(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+            elif model_type == "lstm":
+                return self.create_pytorch_lstm(
+                    X_train_np, y_train_np, X_val_np, y_val_np,
+                    input_shape, num_classes, config, problem_type
+                )
+        
+        raise ValueError(f"Framework not supported: {framework}")
+
 
 def get_deep_learning_automl() -> DeepLearningAutoML:
     """Factory function para DeepLearningAutoML."""
