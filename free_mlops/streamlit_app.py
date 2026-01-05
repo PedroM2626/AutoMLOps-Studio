@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from uuid import uuid4
 
@@ -274,9 +275,11 @@ def main() -> None:
                         epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="dl_epochs")
                         batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="dl_batch_size")
                         learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="dl_lr")
+                        max_training_time = st.number_input("Tempo Máximo (minutos)", min_value=1, max_value=120, value=30, key="dl_max_time")
                     with col2:
                         dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dl_dropout")
                         optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
+                        experiment_id = st.text_input("ID do Experimento", value=f"dl_exp_{int(time.time())}", key="dl_experiment_id")
                     
                     # Configurações específicas por tipo de modelo
                     if model_type == "mlp":
@@ -444,6 +447,9 @@ def main() -> None:
                                     "learning_rate": learning_rate,
                                     "dropout_rate": dropout_rate,
                                     "optimizer": optimizer,
+                                    "activation": "relu",  # Default activation
+                                    "max_training_time": max_training_time,  # Tempo máximo em minutos
+                                    "experiment_id": experiment_id,  # ID do experimento
                                 }
                                 
                                 # Adicionar configurações específicas
@@ -478,9 +484,64 @@ def main() -> None:
                             # Metrics
                             st.write("### 📊 Métricas de Validação")
                             metrics = result["validation_metrics"]
-                            col1, col2 = st.columns(2)
-                            col1.metric("Val Loss", f"{metrics['val_loss']:.4f}")
-                            col2.metric("Val Accuracy", f"{metrics['val_accuracy']:.4f}")
+                            
+                            # Métricas principais
+                            col1, col2, col3, col4 = st.columns(4)
+                            col1.metric("Val Loss", f"{metrics.get('val_loss', 0):.4f}")
+                            col2.metric("Val Accuracy", f"{metrics.get('val_accuracy', 0):.4f}")
+                            
+                            # Métricas adicionais para classificação
+                            if dl_problem_type == "classification":
+                                if 'precision' in metrics:
+                                    col3.metric("Precision", f"{metrics['precision']:.4f}")
+                                if 'recall' in metrics:
+                                    col4.metric("Recall", f"{metrics['recall']:.4f}")
+                                if 'f1_score' in metrics:
+                                    st.metric("F1-Score", f"{metrics['f1_score']:.4f}")
+                                
+                                # Matriz de Confusão
+                                st.write("### 🎯 Matriz de Confusão")
+                                
+                                # Debug: mostrar métricas disponíveis
+                                st.write(f"**Debug - Métricas disponíveis:** {list(metrics.keys())}")
+                                
+                                if 'confusion_matrix' in metrics:
+                                    cm = metrics['confusion_matrix']
+                                    st.write(f"**Debug - Matriz shape:** {len(cm)}x{len(cm[0]) if cm else 'N/A'}")
+                                    st.write(f"**Debug - Matriz data:** {cm}")
+                                    
+                                    import plotly.graph_objects as go
+                                    fig = go.Figure(data=go.Heatmap(
+                                        z=cm,
+                                        x=[f'Pred {i}' for i in range(len(cm))],
+                                        y=[f'True {i}' for i in range(len(cm))],
+                                        colorscale='Blues',
+                                        text=cm,
+                                        texttemplate="%{text}",
+                                        textfont={"size": 12}
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title="Matriz de Confusão",
+                                        xaxis_title="Predito",
+                                        yaxis_title="Verdadeiro"
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                else:
+                                    st.error("Matriz de confusão não encontrada nas métricas")
+                                    st.write("**Métricas disponíveis:**", metrics)
+                            
+                            # Métricas para regressão
+                            elif dl_problem_type == "regression":
+                                if 'mae' in metrics:
+                                    col3.metric("MAE", f"{metrics['mae']:.4f}")
+                                if 'mse' in metrics:
+                                    col4.metric("MSE", f"{metrics['mse']:.4f}")
+                                if 'rmse' in metrics:
+                                    st.metric("RMSE", f"{metrics['rmse']:.4f}")
+                                if 'r2_score' in metrics:
+                                    st.metric("R²", f"{metrics['r2_score']:.4f}")
                             
                         except Exception as e:
                             st.error(f"❌ Erro no treinamento: {str(e)}")

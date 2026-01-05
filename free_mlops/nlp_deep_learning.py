@@ -389,6 +389,10 @@ class NLPDeepLearningAutoML:
             correct = 0
             total = 0
             
+            # Coletar predições para métricas detalhadas
+            all_predictions = []
+            all_labels = []
+            
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     outputs = model(batch_X)
@@ -398,6 +402,10 @@ class NLPDeepLearningAutoML:
                     _, predicted = torch.max(outputs.data, 1)
                     total += batch_y.size(0)
                     correct += (predicted == batch_y).sum().item()
+                    
+                    # Coletar para métricas detalhadas
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(batch_y.cpu().numpy())
             
             avg_train_loss = train_loss / len(train_loader)
             avg_val_loss = val_loss / len(val_loader)
@@ -408,15 +416,27 @@ class NLPDeepLearningAutoML:
         
         training_time = time.time() - start_time
         
+        # Calcular métricas detalhadas
+        from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+        
+        all_predictions = np.array(all_predictions)
+        all_labels = np.array(all_labels)
+        
+        validation_metrics = {
+            "val_loss": best_val_loss,
+            "val_accuracy": val_accuracy,
+            "precision": precision_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "recall": recall_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "f1_score": f1_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "confusion_matrix": confusion_matrix(all_labels, all_predictions).tolist()
+        }
+        
         return {
             "model": model,
             "framework": "pytorch",
             "model_type": "text_cnn",
             "training_time": training_time,
-            "validation_metrics": {
-                "val_loss": best_val_loss,
-                "val_accuracy": val_accuracy,
-            },
+            "validation_metrics": validation_metrics,
             "config": config,
             "processor": processor,
             "num_classes": len(processor.label_encoder.classes_),
@@ -491,6 +511,10 @@ class NLPDeepLearningAutoML:
             correct = 0
             total = 0
             
+            # Coletar predições para métricas detalhadas
+            all_predictions = []
+            all_labels = []
+            
             with torch.no_grad():
                 for batch_X, batch_y in val_loader:
                     outputs = model(batch_X)
@@ -500,6 +524,10 @@ class NLPDeepLearningAutoML:
                     _, predicted = torch.max(outputs.data, 1)
                     total += batch_y.size(0)
                     correct += (predicted == batch_y).sum().item()
+                    
+                    # Coletar para métricas detalhadas
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(batch_y.cpu().numpy())
             
             avg_train_loss = train_loss / len(train_loader)
             avg_val_loss = val_loss / len(val_loader)
@@ -510,15 +538,27 @@ class NLPDeepLearningAutoML:
         
         training_time = time.time() - start_time
         
+        # Calcular métricas detalhadas
+        from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+        
+        all_predictions = np.array(all_predictions)
+        all_labels = np.array(all_labels)
+        
+        validation_metrics = {
+            "val_loss": best_val_loss,
+            "val_accuracy": val_accuracy,
+            "precision": precision_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "recall": recall_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "f1_score": f1_score(all_labels, all_predictions, average='weighted', zero_division=0),
+            "confusion_matrix": confusion_matrix(all_labels, all_predictions).tolist()
+        }
+        
         return {
             "model": model,
             "framework": "pytorch",
             "model_type": "text_lstm",
             "training_time": training_time,
-            "validation_metrics": {
-                "val_loss": best_val_loss,
-                "val_accuracy": val_accuracy,
-            },
+            "validation_metrics": validation_metrics,
             "config": config,
             "processor": processor,
             "num_classes": len(processor.label_encoder.classes_),

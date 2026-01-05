@@ -244,15 +244,27 @@ class DeepLearningAutoML:
         
         # Definir modelo
         class MLP(nn.Module):
-            def __init__(self, input_dim, hidden_layers, dropout_rate, num_classes, problem_type):
+            def __init__(self, input_dim, hidden_layers, dropout_rate, num_classes, problem_type, activation="relu"):
                 super(MLP, self).__init__()
                 
                 layers = []
                 prev_dim = input_dim
                 
+                # Mapear activations
+                activation_map = {
+                    "relu": nn.ReLU,
+                    "tanh": nn.Tanh,
+                    "sigmoid": nn.Sigmoid,
+                    "leaky_relu": nn.LeakyReLU,
+                    "elu": nn.ELU,
+                    "gelu": nn.GELU
+                }
+                
+                activation_fn = activation_map.get(activation, nn.ReLU)
+                
                 for units in hidden_layers:
                     layers.append(nn.Linear(prev_dim, units))
-                    layers.append(nn.ReLU())
+                    layers.append(activation_fn())
                     if dropout_rate > 0:
                         layers.append(nn.Dropout(dropout_rate))
                     prev_dim = units
@@ -273,7 +285,7 @@ class DeepLearningAutoML:
             def forward(self, x):
                 return self.network(x)
         
-        model = MLP(input_shape[0], config["hidden_layers"], config["dropout_rate"], num_classes, problem_type)
+        model = MLP(input_shape[0], config["hidden_layers"], config["dropout_rate"], num_classes, problem_type, config.get("activation", "relu"))
         
         # Loss e optimizer
         if problem_type == "classification":
@@ -293,6 +305,12 @@ class DeepLearningAutoML:
         
         # Treinar
         start_time = time.time()
+        max_training_seconds = config.get("max_training_time", 30) * 60  # Converter minutos para segundos
+        experiment_id = config.get("experiment_id", f"exp_{int(start_time)}")
+        
+        print(f"Starting training - Experiment ID: {experiment_id}")
+        print(f"Max training time: {max_training_seconds/60:.1f} minutes")
+        
         history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
         
         best_val_loss = float('inf')
@@ -300,6 +318,13 @@ class DeepLearningAutoML:
         best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
+            # Verificar tempo máximo de treinamento
+            current_time = time.time()
+            elapsed_time = current_time - start_time
+            
+            if elapsed_time >= max_training_seconds:
+                print(f"Training stopped: Maximum time limit reached ({elapsed_time/60:.1f} minutes)")
+                break
             # Training
             model.train()
             train_loss = 0.0
@@ -339,17 +364,36 @@ class DeepLearningAutoML:
                 for batch_X, batch_y in val_loader:
                     outputs = model(batch_X)
                     
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        print("Warning: NaN detected in model outputs, skipping batch")
+                        continue
+                    
                     if problem_type == "classification" and num_classes == 2:
-                        loss = criterion(outputs.squeeze(), batch_y.float())
-                        predicted = (outputs.squeeze() > 0.5).long()
+                        # Para classificação binária
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
+                        predicted = (outputs_squeezed > 0.5).long()
                     elif problem_type == "classification":
-                        loss = criterion(outputs, batch_y)
+                        # Para classificação multiclasse
+                        loss = criterion(outputs, batch_y.long())
                         predicted = outputs.argmax(dim=1)
                     else:
-                        loss = criterion(outputs.squeeze(), batch_y)
+                        # Para regressão
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
                         predicted = None
                     
-                    val_loss += loss.item()
+                    # Verificar se loss é válido
+                    if not torch.isnan(loss) and not torch.isinf(loss):
+                        val_loss += loss.item()
+                    else:
+                        print("Warning: Invalid loss detected, skipping batch")
+                        continue
                     
                     if predicted is not None:
                         val_correct += (predicted == batch_y).sum().item()
@@ -412,6 +456,102 @@ class DeepLearningAutoML:
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
+        # Calcular métricas finais usando as predições já coletadas no último epoch
+        validation_metrics = {
+            "val_loss": avg_final_val_loss,
+        }
+        
+        if problem_type == "classification":
+            val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
+            validation_metrics["val_accuracy"] = val_accuracy
+            
+            # Coletar predições finais para métricas detalhadas
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        continue
+                    
+                    if num_classes == 2:
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        predicted = (outputs_squeezed > 0.5).long()
+                    else:
+                        predicted = outputs.argmax(dim=1)
+                    
+                    # Garantir arrays 1D
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+            
+            # Calcular métricas detalhadas
+            if len(all_predictions) > 0 and len(all_labels) > 0:
+                from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+                
+                all_predictions = np.array(all_predictions)
+                all_labels = np.array(all_labels)
+                
+                try:
+                    # Métricas principais
+                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    # Matriz de confusão completa
+                    all_classes = sorted(list(set(all_labels) | set(all_predictions)))
+                    cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
+                    validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
+                    print(f"Confusion matrix shape: {cm.shape}")
+                    
+                except Exception as e:
+                    print(f"Error calculating metrics: {e}")
+                    validation_metrics["precision"] = 0.0
+                    validation_metrics["recall"] = 0.0
+                    validation_metrics["f1_score"] = 0.0
+                    validation_metrics["confusion_matrix"] = [[0]]
+            else:
+                print("No valid predictions collected")
+                validation_metrics["precision"] = 0.0
+                validation_metrics["recall"] = 0.0
+                validation_metrics["f1_score"] = 0.0
+                validation_metrics["confusion_matrix"] = [[0]]
+            
+        else:  # regressão
+            # Coletar todas as predições e verdadeiros para métricas de regressão
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    predicted = outputs.squeeze()
+                    
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(batch_y.cpu().numpy())
+            
+            # Calcular métricas de regressão
+            from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+            
+            all_predictions = np.array(all_predictions)
+            all_labels = np.array(all_labels)
+            
+            validation_metrics["mae"] = mean_absolute_error(all_labels, all_predictions)
+            validation_metrics["mse"] = mean_squared_error(all_labels, all_predictions)
+            validation_metrics["rmse"] = np.sqrt(validation_metrics["mse"])
+            validation_metrics["r2_score"] = r2_score(all_labels, all_predictions)
+        
         # Preparar resultados
         result = {
             "framework": "pytorch",
@@ -421,10 +561,7 @@ class DeepLearningAutoML:
             "config": config,
             "training_time": training_time,
             "history": history,
-            "validation_metrics": {
-                "val_loss": avg_final_val_loss,
-                "val_accuracy": final_val_correct / final_val_total if problem_type == "classification" else None,
-            },
+            "validation_metrics": validation_metrics,
             "input_shape": input_shape,
             "num_classes": num_classes,
         }
@@ -736,16 +873,28 @@ class DeepLearningAutoML:
         
         # Definir modelo CNN
         class CNN(nn.Module):
-            def __init__(self, input_channels, conv_layers, dense_layers, dropout_rate, num_classes, problem_type):
+            def __init__(self, input_channels, conv_layers, dense_layers, dropout_rate, num_classes, problem_type, activation="relu"):
                 super(CNN, self).__init__()
                 
                 layers = []
                 prev_channels = input_channels
                 
+                # Mapear activations
+                activation_map = {
+                    "relu": nn.ReLU,
+                    "tanh": nn.Tanh,
+                    "sigmoid": nn.Sigmoid,
+                    "leaky_relu": nn.LeakyReLU,
+                    "elu": nn.ELU,
+                    "gelu": nn.GELU
+                }
+                
+                activation_fn = activation_map.get(activation, nn.ReLU)
+                
                 # Camadas convolucionais
                 for conv_layer in conv_layers:
                     layers.append(nn.Conv2d(prev_channels, conv_layer["filters"], conv_layer["kernel_size"], padding=1))
-                    layers.append(nn.ReLU())
+                    layers.append(activation_fn())
                     layers.append(nn.MaxPool2d(2, 2))
                     prev_channels = conv_layer["filters"]
                 
@@ -754,7 +903,7 @@ class DeepLearningAutoML:
                 # Camadas densas
                 for units in dense_layers:
                     layers.append(nn.Linear(prev_channels, units))
-                    layers.append(nn.ReLU())
+                    layers.append(activation_fn())
                     if dropout_rate > 0:
                         layers.append(nn.Dropout(dropout_rate))
                     prev_channels = units
@@ -775,7 +924,7 @@ class DeepLearningAutoML:
             def forward(self, x):
                 return self.network(x)
         
-        model = CNN(1, config["conv_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type)
+        model = CNN(1, config["conv_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type, config.get("activation", "relu"))
         
         # Loss e optimizer
         if problem_type == "classification":
@@ -795,6 +944,12 @@ class DeepLearningAutoML:
         
         # Treinar
         start_time = time.time()
+        max_training_seconds = config.get("max_training_time", 30) * 60  # Converter minutos para segundos
+        experiment_id = config.get("experiment_id", f"exp_{int(start_time)}")
+        
+        print(f"Starting training - Experiment ID: {experiment_id}")
+        print(f"Max training time: {max_training_seconds/60:.1f} minutes")
+        
         history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
         
         best_val_loss = float('inf')
@@ -802,6 +957,13 @@ class DeepLearningAutoML:
         best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
+            # Verificar tempo máximo de treinamento
+            current_time = time.time()
+            elapsed_time = current_time - start_time
+            
+            if elapsed_time >= max_training_seconds:
+                print(f"Training stopped: Maximum time limit reached ({elapsed_time/60:.1f} minutes)")
+                break
             # Training
             model.train()
             train_loss = 0.0
@@ -841,17 +1003,36 @@ class DeepLearningAutoML:
                 for batch_X, batch_y in val_loader:
                     outputs = model(batch_X)
                     
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        print("Warning: NaN detected in model outputs, skipping batch")
+                        continue
+                    
                     if problem_type == "classification" and num_classes == 2:
-                        loss = criterion(outputs.squeeze(), batch_y.float())
-                        predicted = (outputs.squeeze() > 0.5).long()
+                        # Para classificação binária
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
+                        predicted = (outputs_squeezed > 0.5).long()
                     elif problem_type == "classification":
-                        loss = criterion(outputs, batch_y)
+                        # Para classificação multiclasse
+                        loss = criterion(outputs, batch_y.long())
                         predicted = outputs.argmax(dim=1)
                     else:
-                        loss = criterion(outputs.squeeze(), batch_y)
+                        # Para regressão
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
                         predicted = None
                     
-                    val_loss += loss.item()
+                    # Verificar se loss é válido
+                    if not torch.isnan(loss) and not torch.isinf(loss):
+                        val_loss += loss.item()
+                    else:
+                        print("Warning: Invalid loss detected, skipping batch")
+                        continue
                     
                     if predicted is not None:
                         val_correct += (predicted == batch_y).sum().item()
@@ -914,6 +1095,102 @@ class DeepLearningAutoML:
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
+        # Calcular métricas finais usando as predições já coletadas no último epoch
+        validation_metrics = {
+            "val_loss": avg_final_val_loss,
+        }
+        
+        if problem_type == "classification":
+            val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
+            validation_metrics["val_accuracy"] = val_accuracy
+            
+            # Coletar predições finais para métricas detalhadas
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        continue
+                    
+                    if num_classes == 2:
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        predicted = (outputs_squeezed > 0.5).long()
+                    else:
+                        predicted = outputs.argmax(dim=1)
+                    
+                    # Garantir arrays 1D
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+            
+            # Calcular métricas detalhadas
+            if len(all_predictions) > 0 and len(all_labels) > 0:
+                from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+                
+                all_predictions = np.array(all_predictions)
+                all_labels = np.array(all_labels)
+                
+                try:
+                    # Métricas principais
+                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    # Matriz de confusão completa
+                    all_classes = sorted(list(set(all_labels) | set(all_predictions)))
+                    cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
+                    validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
+                    print(f"Confusion matrix shape: {cm.shape}")
+                    
+                except Exception as e:
+                    print(f"Error calculating metrics: {e}")
+                    validation_metrics["precision"] = 0.0
+                    validation_metrics["recall"] = 0.0
+                    validation_metrics["f1_score"] = 0.0
+                    validation_metrics["confusion_matrix"] = [[0]]
+            else:
+                print("No valid predictions collected")
+                validation_metrics["precision"] = 0.0
+                validation_metrics["recall"] = 0.0
+                validation_metrics["f1_score"] = 0.0
+                validation_metrics["confusion_matrix"] = [[0]]
+            
+        else:  # regressão
+            # Coletar todas as predições e verdadeiros para métricas de regressão
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    predicted = outputs.squeeze()
+                    
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(batch_y.cpu().numpy())
+            
+            # Calcular métricas de regressão
+            from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+            
+            all_predictions = np.array(all_predictions)
+            all_labels = np.array(all_labels)
+            
+            validation_metrics["mae"] = mean_absolute_error(all_labels, all_predictions)
+            validation_metrics["mse"] = mean_squared_error(all_labels, all_predictions)
+            validation_metrics["rmse"] = np.sqrt(validation_metrics["mse"])
+            validation_metrics["r2_score"] = r2_score(all_labels, all_predictions)
+        
         # Preparar resultados
         result = {
             "framework": "pytorch",
@@ -923,10 +1200,7 @@ class DeepLearningAutoML:
             "config": config,
             "training_time": training_time,
             "history": history,
-            "validation_metrics": {
-                "val_loss": avg_final_val_loss,
-                "val_accuracy": final_val_correct / final_val_total if problem_type == "classification" else None,
-            },
+            "validation_metrics": validation_metrics,
             "input_shape": input_shape,
             "num_classes": num_classes,
         }
@@ -985,8 +1259,20 @@ class DeepLearningAutoML:
         
         # Definir modelo LSTM
         class LSTM(nn.Module):
-            def __init__(self, input_size, lstm_layers, dense_layers, dropout_rate, num_classes, problem_type):
+            def __init__(self, input_size, lstm_layers, dense_layers, dropout_rate, num_classes, problem_type, activation="relu"):
                 super(LSTM, self).__init__()
+                
+                # Mapear activations
+                activation_map = {
+                    "relu": nn.ReLU,
+                    "tanh": nn.Tanh,
+                    "sigmoid": nn.Sigmoid,
+                    "leaky_relu": nn.LeakyReLU,
+                    "elu": nn.ELU,
+                    "gelu": nn.GELU
+                }
+                
+                activation_fn = activation_map.get(activation, nn.ReLU)
                 
                 # Camada LSTM
                 self.lstm = nn.LSTM(input_size, lstm_layers[0], lstm_layers[1], batch_first=True, dropout=dropout_rate)
@@ -996,7 +1282,7 @@ class DeepLearningAutoML:
                 prev_size = lstm_layers[1]
                 for units in dense_layers:
                     layers.append(nn.Linear(prev_size, units))
-                    layers.append(nn.ReLU())
+                    layers.append(activation_fn())
                     if dropout_rate > 0:
                         layers.append(nn.Dropout(dropout_rate))
                     prev_size = units
@@ -1027,7 +1313,7 @@ class DeepLearningAutoML:
                 # Passar através das camadas densas
                 return self.dense_layers(last_output)
         
-        model = LSTM(X_train.shape[1], config["lstm_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type)
+        model = LSTM(X_train.shape[1], config["lstm_layers"], config["dense_layers"], config["dropout_rate"], num_classes, problem_type, config.get("activation", "relu"))
         
         # Loss e optimizer
         if problem_type == "classification":
@@ -1047,6 +1333,12 @@ class DeepLearningAutoML:
         
         # Treinar
         start_time = time.time()
+        max_training_seconds = config.get("max_training_time", 30) * 60  # Converter minutos para segundos
+        experiment_id = config.get("experiment_id", f"exp_{int(start_time)}")
+        
+        print(f"Starting training - Experiment ID: {experiment_id}")
+        print(f"Max training time: {max_training_seconds/60:.1f} minutes")
+        
         history = {"loss": [], "val_loss": [], "accuracy": [], "val_accuracy": []}
         
         best_val_loss = float('inf')
@@ -1054,6 +1346,13 @@ class DeepLearningAutoML:
         best_model_state = None  # Initialize best model state
         
         for epoch in range(config["epochs"]):
+            # Verificar tempo máximo de treinamento
+            current_time = time.time()
+            elapsed_time = current_time - start_time
+            
+            if elapsed_time >= max_training_seconds:
+                print(f"Training stopped: Maximum time limit reached ({elapsed_time/60:.1f} minutes)")
+                break
             # Training
             model.train()
             train_loss = 0.0
@@ -1093,17 +1392,36 @@ class DeepLearningAutoML:
                 for batch_X, batch_y in val_loader:
                     outputs = model(batch_X)
                     
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        print("Warning: NaN detected in model outputs, skipping batch")
+                        continue
+                    
                     if problem_type == "classification" and num_classes == 2:
-                        loss = criterion(outputs.squeeze(), batch_y.float())
-                        predicted = (outputs.squeeze() > 0.5).long()
+                        # Para classificação binária
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
+                        predicted = (outputs_squeezed > 0.5).long()
                     elif problem_type == "classification":
-                        loss = criterion(outputs, batch_y)
+                        # Para classificação multiclasse
+                        loss = criterion(outputs, batch_y.long())
                         predicted = outputs.argmax(dim=1)
                     else:
-                        loss = criterion(outputs.squeeze(), batch_y)
+                        # Para regressão
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        loss = criterion(outputs_squeezed, batch_y.float())
                         predicted = None
                     
-                    val_loss += loss.item()
+                    # Verificar se loss é válido
+                    if not torch.isnan(loss) and not torch.isinf(loss):
+                        val_loss += loss.item()
+                    else:
+                        print("Warning: Invalid loss detected, skipping batch")
+                        continue
                     
                     if predicted is not None:
                         val_correct += (predicted == batch_y).sum().item()
@@ -1166,6 +1484,102 @@ class DeepLearningAutoML:
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
+        # Calcular métricas finais usando as predições já coletadas no último epoch
+        validation_metrics = {
+            "val_loss": avg_final_val_loss,
+        }
+        
+        if problem_type == "classification":
+            val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
+            validation_metrics["val_accuracy"] = val_accuracy
+            
+            # Coletar predições finais para métricas detalhadas
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    
+                    # Verificar se outputs contém NaN
+                    if torch.isnan(outputs).any():
+                        continue
+                    
+                    if num_classes == 2:
+                        outputs_squeezed = outputs.squeeze()
+                        if outputs_squeezed.dim() == 0:
+                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                        predicted = (outputs_squeezed > 0.5).long()
+                    else:
+                        predicted = outputs.argmax(dim=1)
+                    
+                    # Garantir arrays 1D
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+            
+            # Calcular métricas detalhadas
+            if len(all_predictions) > 0 and len(all_labels) > 0:
+                from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+                
+                all_predictions = np.array(all_predictions)
+                all_labels = np.array(all_labels)
+                
+                try:
+                    # Métricas principais
+                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    # Matriz de confusão completa
+                    all_classes = sorted(list(set(all_labels) | set(all_predictions)))
+                    cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
+                    validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
+                    print(f"Confusion matrix shape: {cm.shape}")
+                    
+                except Exception as e:
+                    print(f"Error calculating metrics: {e}")
+                    validation_metrics["precision"] = 0.0
+                    validation_metrics["recall"] = 0.0
+                    validation_metrics["f1_score"] = 0.0
+                    validation_metrics["confusion_matrix"] = [[0]]
+            else:
+                print("No valid predictions collected")
+                validation_metrics["precision"] = 0.0
+                validation_metrics["recall"] = 0.0
+                validation_metrics["f1_score"] = 0.0
+                validation_metrics["confusion_matrix"] = [[0]]
+            
+        else:  # regressão
+            # Coletar todas as predições e verdadeiros para métricas de regressão
+            all_predictions = []
+            all_labels = []
+            
+            model.eval()
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    outputs = model(batch_X)
+                    predicted = outputs.squeeze()
+                    
+                    all_predictions.extend(predicted.cpu().numpy())
+                    all_labels.extend(batch_y.cpu().numpy())
+            
+            # Calcular métricas de regressão
+            from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+            
+            all_predictions = np.array(all_predictions)
+            all_labels = np.array(all_labels)
+            
+            validation_metrics["mae"] = mean_absolute_error(all_labels, all_predictions)
+            validation_metrics["mse"] = mean_squared_error(all_labels, all_predictions)
+            validation_metrics["rmse"] = np.sqrt(validation_metrics["mse"])
+            validation_metrics["r2_score"] = r2_score(all_labels, all_predictions)
+        
         # Preparar resultados
         result = {
             "framework": "pytorch",
@@ -1175,10 +1589,7 @@ class DeepLearningAutoML:
             "config": config,
             "training_time": training_time,
             "history": history,
-            "validation_metrics": {
-                "val_loss": avg_final_val_loss,
-                "val_accuracy": final_val_correct / final_val_total if problem_type == "classification" else None,
-            },
+            "validation_metrics": validation_metrics,
             "input_shape": input_shape,
             "num_classes": num_classes,
         }
@@ -1539,6 +1950,18 @@ class DeepLearningAutoML:
         X_val_np = X_val.values if hasattr(X_val, 'values') else X_val
         y_train_np = y_train.values if hasattr(y_train, 'values') else y_train
         y_val_np = y_val.values if hasattr(y_val, 'values') else y_val
+        
+        # Limpar dados - remover NaN e infinitos
+        X_train_np = np.nan_to_num(X_train_np, nan=0.0, posinf=1e6, neginf=-1e6)
+        X_val_np = np.nan_to_num(X_val_np, nan=0.0, posinf=1e6, neginf=-1e6)
+        y_train_np = np.nan_to_num(y_train_np, nan=0.0, posinf=1e6, neginf=-1e6)
+        y_val_np = np.nan_to_num(y_val_np, nan=0.0, posinf=1e6, neginf=-1e6)
+        
+        # Verificar se há dados válidos
+        if np.any(np.isnan(X_train_np)) or np.any(np.isnan(y_train_np)):
+            raise ValueError("Dados de treinamento contêm NaN após limpeza")
+        if np.any(np.isinf(X_train_np)) or np.any(np.isinf(y_train_np)):
+            raise ValueError("Dados de treinamento contêm valores infinitos após limpeza")
         
         # Detectar se temos dados de texto (NLP) ou dados tabulares
         if self._is_text_data(X_train):
