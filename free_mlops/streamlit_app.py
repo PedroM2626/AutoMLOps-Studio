@@ -22,6 +22,12 @@ from free_mlops.test_models import test_single_prediction
 from free_mlops.test_models import test_batch_prediction
 from free_mlops.test_models import load_test_data_from_uploaded_file
 from free_mlops.test_models import save_test_results
+from free_mlops.monitoring import get_performance_monitor
+from free_mlops.monitoring import get_alert_manager
+from free_mlops.drift_detection import get_drift_detector
+from free_mlops.concept_drift import get_concept_drift_detector
+from free_mlops.hyperopt import get_hyperparameter_optimizer
+from free_mlops.dvc_integration import get_dvc_integration
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -35,7 +41,7 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
-    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Deploy/API"])
+    tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Monitoramento", "Hyperopt", "DVC", "Fine-Tune", "Deploy/API"])
 
     with tabs[0]:
         st.subheader("1) Upload do CSV")
@@ -514,7 +520,444 @@ def main() -> None:
                     except Exception as exc:
                         st.error(f"Erro no fine-tune: {exc}")
 
-    with tabs[4]:
+    with tabs[5]:
+        st.subheader("Hyperparameter Optimization (Optuna)")
+        
+        # Upload de dados para otimização
+        uploaded_opt = st.file_uploader("Dataset para otimização (CSV)", type=["csv"])
+        
+        if uploaded_opt is not None:
+            try:
+                # Ler dados
+                df = pd.read_csv(uploaded_opt)
+                st.write(f"Dataset carregado: {df.shape}")
+                st.dataframe(df.head(), use_container_width=True)
+                
+                # Selecionar target e tipo
+                target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
+                problem_type = st.radio(
+                    "Tipo do problema",
+                    options=["classification", "regression", "multiclass_classification", "binary_classification"],
+                    horizontal=True,
+                )
+                
+                # Selecionar modelo
+                model_options = [
+                    "logistic_regression",
+                    "ridge", 
+                    "lasso",
+                    "elastic_net",
+                    "random_forest_classifier",
+                    "random_forest_regressor", 
+                    "gradient_boosting_classifier",
+                    "gradient_boosting_regressor",
+                    "decision_tree_classifier",
+                    "decision_tree_regressor",
+                    "knn_classifier",
+                    "knn_regressor",
+                    "svr",
+                ]
+                
+                # Filtrar modelos por tipo de problema
+                if problem_type in ["classification", "multiclass_classification", "binary_classification"]:
+                    available_models = [m for m in model_options if "classifier" in m or m in ["logistic_regression"]]
+                else:
+                    available_models = [m for m in model_options if "regressor" in m or m in ["ridge", "lasso", "elastic_net", "svr"]]
+                
+                selected_model = st.selectbox("Modelo para otimizar", options=available_models)
+                
+                # Configurações da otimização
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    n_trials = st.number_input("Número de trials", min_value=10, max_value=1000, value=100)
+                with col2:
+                    cv_folds = st.number_input("CV Folds", min_value=2, max_value=10, value=5)
+                with col3:
+                    timeout = st.number_input("Timeout (segundos, 0 = ilimitado)", min_value=0, value=300, step=60)
+                
+                timeout_seconds = None if timeout == 0 else timeout
+                
+                # Botão para iniciar otimização
+                if st.button("Iniciar Otimização", type="primary"):
+                    with st.spinner("Otimizando hiperparâmetros..."):
+                        try:
+                            # Preparar dados
+                            df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                            feature_cols = [c for c in df_clean.columns if c != target_column]
+                            X = df_clean[feature_cols]
+                            y = df_clean[target_column]
+                            
+                            # Split treino/validação
+                            from sklearn.model_selection import train_test_split
+                            X_train, X_val, y_train, y_val = train_test_split(
+                                X, y, test_size=0.2, random_state=42
+                            )
+                            
+                            # Otimizar
+                            optimizer = get_hyperparameter_optimizer()
+                            result = optimizer.optimize_hyperparameters(
+                                X_train=X_train,
+                                y_train=y_train,
+                                X_val=X_val,
+                                y_val=y_val,
+                                model_name=selected_model,
+                                problem_type=problem_type,
+                                n_trials=n_trials,
+                                timeout=timeout_seconds,
+                                cv_folds=cv_folds,
+                                random_state=42,
+                            )
+                            
+                            st.success("✅ Otimização concluída!")
+                            
+                            # Mostrar resultados
+                            col1, col2, col3 = st.columns(3)
+                            col1.metric("Best Score", f"{result['best_score']:.4f}")
+                            col2.metric("Trials", result['n_trials'])
+                            col3.metric("Modelo", result['model_name'])
+                            
+                            st.write("**Melhores Hiperparâmetros:**")
+                            st.json(result['best_params'])
+                            
+                            st.write("**Métricas de Validação:**")
+                            st.json(result['validation_metrics'])
+                            
+                            # Salvar modelo otimizado
+                            if st.button("Salvar Modelo Otimizado", key=f"save_hyperopt_{result['study_name']}"):
+                                try:
+                                    # Salvar pipeline
+                                    model_path = settings.artifacts_dir / f"hyperopt_{result['study_name']}.pkl"
+                                    import joblib
+                                    joblib.dump(result['best_pipeline'], model_path)
+                                    
+                                    st.success(f"Modelo salvo em: {model_path}")
+                                except Exception as exc:
+                                    st.error(f"Erro ao salvar modelo: {exc}")
+                            
+                        except ImportError:
+                            st.error("Optuna não está instalado. Instale com: pip install optuna")
+                        except Exception as exc:
+                            st.error(f"Erro na otimização: {exc}")
+            
+            except Exception as exc:
+                st.error(f"Erro ao carregar dataset: {exc}")
+        
+        # Histórico de otimizações
+        st.write("**Histórico de Otimizações:**")
+        try:
+            optimizer = get_hyperparameter_optimizer()
+            studies = optimizer.list_studies()
+            
+            if studies:
+                studies_df = pd.DataFrame(studies)
+                st.dataframe(studies_df, use_container_width=True)
+                
+                # Detalhes de estudo selecionado
+                selected_study = st.selectbox(
+                    "Ver detalhes do estudo",
+                    options=[s["study_name"] for s in studies],
+                    key="study_select"
+                )
+                
+                if selected_study:
+                    study_data = next((s for s in studies if s["study_name"] == selected_study), None)
+                    if study_data:
+                        st.write("**Detalhes do Estudo:**")
+                        col1, col2, col3 = st.columns(3)
+                        col1.metric("Modelo", study_data["model_name"])
+                        col2.metric("Tipo", study_data["problem_type"])
+                        col3.metric("Best Score", f"{study_data['best_score']:.4f}")
+                        
+                        # Histórico de trials
+                        history = optimizer.get_optimization_history(selected_study)
+                        if history:
+                            st.write("**Histórico de Trials:**")
+                            history_df = pd.DataFrame([
+                                {
+                                    "Trial": t["number"],
+                                    "Score": t["value"],
+                                    "Estado": t["state"],
+                                    "Parâmetros": str(t["params"])[:100] + "..." if len(str(t["params"])) > 100 else str(t["params"]),
+                                }
+                                for t in history
+                            ])
+                            st.dataframe(history_df, use_container_width=True)
+            else:
+                st.info("Nenhuma otimização realizada ainda.")
+                
+        except Exception as exc:
+            st.error(f"Erro ao carregar histórico: {exc}")
+
+    with tabs[6]:
+        st.subheader("DVC - Data Version Control")
+        
+        dvc = get_dvc_integration()
+        
+        # Status do DVC
+        st.write("**Status do DVC:**")
+        dvc_status = dvc.get_dvc_status()
+        
+        if not dvc_status.get("initialized", False):
+            st.warning("DVC não está inicializado. Use o botão abaixo para inicializar.")
+            
+            if st.button("Inicializar DVC", type="primary"):
+                with st.spinner("Inicializando DVC..."):
+                    try:
+                        result = dvc.initialize_dvc()
+                        if result.get("initialized", False):
+                            st.success("✅ DVC inicializado com sucesso!")
+                            for msg in result.get("messages", []):
+                                st.info(msg)
+                            st.experimental_rerun()
+                        else:
+                            st.error("❌ Erro ao inicializar DVC")
+                            for msg in result.get("messages", []):
+                                st.error(msg)
+                    except Exception as exc:
+                        st.error(f"Erro: {exc}")
+        else:
+            st.success("✅ DVC está inicializado e pronto para uso")
+            
+            # Tabs DVC
+            dvc_tabs = st.tabs(["Datasets", "Pipelines", "Linhagem"])
+            
+            with dvc_tabs[0]:
+                st.subheader("Gerenciamento de Datasets")
+                
+                # Upload de novo dataset
+                st.write("**Adicionar Novo Dataset:**")
+                dataset_file = st.file_uploader("Upload Dataset (CSV)", type=["csv"])
+                
+                if dataset_file is not None:
+                    with st.form("add_dataset_form"):
+                        dataset_name = st.text_input("Nome do Dataset", value=dataset_file.name.replace('.csv', ''))
+                        dataset_type = st.selectbox("Tipo", options=["raw", "processed", "models"])
+                        description = st.text_area("Descrição (opcional)")
+                        tags_input = st.text_input("Tags (separadas por vírgula)")
+                        
+                        submitted = st.form_submit_button("Adicionar Dataset ao DVC")
+                        
+                        if submitted:
+                            try:
+                                # Salvar arquivo temporariamente
+                                temp_path = settings.data_dir / f"temp_{dataset_name}.csv"
+                                temp_path.write_bytes(dataset_file.getvalue())
+                                
+                                tags = [tag.strip() for tag in tags_input.split(",")] if tags_input else []
+                                
+                                result = dvc.add_dataset(
+                                    dataset_path=temp_path,
+                                    dataset_name=dataset_name,
+                                    dataset_type=dataset_type,
+                                    description=description,
+                                    tags=tags,
+                                    metadata={"original_filename": dataset_file.name}
+                                )
+                                
+                                if result["success"]:
+                                    st.success(f"✅ Dataset {dataset_name} adicionado ao DVC!")
+                                    st.info(result["message"])
+                                else:
+                                    st.error("❌ Erro ao adicionar dataset")
+                                
+                                # Limpar arquivo temporário
+                                temp_path.unlink(missing_ok=True)
+                                
+                            except Exception as exc:
+                                st.error(f"Erro: {exc}")
+                                # Limpar arquivo temporário
+                                temp_path.unlink(missing_ok=True)
+                
+                # Listar datasets
+                st.write("**Datasets Existentes:**")
+                try:
+                    datasets = dvc.list_datasets()
+                    
+                    if datasets:
+                        # Filtros
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            filter_type = st.selectbox("Filtrar por tipo", options=["todos", "raw", "processed", "models"])
+                        with col2:
+                            filter_tags = st.text_input("Filtrar por tags")
+                        
+                        # Aplicar filtros
+                        filtered_datasets = datasets
+                        if filter_type != "todos":
+                            filtered_datasets = [d for d in filtered_datasets if d.get("type") == filter_type]
+                        if filter_tags:
+                            filter_tag_list = [tag.strip() for tag in filter_tags.split(",")]
+                            filtered_datasets = [d for d in filtered_datasets if any(tag in d.get("tags", []) for tag in filter_tag_list)]
+                        
+                        if filtered_datasets:
+                            datasets_df = pd.DataFrame([
+                                {
+                                    "Nome": d["name"],
+                                    "Tipo": d["type"],
+                                    "Tamanho (bytes)": d["file_size"],
+                                    "Criado em": d["created_at"][:19],
+                                    "Tags": ", ".join(d.get("tags", [])),
+                                    "Descrição": d.get("description", "")[:50] + "..." if len(d.get("description", "")) > 50 else d.get("description", ""),
+                                }
+                                for d in filtered_datasets
+                            ])
+                            st.dataframe(datasets_df, use_container_width=True)
+                            
+                            # Detalhes do dataset selecionado
+                            selected_dataset = st.selectbox(
+                                "Ver detalhes",
+                                options=[d["name"] for d in filtered_datasets],
+                                key="dataset_select"
+                            )
+                            
+                            if selected_dataset:
+                                dataset_info = dvc.get_dataset_info(selected_dataset)
+                                if dataset_info:
+                                    st.write("**Detalhes do Dataset:**")
+                                    st.json(dataset_info)
+                                    
+                                    # Versões
+                                    versions = dvc.get_dataset_versions(selected_dataset)
+                                    if versions:
+                                        st.write("**Versões:**")
+                                        versions_df = pd.DataFrame(versions)
+                                        st.dataframe(versions_df, use_container_width=True)
+                                        
+                                        # Checkout de versão
+                                        selected_version = st.selectbox(
+                                            "Fazer checkout de versão",
+                                            options=[v["hash"] for v in versions],
+                                            format_func=lambda x: f"{x[:8]} - {v.get('date', '')}",
+                                            key="version_select"
+                                        )
+                                        
+                                        if st.button("Fazer Checkout", key=f"checkout_{selected_dataset}"):
+                                            try:
+                                                result = dvc.checkout_dataset_version(selected_dataset, selected_version)
+                                                if result["success"]:
+                                                    st.success(f"✅ {result['message']}")
+                                                    st.info(f"Arquivo restaurado em: {result['target_path']}")
+                                                else:
+                                                    st.error("❌ Erro no checkout")
+                                            except Exception as exc:
+                                                st.error(f"Erro: {exc}")
+                        else:
+                            st.info("Nenhum dataset encontrado com os filtros selecionados.")
+                    else:
+                        st.info("Nenhum dataset encontrado. Adicione um dataset usando o formulário acima.")
+                        
+                except Exception as exc:
+                    st.error(f"Erro ao listar datasets: {exc}")
+            
+            with dvc_tabs[1]:
+                st.subheader("Pipelines DVC")
+                
+                # Criar novo pipeline
+                st.write("**Criar Pipeline:**")
+                with st.form("create_pipeline_form"):
+                    pipeline_name = st.text_input("Nome do Pipeline")
+                    pipeline_desc = st.text_area("Descrição (opcional)")
+                    
+                    st.write("**Estágios do Pipeline:**")
+                    stages = []
+                    stage_count = st.number_input("Número de estágios", min_value=1, max_value=10, value=1)
+                    
+                    for i in range(stage_count):
+                        with st.expander(f"Estágio {i+1}"):
+                            stage_name = st.text_input(f"Nome do estágio {i+1}", value=f"stage_{i+1}", key=f"stage_name_{i}")
+                            stage_cmd = st.text_input(f"Comando", value=f"echo 'Stage {i+1}'", key=f"stage_cmd_{i}")
+                            stage_deps = st.text_input(f"Dependências (separadas por espaço)", key=f"stage_deps_{i}")
+                            stage_outs = st.text_input(f"Outputs (separados por espaço)", key=f"stage_outs_{i}")
+                            
+                            stages.append({
+                                "name": stage_name,
+                                "cmd": stage_cmd,
+                                "deps": stage_deps.split() if stage_deps else [],
+                                "outs": stage_outs.split() if stage_outs else [],
+                            })
+                    
+                    submitted = st.form_submit_button("Criar Pipeline")
+                    
+                    if submitted:
+                        try:
+                            result = dvc.create_pipeline(pipeline_name, stages, pipeline_desc)
+                            if result["success"]:
+                                st.success(f"✅ Pipeline {pipeline_name} criado!")
+                                st.info(result["message"])
+                            else:
+                                st.error("❌ Erro ao criar pipeline")
+                        except Exception as exc:
+                            st.error(f"Erro: {exc}")
+                
+                # Executar pipeline
+                st.write("**Executar Pipeline:**")
+                if st.button("Executar Pipeline Atual", type="primary"):
+                    with st.spinner("Executando pipeline..."):
+                        try:
+                            result = dvc.run_pipeline("current")
+                            if result["success"]:
+                                st.success("✅ Pipeline executado com sucesso!")
+                                if result.get("stdout"):
+                                    st.code(result["stdout"])
+                            else:
+                                st.error("❌ Erro na execução do pipeline")
+                                if result.get("stderr"):
+                                    st.error(result["stderr"])
+                        except Exception as exc:
+                            st.error(f"Erro: {exc}")
+            
+            with dvc_tabs[2]:
+                st.subheader("Linhagem de Dados")
+                
+                # Selecionar dataset para análise
+                try:
+                    datasets = dvc.list_datasets()
+                    if datasets:
+                        selected_lineage_dataset = st.selectbox(
+                            "Selecionar Dataset para Análise de Linhagem",
+                            options=[d["name"] for d in datasets],
+                            key="lineage_dataset_select"
+                        )
+                        
+                        if selected_lineage_dataset:
+                            with st.spinner("Analisando linhagem..."):
+                                lineage = dvc.get_data_lineage(selected_lineage_dataset)
+                                
+                                if "error" in lineage:
+                                    st.error(f"Erro na análise: {lineage['error']}")
+                                else:
+                                    st.write("**Linhagem de Dados:**")
+                                    
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        st.metric("Dataset", lineage["dataset"])
+                                        st.metric("Dependências", len(lineage.get("dependencies", [])))
+                                    with col2:
+                                        st.metric("Downstream", len(lineage.get("downstream", [])))
+                                    
+                                    # Dependências
+                                    if lineage.get("dependencies"):
+                                        st.write("**Dependências (Datasets de entrada):**")
+                                        for dep in lineage["dependencies"]:
+                                            st.write(f"- {dep}")
+                                    
+                                    # Downstream
+                                    if lineage.get("downstream"):
+                                        st.write("**Downstream (Datasets gerados):**")
+                                        for down in lineage["downstream"]:
+                                            st.write(f"- {down}")
+                                    
+                                    # Grafo (se disponível)
+                                    if lineage.get("graph"):
+                                        st.write("**Grafo de Dependências:**")
+                                        st.code(lineage["graph"])
+                    else:
+                        st.info("Nenhum dataset encontrado. Adicione datasets primeiro.")
+                        
+                except Exception as exc:
+                    st.error(f"Erro na análise de linhagem: {exc}")
+
+    with tabs[7]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
