@@ -168,6 +168,55 @@ python start_mlflow.py
 
 Acesse: `http://localhost:5000`
 
+### 🐳 Docker (Recomendado para produção)
+```bash
+# Build e iniciar todos os serviços
+./docker-run.sh run
+
+# Ou individualmente
+./docker-run.sh streamlit    # Apenas Streamlit
+./docker-run.sh mlflow       # Apenas MLflow
+./docker-run.sh api          # Apenas API
+
+# Parar serviços
+./docker-run.sh stop
+
+# Ver logs
+./docker-run.sh logs
+
+# Limpar tudo
+./docker-run.sh cleanup
+```
+
+**Acessar serviços:**
+- 🌐 Streamlit: http://localhost:8501
+- 📊 MLflow UI: http://localhost:5000
+- 🔌 API Docs: http://localhost:8000/docs
+
+### ☸️ Kubernetes (Para clusters)
+```bash
+# Deploy completo
+./k8s-deploy.sh deploy
+
+# Com ingress
+./k8s-deploy.sh deploy --ingress
+
+# Ver status
+./k8s-deploy.sh status
+
+# Ver logs
+./k8s-deploy.sh logs free-mlops-app
+
+# Escalar
+./k8s-deploy.sh scale free-mlops-app 3
+
+# Atualizar
+./k8s-deploy.sh update
+
+# Remover
+./k8s-deploy.sh delete
+```
+
 ### API REST
 ```bash
 python -m free_mlops.api
@@ -229,6 +278,19 @@ free-mlops/
 ├── requirements-dev.txt            # Dependências de desenvolvimento
 ├── install_optional.py             # Instalador guiado de dependências opcionais
 ├── start_mlflow.py                 # Script para iniciar MLflow UI
+├── docker-run.sh                   # Script Docker para automação
+├── k8s-deploy.sh                   # Script Kubernetes para deploy
+├── Dockerfile                      # Docker image definition
+├── docker-compose.yml              # Docker Compose configuration
+├── .dockerignore                   # Docker ignore file
+├── k8s/                            # Kubernetes manifests
+│   ├── namespace.yaml              # Namespace definition
+│   ├── app-deployment.yaml         # Streamlit app deployment
+│   ├── mlflow-deployment.yaml      # MLflow deployment
+│   ├── api-deployment.yaml         # API deployment
+│   ├── persistent-volumes.yaml     # PVCs for data persistence
+│   ├── ingress.yaml                # Ingress configuration
+│   └── configmap.yaml              # Configuration maps
 └── README.md                       # Este arquivo
 ```
 
@@ -337,6 +399,84 @@ Interpretação de modelos com SHAP e Captum:
 - Identificação de features importantes
 - Conformidade regulatória (GDPR, etc.)
 - Debugging e melhoria de modelos
+
+---
+
+## 🐳 Docker & Kubernetes
+
+### **Por que usar Docker/Kubernetes?**
+- ✅ **Consistência**: Mesmo ambiente em qualquer máquina
+- ✅ **Portabilidade**: Roda em qualquer lugar com Docker/K8s
+- ✅ **Escalabilidade**: Fácil escalar horizontalmente
+- ✅ **Isolamento**: Dependências isoladas e reproduzíveis
+- ✅ **Deploy**: Deploy automatizado e versionado
+
+### **🐳 Docker Features**
+- **Multi-service**: Streamlit + MLflow + API
+- **Volumes persistentes**: Dados preservados entre restarts
+- **Health checks**: Monitoramento automático de saúde
+- **Environment variables**: Configuração externa
+- **Optimized images**: Python slim base + cache eficiente
+
+### **☸️ Kubernetes Features**
+- **Auto-scaling**: HPA e VPA support
+- **Self-healing**: Restart automático de pods falhos
+- **Rolling updates**: Deploy sem downtime
+- **Load balancing**: Distribuição automática de tráfego
+- **Persistent storage**: PVCs para dados duráveis
+- **Ingress**: Single endpoint com TLS
+
+### **🔧 Arquitetura de Containers**
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   Streamlit     │    │     MLflow      │    │   FastAPI       │
+│   (UI Web)      │    │   (Tracking)    │    │   (REST API)    │
+│   Port: 8501    │    │   Port: 5000    │    │   Port: 8000    │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                       │                       │
+         └───────────────────────┼───────────────────────┘
+                                 │
+                    ┌─────────────────┐
+                    │   Shared Data   │
+                    │   Volumes:       │
+                    │   • /data        │
+                    │   • /artifacts   │
+                    │   • /models      │
+                    │   • /mlruns      │
+                    └─────────────────┘
+```
+
+### **🚀 Quick Start Docker**
+```bash
+# 1. Build e run tudo
+./docker-run.sh run
+
+# 2. Acessar serviços
+open http://localhost:8501  # Streamlit
+open http://localhost:5000  # MLflow
+open http://localhost:8000/docs  # API
+
+# 3. Ver status
+docker-compose ps
+
+# 4. Ver logs
+./docker-run.sh logs app
+```
+
+### **☸️ Quick Start Kubernetes**
+```bash
+# 1. Deploy no cluster
+./k8s-deploy.sh deploy
+
+# 2. Ver status
+./k8s-deploy.sh status
+
+# 3. Acessar (port-forward)
+kubectl port-forward svc/free-mlops-app-service 8501:8501 -n free-mlops
+
+# 4. Escalar
+./k8s-deploy.sh scale free-mlops-app 3
+```
 
 ---
 

@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: free-mlops-app
+  namespace: free-mlops
+  labels:
+    app: free-mlops
+    component: app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: free-mlops
+      component: app
+  template:
+    metadata:
+      labels:
+        app: free-mlops
+        component: app
+    spec:
+      containers:
+      - name: app
+        image: free-mlops:latest
+        ports:
+        - containerPort: 8501
+        env:
+        - name: PYTHONPATH
+          value: "/app"
+        - name: STREAMLIT_SERVER_ADDRESS
+          value: "0.0.0.0"
+        - name: STREAMLIT_SERVER_PORT
+          value: "8501"
+        - name: STREAMLIT_SERVER_HEADLESS
+          value: "true"
+        - name: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+          value: "false"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        livenessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /_stcore/health
+            port: 8501
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: data-volume
+          mountPath: /app/data
+        - name: artifacts-volume
+          mountPath: /app/artifacts
+        - name: models-volume
+          mountPath: /app/models
+      volumes:
+      - name: data-volume
+        persistentVolumeClaim:
+          claimName: free-mlops-data-pvc
+      - name: artifacts-volume
+        persistentVolumeClaim:
+          claimName: free-mlops-artifacts-pvc
+      - name: models-volume
+        persistentVolumeClaim:
+          claimName: free-mlops-models-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: free-mlops-app-service
+  namespace: free-mlops
+  labels:
+    app: free-mlops
+    component: app
+spec:
+  selector:
+    app: free-mlops
+    component: app
+  ports:
+  - protocol: TCP
+    port: 8501
+    targetPort: 8501
+  type: LoadBalancer

@@ -579,11 +579,11 @@ def main() -> None:
                 # Configurações da otimização
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    n_trials = st.number_input("Número de trials", min_value=10, max_value=1000, value=100)
+                    n_trials = st.number_input("Número de trials", min_value=10, max_value=1000, value=100, key="opt_n_trials")
                 with col2:
-                    cv_folds = st.number_input("CV Folds", min_value=2, max_value=10, value=5)
+                    cv_folds = st.number_input("CV Folds", min_value=2, max_value=10, value=5, key="opt_cv_folds")
                 with col3:
-                    timeout = st.number_input("Timeout (segundos, 0 = ilimitado)", min_value=0, value=300, step=60)
+                    timeout = st.number_input("Timeout (segundos, 0 = ilimitado)", min_value=0, value=300, step=60, key="opt_timeout")
                 
                 timeout_seconds = None if timeout == 0 else timeout
                 
@@ -1290,11 +1290,11 @@ def main() -> None:
                     with st.expander("Configurações Avançadas"):
                         col1, col2 = st.columns(2)
                         with col1:
-                            epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100)
-                            batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32)
-                            learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, format="%.4f")
+                            epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="dl_epochs")
+                            batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="dl_batch_size")
+                            learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="dl_lr")
                         with col2:
-                            dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, format="%.2f")
+                            dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dl_dropout")
                             optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
                         
                         # Configurações específicas por tipo de modelo
@@ -1690,23 +1690,23 @@ def main() -> None:
                 col1, col2 = st.columns(2)
                 with col1:
                     embedding_dim = st.number_input("Embedding Dim", min_value=4, max_value=64, value=8, key="tab_embedding_dim")
-                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], value=8, key="tab_num_heads")
-                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], value=6, key="tab_num_layers")
+                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8, 16], index=3, key="tab_num_heads")
+                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=2, key="tab_num_layers")
                 with col2:
                     hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="tab_hidden_dim")
-                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, format="%.2f", key="tab_dropout")
-                    scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], value="cosine", key="tab_scheduler")
+                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, key="tab_dropout")
+                    scheduler = st.selectbox("Scheduler", options=["cosine", "plateau", "cyclic"], index=0, key="tab_scheduler")
             
             elif model_type == "vision_transformer":
                 col1, col2 = st.columns(2)
                 with col1:
-                    patch_size = st.selectbox("Patch Size", options=[2, 4, 8], value=4, key="vit_patch_size")
+                    patch_size = st.selectbox("Patch Size", options=[2, 4, 8], index=1, key="vit_patch_size")
                     embedding_dim = st.number_input("Embedding Dim", min_value=32, max_value=128, value=64, key="vit_embedding_dim")
-                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8], value=4, key="vit_num_heads")
+                    num_heads = st.selectbox("Num Heads", options=[2, 4, 8], index=1, key="vit_num_heads")
                 with col2:
-                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], value=4, key="vit_num_layers")
+                    num_layers = st.selectbox("Num Layers", options=[2, 4, 6, 8], index=1, key="vit_num_layers")
                     hidden_dim = st.number_input("Hidden Dim", min_value=64, max_value=256, value=128, key="vit_hidden_dim")
-                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, format="%.2f", key="vit_dropout")
+                    dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.1, key="vit_dropout")
                 scheduler = "cosine"  # Default for Vision Transformer
             
             # Training parameters
@@ -1717,7 +1717,7 @@ def main() -> None:
             with col2:
                 batch_size = st.number_input("Batch Size", min_value=8, max_value=128, value=32, key="adv_batch_size")
             with col3:
-                learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, format="%.4f", key="adv_lr")
+                learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.01, value=0.001, key="adv_lr")
             
             # MLflow tracking
             enable_mlflow = st.checkbox("📊 Habilitar MLflow Tracking", value=True, key="enable_mlflow")
@@ -1886,7 +1886,7 @@ def main() -> None:
                                 weekly_seasonality = st.selectbox("Sazonalidade Semanal", options=["auto", True, False])
                             with col2:
                                 daily_seasonality = st.selectbox("Sazonalidade Diária", options=["auto", True, False])
-                                changepoint_prior = st.number_input("Changepoint Prior Scale", min_value=0.01, max_value=0.5, value=0.05, format="%.3f")
+                                changepoint_prior = st.number_input("Changepoint Prior Scale", min_value=0.01, max_value=0.5, value=0.05, key="changepoint_prior")
                         
                         elif model_type == "lstm":
                             col1, col2 = st.columns(2)
@@ -1895,7 +1895,7 @@ def main() -> None:
                                 epochs = st.number_input("Épocas", min_value=10, max_value=200, value=100)
                             with col2:
                                 batch_size = st.number_input("Batch Size", min_value=8, max_value=64, value=32)
-                                dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.2, format="%.2f")
+                                dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.5, value=0.2, key="lstm_dropout")
                     
                     # Test size
                     test_size = st.number_input("Período de Teste (dias)", min_value=7, max_value=365, value=30)
