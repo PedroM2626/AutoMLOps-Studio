@@ -17,6 +17,7 @@ from free_mlops.registry import list_registered_models
 from free_mlops.registry import register_model
 from free_mlops.registry import download_model_package
 from free_mlops.db_delete import delete_experiment
+from free_mlops.registry_delete import delete_registered_model
 
 
 def _read_bytes(path: Path) -> bytes:
@@ -128,10 +129,11 @@ def main() -> None:
             if record:
                 st.subheader("Resultados")
 
-                col1, col2, col3 = st.columns(3)
+                col1, col2, col3, col4 = st.columns(4)
                 col1.metric("Experiment ID", record["id"])
                 col2.metric("Melhor modelo", record["best_model_name"])
                 col3.metric("Tipo", record["problem_type"])
+                col4.metric("Tempo de treino", f"{record.get('model_metadata', {}).get('training_time_seconds', 0):.2f}s")
 
                 st.write("Métricas detalhadas")
                 st.json(record["best_metrics"])
@@ -182,6 +184,7 @@ def main() -> None:
                         "problem_type": e["problem_type"],
                         "target_column": e["target_column"],
                         "best_model_name": e["best_model_name"],
+                        "training_time_seconds": e.get("model_metadata", {}).get("training_time_seconds", 0),
                     }
                     for e in experiments
                 ]
@@ -237,6 +240,7 @@ def main() -> None:
                         "problem_type": r["problem_type"],
                         "target": r["target_column"],
                         "created_at": r["created_at"],
+                        "training_time_seconds": r.get("model_metadata", {}).get("training_time_seconds", 0),
                     }
                     for r in registered
                 ]
@@ -279,6 +283,15 @@ def main() -> None:
                         mime="application/octet-stream",
                         key=f"download_reg_{selected_reg['id']}",
                     )
+
+                # Botão para excluir modelo registrado
+                if st.button("Excluir modelo registrado", key=f"delete_reg_{selected_reg['id']}"):
+                    try:
+                        delete_registered_model(settings.db_path, selected_reg['id'])
+                        st.success(f"Modelo registrado {selected_reg['id']} excluído")
+                        st.experimental_rerun()
+                    except Exception as exc:
+                        st.error(f"Erro ao excluir modelo registrado: {exc}")
 
     with tabs[3]:
         st.subheader("Fine-Tune (ajuste de hiperparâmetros)")
@@ -363,6 +376,10 @@ def main() -> None:
                                 "metrics": result["metrics"],
                             }
                         )
+                        
+                        # Botão para excluir resultado do fine-tune (apenas da UI)
+                        if st.button("Limpar resultado do fine-tune", key="clear_finetune"):
+                            st.experimental_rerun()
                     except Exception as exc:
                         st.error(f"Erro no fine-tune: {exc}")
 

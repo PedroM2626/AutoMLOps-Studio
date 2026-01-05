@@ -44,6 +44,7 @@ class AutoMLResult:
     best_pipeline: Any
     best_metrics: dict[str, Any]
     leaderboard: list[dict[str, Any]]
+    training_time_seconds: float
 
 
 def _infer_columns(X: pd.DataFrame) -> tuple[list[str], list[str]]:
@@ -166,7 +167,7 @@ def run_automl(
 
     candidates: dict[str, Any]
 
-    if problem_type == "classification":
+    if problem_type == "classification" or problem_type == "multiclass_classification" or problem_type == "binary_classification":
         all_candidates = {
             "logistic_regression": LogisticRegression(max_iter=2000),
             "linear_svc": LinearSVC(max_iter=5000, dual=False),
@@ -220,7 +221,7 @@ def run_automl(
                 except Exception:
                     y_proba = None
 
-            if problem_type == "classification":
+            if problem_type == "classification" or problem_type == "multiclass_classification" or problem_type == "binary_classification":
                 metrics = _classification_metrics(y_test, y_pred, y_proba)
                 score = float(metrics.get("f1_weighted", 0.0))
             else:
@@ -258,6 +259,7 @@ def run_automl(
     best_model.fit(X_train_pre, y_train)
 
     best_metrics = dict(best_row.get("metrics", {}))
+    training_time = time.time() - start_time
 
     best_pipeline = Pipeline(steps=[("preprocess", preprocessor), ("model", best_model)])
 
@@ -266,4 +268,5 @@ def run_automl(
         best_pipeline=best_pipeline,
         best_metrics=best_metrics,
         leaderboard=leaderboard,
+        training_time_seconds=training_time,
     )

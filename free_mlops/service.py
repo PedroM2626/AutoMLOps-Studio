@@ -168,6 +168,7 @@ def run_experiment(
         "n_cols": int(df.shape[1]),
         "best_metrics": automl_result.best_metrics,
         "leaderboard": automl_result.leaderboard,
+        "training_time_seconds": automl_result.training_time_seconds,
     }
 
     metadata_path = artifact_dir / "metadata.json"
