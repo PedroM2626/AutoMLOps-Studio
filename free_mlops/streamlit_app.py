@@ -78,7 +78,7 @@ def main() -> None:
             st.write("Prévia do dataset")
             st.dataframe(df.head(200), width='stretch')
 
-            target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
+            target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
             problem_type = st.radio(
                 "Tipo do problema",
                 options=["classification", "regression", "multiclass_classification", "binary_classification"],
@@ -204,7 +204,7 @@ def main() -> None:
             )
             st.dataframe(df_exp, use_container_width=True)
 
-            selected_id = st.selectbox("Ver detalhes", options=[e["id"] for e in experiments])
+            selected_id = st.selectbox("Ver detalhes", options=[e["id"] for e in experiments], key="exp_details")
             selected = next((e for e in experiments if e["id"] == selected_id), None)
             if selected:
                 st.write("Métricas")
@@ -327,7 +327,7 @@ def main() -> None:
                 f"{m['id']} – {m['best_model_name']} ({'Registrado' if m in registered else 'Experimento'})": m 
                 for m in all_models
             }
-            selected_label = st.selectbox("Escolha um modelo para testar", options=list(model_options.keys()))
+            selected_label = st.selectbox("Escolha um modelo para testar", options=list(model_options.keys()), key="test_model_select")
             selected_model = model_options[selected_label]
 
             model_path = Path(selected_model["model_path"])
@@ -446,7 +446,7 @@ def main() -> None:
             st.info("Nenhum experimento encontrado para fine-tune.")
         else:
             exp_options = {f"{e['id']} – {e['best_model_name']}": e for e in experiments}
-            selected_label = st.selectbox("Escolha um experimento para fine-tune", options=list(exp_options.keys()))
+            selected_label = st.selectbox("Escolha um experimento para fine-tune", options=list(exp_options.keys()), key="finetune_exp_select")
             selected_exp = exp_options[selected_label]
 
             st.write("Detalhes do experimento base")
@@ -468,6 +468,7 @@ def main() -> None:
                     "svr",
                 ],
                 index=0,
+                key="finetune_model_select",
             )
 
             search_type = st.radio("Tipo de busca", options=["grid", "random"], horizontal=True)
@@ -537,7 +538,7 @@ def main() -> None:
                 st.dataframe(df.head(), use_container_width=True)
                 
                 # Selecionar target e tipo
-                target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
+                target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
                 problem_type = st.radio(
                     "Tipo do problema",
                     options=["classification", "regression", "multiclass_classification", "binary_classification"],
@@ -567,7 +568,7 @@ def main() -> None:
                 else:
                     available_models = [m for m in model_options if "regressor" in m or m in ["ridge", "lasso", "elastic_net", "svr"]]
                 
-                selected_model = st.selectbox("Modelo para otimizar", options=available_models)
+                selected_model = st.selectbox("Modelo para otimizar", options=available_models, key="opt_model_select")
                 
                 # Configurações da otimização
                 col1, col2, col3 = st.columns(3)
@@ -734,7 +735,7 @@ def main() -> None:
                 if dataset_file is not None:
                     with st.form("add_dataset_form"):
                         dataset_name = st.text_input("Nome do Dataset", value=dataset_file.name.replace('.csv', ''))
-                        dataset_type = st.selectbox("Tipo", options=["raw", "processed", "models"])
+                        dataset_type = st.selectbox("Tipo", options=["raw", "processed", "models"], key="dataset_type_select")
                         description = st.text_area("Descrição (opcional)")
                         tags_input = st.text_input("Tags (separadas por vírgula)")
                         
@@ -780,7 +781,7 @@ def main() -> None:
                         # Filtros
                         col1, col2 = st.columns(2)
                         with col1:
-                            filter_type = st.selectbox("Filtrar por tipo", options=["todos", "raw", "processed", "models"])
+                            filter_type = st.selectbox("Filtrar por tipo", options=["todos", "raw", "processed", "models"], key="filter_type_select")
                         with col2:
                             filter_tags = st.text_input("Filtrar por tags")
                         
@@ -1167,7 +1168,7 @@ def main() -> None:
                         
                         # Exportar schema
                         st.write("**Exportar Schema:**")
-                        export_format = st.selectbox("Formato", options=["json", "python"])
+                        export_format = st.selectbox("Formato", options=["json", "python"], key="export_format_select")
                         
                         if st.button("Exportar Schema", key=f"export_{selected_details_schema}"):
                             try:
@@ -1191,9 +1192,9 @@ def main() -> None:
             if len(schemas) >= 2:
                 col1, col2 = st.columns(2)
                 with col1:
-                    schema1 = st.selectbox("Schema 1", options=[s["name"] for s in schemas])
+                    schema1 = st.selectbox("Schema 1", options=[s["name"] for s in schemas], key="schema1_select")
                 with col2:
-                    schema2 = st.selectbox("Schema 2", options=[s["name"] for s in schemas])
+                    schema2 = st.selectbox("Schema 2", options=[s["name"] for s in schemas], key="schema2_select")
                 
                 if schema1 and schema2 and schema1 != schema2:
                     if st.button("Comparar Schemas", type="primary"):
@@ -1260,7 +1261,7 @@ def main() -> None:
                     st.dataframe(df.head(), use_container_width=True)
                     
                     # Configurações
-                    target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns))
+                    target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
                     problem_type = st.radio(
                         "Tipo do problema",
                         options=["classification", "regression"],
@@ -1270,12 +1271,13 @@ def main() -> None:
                     # Framework e tipo de modelo
                     col1, col2 = st.columns(2)
                     with col1:
-                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"])
+                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
                     with col2:
                         model_type = st.selectbox(
                             "Tipo de Modelo",
                             options=["mlp", "cnn", "lstm"],
-                            help="MLP: dados tabulares, CNN: imagens, LSTM: sequências/temporal"
+                            help="MLP: dados tabulares, CNN: imagens, LSTM: sequências/temporal",
+                            key="dl_model_type"
                         )
                     
                     # Configurações avançadas
@@ -1576,8 +1578,8 @@ def main() -> None:
         with dl_tabs[3]:
             st.subheader("Configurações Padrão")
             
-            framework_config = st.selectbox("Framework", options=["tensorflow", "pytorch"])
-            model_config = st.selectbox("Modelo", options=["mlp", "cnn", "lstm"])
+            framework_config = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="default_framework")
+            model_config = st.selectbox("Modelo", options=["mlp", "cnn", "lstm"], key="default_model")
             
             config = dl_automl.default_configs[framework_config][model_config]
             
@@ -1610,15 +1612,16 @@ def main() -> None:
                     # Configurações
                     col1, col2 = st.columns(2)
                     with col1:
-                        date_column = st.selectbox("Coluna de Data", options=list(df.columns))
+                        date_column = st.selectbox("Coluna de Data", options=list(df.columns), key="ts_date_col")
                     with col2:
-                        value_column = st.selectbox("Coluna de Valor", options=[c for c in df.columns if c != date_column])
+                        value_column = st.selectbox("Coluna de Valor", options=[c for c in df.columns if c != date_column], key="ts_value_col")
                     
                     # Tipo de modelo
                     model_type = st.selectbox(
                         "Tipo de Modelo",
                         options=["arima", "prophet", "lstm"],
-                        help="ARIMA: estatístico tradicional, Prophet: Facebook, LSTM: Deep Learning"
+                        help="ARIMA: estatístico tradicional, Prophet: Facebook, LSTM: Deep Learning",
+                        key="ts_model_type"
                     )
                     
                     # Configurações específicas
@@ -2242,7 +2245,7 @@ def main() -> None:
             experiments = list_experiment_records(settings=settings, limit=200, offset=0)
             if experiments:
                 model_options = {f"{e['id']} – {e['best_model_name']}": e for e in experiments}
-                selected_label = st.selectbox("Selecione um modelo para monitorar", options=list(model_options.keys()))
+                selected_label = st.selectbox("Selecione um modelo para monitorar", options=list(model_options.keys()), key="monitor_model_select")
                 selected_exp = model_options[selected_label]
                 
                 # Inicializar monitor
