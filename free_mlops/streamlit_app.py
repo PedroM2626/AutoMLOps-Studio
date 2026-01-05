@@ -45,6 +45,11 @@ def main() -> None:
 
     st.title("Free MLOps (MVP)")
 
+    # Initialize variables to avoid UnboundLocalError
+    df = None
+    target_column = None
+    problem_type = "classification"
+
     tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Deep Learning", "Advanced DL", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
@@ -2474,7 +2479,7 @@ def main() -> None:
                 except Exception as exc:
                     st.error(f"Erro ao ler dataset: {exc}")
 
-    with tabs[10]:
+    with tabs[11]:
         st.subheader("Monitoramento")
         
         # Selecionar modelo para monitorar
@@ -2527,7 +2532,7 @@ def main() -> None:
         except Exception as exc:
             st.error(f"Erro no monitoramento: {exc}")
 
-    with tabs[11]:
+    with tabs[12]:
         st.subheader("Deploy local (API)")
         st.write("Para subir a API localmente:")
         st.code("python -m free_mlops.api")
