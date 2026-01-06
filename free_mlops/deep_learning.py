@@ -11,6 +11,61 @@ import pandas as pd
 
 from free_mlops.config import get_settings
 
+# Import PyTorch no nível do módulo para evitar problemas de escopo
+try:
+    import torch
+    import torch.nn as nn
+    PYTORCH_AVAILABLE = True
+except ImportError:
+    PYTORCH_AVAILABLE = False
+
+
+class MLPModule(nn.Module):
+    """MLP Module for PyTorch - definido como classe de nível superior."""
+    
+    def __init__(self, input_dim, hidden_layers, dropout_rate, num_classes, problem_type, activation="relu"):
+        super(MLPModule, self).__init__()
+        
+        layers = []
+        prev_dim = input_dim
+        
+        # Mapear activations
+        activation_map = {
+            "relu": nn.ReLU,
+            "tanh": nn.Tanh,
+            "sigmoid": nn.Sigmoid,
+            "leaky_relu": nn.LeakyReLU,
+            "elu": nn.ELU,
+            "gelu": nn.GELU
+        }
+        
+        activation_fn = activation_map.get(activation, nn.ReLU)
+        
+        for units in hidden_layers:
+            layers.append(nn.Linear(prev_dim, units))
+            layers.append(activation_fn())
+            if dropout_rate > 0:
+                layers.append(nn.Dropout(dropout_rate))
+            prev_dim = units
+        
+        # Output layer
+        if problem_type == "classification":
+            if num_classes == 2:
+                layers.append(nn.Linear(prev_dim, 1))
+                layers.append(nn.Sigmoid())
+            else:
+                layers.append(nn.Linear(prev_dim, num_classes))
+                layers.append(nn.Softmax(dim=1))
+        else:
+            layers.append(nn.Linear(prev_dim, 1))
+        
+        self.network = nn.Sequential(*layers)
+    
+    def forward(self, x):
+        return self.network(x)
+
+
+
 
 class DeepLearningAutoML:
     """AutoML para Deep Learning com suporte a TensorFlow e PyTorch."""
@@ -242,50 +297,8 @@ class DeepLearningAutoML:
         train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], shuffle=False)
         
-        # Definir modelo
-        class MLP(nn.Module):
-            def __init__(self, input_dim, hidden_layers, dropout_rate, num_classes, problem_type, activation="relu"):
-                super(MLP, self).__init__()
-                
-                layers = []
-                prev_dim = input_dim
-                
-                # Mapear activations
-                activation_map = {
-                    "relu": nn.ReLU,
-                    "tanh": nn.Tanh,
-                    "sigmoid": nn.Sigmoid,
-                    "leaky_relu": nn.LeakyReLU,
-                    "elu": nn.ELU,
-                    "gelu": nn.GELU
-                }
-                
-                activation_fn = activation_map.get(activation, nn.ReLU)
-                
-                for units in hidden_layers:
-                    layers.append(nn.Linear(prev_dim, units))
-                    layers.append(activation_fn())
-                    if dropout_rate > 0:
-                        layers.append(nn.Dropout(dropout_rate))
-                    prev_dim = units
-                
-                # Output layer
-                if problem_type == "classification":
-                    if num_classes == 2:
-                        layers.append(nn.Linear(prev_dim, 1))
-                        layers.append(nn.Sigmoid())
-                    else:
-                        layers.append(nn.Linear(prev_dim, num_classes))
-                        layers.append(nn.Softmax(dim=1))
-                else:
-                    layers.append(nn.Linear(prev_dim, 1))
-                
-                self.network = nn.Sequential(*layers)
-            
-            def forward(self, x):
-                return self.network(x)
-        
-        model = MLP(input_shape[0], config["hidden_layers"], config["dropout_rate"], num_classes, problem_type, config.get("activation", "relu"))
+        # Usar a classe MLPModule definida no nível do módulo
+        model = MLPModule(input_shape[0], config["hidden_layers"], config["dropout_rate"], num_classes, problem_type, config.get("activation", "relu"))
         
         # Loss e optimizer
         if problem_type == "classification":
@@ -494,34 +507,51 @@ class DeepLearningAutoML:
                     all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
+            print(f"Total predictions collected: {len(all_predictions)}")
+            print(f"Total labels collected: {len(all_labels)}")
+            print(f"Sample predictions: {all_predictions[:5] if all_predictions else 'None'}")
+            print(f"Sample labels: {all_labels[:5] if all_labels else 'None'}")
+            
             if len(all_predictions) > 0 and len(all_labels) > 0:
                 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
                 
                 all_predictions = np.array(all_predictions)
                 all_labels = np.array(all_labels)
                 
+                print(f"Predictions array shape: {all_predictions.shape}")
+                print(f"Labels array shape: {all_labels.shape}")
+                print(f"Unique predictions: {np.unique(all_predictions)}")
+                print(f"Unique labels: {np.unique(all_labels)}")
+                
                 try:
                     # Métricas principais
-                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    precision = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    recall = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    f1 = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    validation_metrics["precision"] = float(precision)
+                    validation_metrics["recall"] = float(recall)
+                    validation_metrics["f1_score"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
                     
-                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
-                    print(f"Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+                    print(f"✅ Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Confusion matrix:\n{cm}")
                     
                 except Exception as e:
-                    print(f"Error calculating metrics: {e}")
+                    print(f"❌ Error calculating metrics: {e}")
+                    import traceback
+                    traceback.print_exc()
                     validation_metrics["precision"] = 0.0
                     validation_metrics["recall"] = 0.0
                     validation_metrics["f1_score"] = 0.0
                     validation_metrics["confusion_matrix"] = [[0]]
             else:
-                print("No valid predictions collected")
+                print("❌ No valid predictions collected")
                 validation_metrics["precision"] = 0.0
                 validation_metrics["recall"] = 0.0
                 validation_metrics["f1_score"] = 0.0
@@ -1133,34 +1163,51 @@ class DeepLearningAutoML:
                     all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
+            print(f"Total predictions collected: {len(all_predictions)}")
+            print(f"Total labels collected: {len(all_labels)}")
+            print(f"Sample predictions: {all_predictions[:5] if all_predictions else 'None'}")
+            print(f"Sample labels: {all_labels[:5] if all_labels else 'None'}")
+            
             if len(all_predictions) > 0 and len(all_labels) > 0:
                 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
                 
                 all_predictions = np.array(all_predictions)
                 all_labels = np.array(all_labels)
                 
+                print(f"Predictions array shape: {all_predictions.shape}")
+                print(f"Labels array shape: {all_labels.shape}")
+                print(f"Unique predictions: {np.unique(all_predictions)}")
+                print(f"Unique labels: {np.unique(all_labels)}")
+                
                 try:
                     # Métricas principais
-                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    precision = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    recall = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    f1 = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    validation_metrics["precision"] = float(precision)
+                    validation_metrics["recall"] = float(recall)
+                    validation_metrics["f1_score"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
                     
-                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
-                    print(f"Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+                    print(f"✅ Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Confusion matrix:\n{cm}")
                     
                 except Exception as e:
-                    print(f"Error calculating metrics: {e}")
+                    print(f"❌ Error calculating metrics: {e}")
+                    import traceback
+                    traceback.print_exc()
                     validation_metrics["precision"] = 0.0
                     validation_metrics["recall"] = 0.0
                     validation_metrics["f1_score"] = 0.0
                     validation_metrics["confusion_matrix"] = [[0]]
             else:
-                print("No valid predictions collected")
+                print("❌ No valid predictions collected")
                 validation_metrics["precision"] = 0.0
                 validation_metrics["recall"] = 0.0
                 validation_metrics["f1_score"] = 0.0
@@ -1522,34 +1569,51 @@ class DeepLearningAutoML:
                     all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
+            print(f"Total predictions collected: {len(all_predictions)}")
+            print(f"Total labels collected: {len(all_labels)}")
+            print(f"Sample predictions: {all_predictions[:5] if all_predictions else 'None'}")
+            print(f"Sample labels: {all_labels[:5] if all_labels else 'None'}")
+            
             if len(all_predictions) > 0 and len(all_labels) > 0:
                 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
                 
                 all_predictions = np.array(all_predictions)
                 all_labels = np.array(all_labels)
                 
+                print(f"Predictions array shape: {all_predictions.shape}")
+                print(f"Labels array shape: {all_labels.shape}")
+                print(f"Unique predictions: {np.unique(all_predictions)}")
+                print(f"Unique labels: {np.unique(all_labels)}")
+                
                 try:
                     # Métricas principais
-                    validation_metrics["precision"] = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["recall"] = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
-                    validation_metrics["f1_score"] = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    precision = precision_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    recall = recall_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    f1 = f1_score(all_labels, all_predictions, average='weighted', zero_division=0)
+                    
+                    validation_metrics["precision"] = float(precision)
+                    validation_metrics["recall"] = float(recall)
+                    validation_metrics["f1_score"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
                     
-                    print(f"Final metrics - Precision: {validation_metrics['precision']:.4f}, Recall: {validation_metrics['recall']:.4f}, F1: {validation_metrics['f1_score']:.4f}")
-                    print(f"Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+                    print(f"✅ Confusion matrix shape: {cm.shape}")
+                    print(f"✅ Confusion matrix:\n{cm}")
                     
                 except Exception as e:
-                    print(f"Error calculating metrics: {e}")
+                    print(f"❌ Error calculating metrics: {e}")
+                    import traceback
+                    traceback.print_exc()
                     validation_metrics["precision"] = 0.0
                     validation_metrics["recall"] = 0.0
                     validation_metrics["f1_score"] = 0.0
                     validation_metrics["confusion_matrix"] = [[0]]
             else:
-                print("No valid predictions collected")
+                print("❌ No valid predictions collected")
                 validation_metrics["precision"] = 0.0
                 validation_metrics["recall"] = 0.0
                 validation_metrics["f1_score"] = 0.0

@@ -201,6 +201,107 @@ def run_experiment(
     return record
 
 
+def run_deep_learning_experiment(
+    dataset_path: Path,
+    target_column: str,
+    problem_type: str,
+    settings: Settings,
+    model_type: str,
+    config: dict[str, Any],
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Salva experimento de deep learning no banco de dados."""
+    import torch
+    
+    df = load_csv(dataset_path)
+    
+    # Definir feature columns
+    feature_columns = [c for c in df.columns if c != target_column]
+    if not feature_columns:
+        raise ValueError("Dataset must have at least 1 feature column")
+    
+    experiment_id = config.get("experiment_id", uuid4().hex)
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    artifact_dir = settings.artifacts_dir / experiment_id
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+
+    # Salvar modelo PyTorch
+    model_path = artifact_dir / "model.pth"
+    torch.save(result["model"], model_path)
+
+    # Salvar configuração
+    config_path = artifact_dir / "config.json"
+    config_path.write_text(
+        json.dumps(config, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    # Salvar métricas
+    metrics_path = artifact_dir / "metrics.json"
+    metrics_path.write_text(
+        json.dumps(result["validation_metrics"], ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    # Salvar histórico de treinamento
+    history_path = artifact_dir / "history.json"
+    history_path.write_text(
+        json.dumps(result.get("history", {}), ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    model_version = "v1.0.0"
+    model_metadata = {
+        "version": model_version,
+        "framework": "pytorch",
+        "model_type": model_type,
+        "problem_type": problem_type,
+        "target_column": target_column,
+        "feature_columns": feature_columns,
+        "test_size": 0.2,
+        "random_state": 42,
+        "created_at": created_at,
+        "dataset_path": str(dataset_path),
+        "training_time_seconds": result.get("training_time", 0),
+        "config": config,
+        "validation_metrics": result["validation_metrics"],
+        "history": result.get("history", {}),
+        "input_shape": result.get("input_shape"),
+        "num_classes": result.get("num_classes"),
+    }
+
+    metadata_path = artifact_dir / "metadata.json"
+    metadata_path.write_text(
+        json.dumps(model_metadata, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    record: dict[str, Any] = {
+        "id": experiment_id,
+        "created_at": created_at,
+        "dataset_path": str(dataset_path),
+        "target_column": str(target_column),
+        "problem_type": str(problem_type),
+        "test_size": 0.2,  # Deep Learning usa 20% para validação
+        "random_state": 42,  # Random state fixo para Deep Learning
+        "n_rows": int(df.shape[0]),
+        "n_cols": int(df.shape[1]),
+        "feature_columns": [str(c) for c in feature_columns],
+        "best_model_name": f"pytorch_{model_type}",
+        "best_metrics": result["validation_metrics"],
+        "leaderboard": result.get("leaderboard", [{"model_name": model_type, "success": True, "metrics": result["validation_metrics"]}]),
+        "model_path": str(model_path),
+        "model_version": model_version,
+        "model_metadata": model_metadata,
+        "training_time_seconds": result.get("training_time", 0),
+    }
+
+    insert_experiment(settings.db_path, record)
+
+    return record
+
+
 def get_experiment_record(settings: Settings, experiment_id: str) -> dict[str, Any] | None:
     return get_experiment(settings.db_path, experiment_id)
 

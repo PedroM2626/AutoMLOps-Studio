@@ -55,497 +55,561 @@ def main() -> None:
     tabs = st.tabs(["Treinar", "Experimentos", "Model Registry", "Testar Modelos", "Fine-Tune", "Hyperopt", "DVC", "Data Validation", "Time Series", "Monitoramento", "Deploy/API"])
 
     with tabs[0]:
-        st.subheader("1) Upload do CSV")
-
-        uploaded = st.file_uploader("Dataset (CSV)", type=["csv"])
-
-        if uploaded is not None:
-            file_bytes = uploaded.getvalue()
-            file_hash = hash_uploaded_file(file_bytes)
-
-            if st.session_state.get("uploaded_hash") != file_hash:
-                dataset_path = save_uploaded_bytes(
-                    file_bytes=file_bytes,
-                    original_filename=uploaded.name,
-                    settings=settings,
-                )
-                st.session_state["uploaded_hash"] = file_hash
-                st.session_state["dataset_path"] = str(dataset_path)
-                st.session_state.pop("last_experiment", None)
-
-        dataset_path_str = st.session_state.get("dataset_path")
-        if dataset_path_str:
-            dataset_path = Path(dataset_path_str)
-            try:
-                df = load_csv(dataset_path)
-            except Exception as exc:
-                st.error(f"Falha ao ler CSV: {exc}")
-                st.stop()
-
-            st.subheader("2) Selecionar target e tipo")
-            st.write("Prévia do dataset")
-            st.dataframe(df.head(200), width='stretch')
-
-            target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
-            problem_type = st.radio(
-                "Tipo do problema",
-                options=["classification", "regression", "multiclass_classification", "binary_classification"],
-                horizontal=True,
-            )
-
-            # Gerar ID do experimento antes de treinar
-            if "experiment_id" not in st.session_state:
-                st.session_state["experiment_id"] = uuid4().hex
-
-            st.info(f"ID do experimento: {st.session_state['experiment_id']}")
-
-            # Personalização do treinamento
-            with st.expander("Personalizar treinamento"):
-                all_models = [
-                    "logistic_regression",
-                    "linear_svc",
-                    "random_forest",
-                    "extra_trees",
-                    "gradient_boosting",
-                    "decision_tree",
-                    "knn",
-                    "ridge",
-                    "lasso",
-                    "elastic_net",
-                    "svr",
-                ]
-                selected_models = st.multiselect(
-                    "Algoritmos para treinar",
-                    options=all_models,
-                    default=all_models,
-                )
-                max_time = st.number_input(
-                    "Tempo máximo de treinamento (segundos, 0 = ilimitado)",
-                    min_value=0,
-                    value=0,
-                    step=30,
-                )
-                max_time_seconds = None if max_time == 0 else max_time
-
-            st.subheader("3) Treinar (AutoML)")
-            train_clicked = st.button("Treinar", type="primary")
-
-            if train_clicked:
-                with st.spinner("Treinando e avaliando modelos..."):
-                    try:
-                        record = run_experiment(
-                            dataset_path=dataset_path,
-                            target_column=target_column,
-                            problem_type=problem_type,
-                            settings=settings,
-                            selected_models=selected_models,
-                            max_time_seconds=max_time_seconds,
-                        )
-                        st.session_state["last_experiment"] = record
-                        st.session_state.pop("experiment_id", None)  # Limpar ID para novo experimento
-                    except Exception as exc:
-                        st.error(str(exc))
-
-            record = st.session_state.get("last_experiment")
-            if record:
-                st.subheader("Resultados")
-
-                col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Experiment ID", record["id"])
-                col2.metric("Melhor modelo", record["best_model_name"])
-                col3.metric("Tipo", record["problem_type"])
-                col4.metric("Tempo de treino", f"{record.get('model_metadata', {}).get('training_time_seconds', 0):.2f}s")
-
-                st.write("Métricas detalhadas")
-                st.json(record["best_metrics"])
-
-                st.write("Leaderboard")
-                st.dataframe(pd.DataFrame(record.get("leaderboard", [])), use_container_width=True)
-
-                model_path = Path(record["model_path"])
-                if model_path.exists():
-                    st.download_button(
-                        label="Baixar modelo (.pkl)",
-                        data=_read_bytes(model_path),
-                        file_name=f"model_{record['id']}.pkl",
-                        mime="application/octet-stream",
-                        key=f"download_{record['id']}",
-                    )
-
-                # Botão para registrar modelo
-                if st.button("Registrar modelo no Model Registry", key=f"register_{record['id']}"):
-                    try:
-                        new_record = register_model(
-                            settings=settings,
-                            experiment_id=record["id"],
-                            new_version="v1.1.0",
-                            description="Modelo registrado via UI",
-                        )
-                        st.success(f"Modelo registrado: {new_record['id']}")
-                    except Exception as exc:
-                        st.error(f"Erro ao registrar modelo: {exc}")
+        st.subheader("🚀 Treinar Modelos (Clássicos + Deep Learning)")
         
-        # Seção Deep Learning integrada
-        st.divider()
-        st.subheader("🚀 Treinar Modelos Avançados (Deep Learning)")
+        # Upload de dados
+        uploaded_file = st.file_uploader("Upload Dataset (CSV)", type=["csv"], key="train_upload")
         
-        dl_automl = get_deep_learning_automl()
-        
-        # Upload de dados específico para DL
-        dl_file = st.file_uploader("Upload Dataset para Deep Learning (CSV)", type=["csv"], key="dl_upload")
-        
-        if dl_file is not None:
+        if uploaded_file is not None:
             try:
                 # Ler dados
-                dl_df = pd.read_csv(dl_file)
-                st.write(f"Dataset DL carregado: {dl_df.shape}")
-                st.dataframe(dl_df.head(), use_container_width=True)
-                
-                # Detectar tipo de dados
-                text_cols = [col for col in dl_df.columns if dl_df[col].dtype == 'object']
-                numeric_cols = [col for col in dl_df.columns if dl_df[col].dtype in ['int64', 'float64']]
-                
-                if text_cols and not numeric_cols:
-                    st.info("🤖 **Dados de texto detectados!** Será usado processamento NLP.")
-                    data_type = "nlp"
-                elif numeric_cols and not text_cols:
-                    st.info("📊 **Dados numéricos detectados!** Será usado processamento padrão.")
-                    data_type = "numeric"
-                else:
-                    st.warning("⚠️ **Dados mistos detectados!** Será usado processamento numérico (colunas de texto serão ignoradas).")
-                    data_type = "numeric"
+                df = pd.read_csv(uploaded_file)
+                st.write(f"Dataset carregado: {df.shape}")
+                st.dataframe(df.head(), use_container_width=True)
                 
                 # Configurações
-                dl_target = st.selectbox("Target (coluna alvo)", options=list(dl_df.columns), key="dl_target")
-                dl_problem_type = st.radio(
+                target_column = st.selectbox("Target (coluna alvo)", options=list(df.columns), key="train_target")
+                problem_type = st.radio(
                     "Tipo do problema",
                     options=["classification", "regression"],
                     horizontal=True,
-                    key="dl_problem_type"
                 )
                 
-                # Framework e tipo de modelo
-                col1, col2 = st.columns(2)
-                with col1:
-                    if data_type == "nlp":
-                        framework = st.selectbox("Framework", options=["pytorch"], key="dl_framework", help="Para NLP, apenas PyTorch disponível")
-                    else:
-                        framework = st.selectbox("Framework", options=["tensorflow", "pytorch"], key="dl_framework")
-                with col2:
-                    if data_type == "nlp":
-                        model_type = st.selectbox(
-                            "Tipo de Modelo NLP",
-                            options=["text_cnn", "text_lstm", "bert_classifier"],
-                            format_func=lambda x: {
-                                "text_cnn": "📝 Text CNN",
-                                "text_lstm": "🔄 Text LSTM", 
-                                "bert_classifier": "🤖 BERT Classifier"
-                            }[x],
-                            key="dl_model_type",
-                            help="Text CNN: rápido, LSTM: memória, BERT: state-of-the-art"
-                        )
-                    else:
-                        model_type = st.selectbox(
-                            "Tipo de Modelo",
-                            options=[
-                                "mlp", "cnn", "lstm",  # Deep Learning básico
-                                "random_forest", "xgboost", "lightgbm",  # Clássicos potentes
-                                "svm", "logistic_regression", "ridge", "lasso"  # Clássicos tradicionais
-                            ],
-                            format_func=lambda x: {
-                                "mlp": "🧠 MLP (Rede Neural)",
-                                "cnn": "👁️ CNN (Convolucional)",
-                                "lstm": "🔄 LSTM (Recorrente)",
-                                "random_forest": "🌲 Random Forest",
-                                "xgboost": "⚡ XGBoost",
-                                "lightgbm": "💡 LightGBM",
-                                "svm": "📊 SVM",
-                                "logistic_regression": "📈 Logistic Regression",
-                                "ridge": "📐 Ridge Regression",
-                                "lasso": "🎯 Lasso Regression"
-                            }[x],
-                            key="dl_model_type",
-                            help="Escolha entre Deep Learning e modelos clássicos"
-                        )
+                # Gerar ID do experimento antes de treinar
+                if "experiment_id" not in st.session_state:
+                    st.session_state["experiment_id"] = uuid4().hex
+
+                st.info(f"ID do experimento: {st.session_state['experiment_id']}")
+
+                # Sempre mostrar todos os modelos disponíveis (sem restrição de NLP)
+                all_available_models = [
+                    # Deep Learning
+                    "mlp", "cnn", "lstm",
+                    # Clássicos ensemble
+                    "random_forest", "xgboost", "lightgbm",
+                    # Clássicos tradicionais
+                    "logistic_regression", "linear_svc", "svm", "ridge", "lasso",
+                    # Outros modelos clássicos
+                    "decision_tree", "knn", "extra_trees", "gradient_boosting", "elastic_net", "svr",
+                    # Modelos NLP
+                    "text_cnn", "text_lstm", "bert_classifier"
+                ]
+                
+                selected_models = st.multiselect(
+                    "Selecione os modelos para treinar (pode escolher múltiplos)",
+                    options=all_available_models,
+                    default=[],  # Nenhum modelo selecionado por padrão
+                    format_func=lambda x: {
+                        # Deep Learning
+                        "mlp": "MLP (Rede Neural)",
+                        "cnn": "CNN (Convolucional)",
+                        "lstm": "LSTM (Recorrente)",
+                        # Ensemble
+                        "random_forest": "Random Forest",
+                        "xgboost": "XGBoost",
+                        "lightgbm": "LightGBM",
+                        # Tradicionais
+                        "logistic_regression": "Logistic Regression",
+                        "linear_svc": "Linear SVC",
+                        "svm": "SVM",
+                        "ridge": "Ridge Regression",
+                        "lasso": "Lasso Regression",
+                        # Outros modelos clássicos
+                        "decision_tree": "Decision Tree",
+                        "knn": "KNN",
+                        "extra_trees": "Extra Trees",
+                        "gradient_boosting": "Gradient Boosting",
+                        "elastic_net": "Elastic Net",
+                        "svr": "SVR",
+                        # Modelos NLP
+                        "text_cnn": "Text CNN",
+                        "text_lstm": "Text LSTM",
+                        "bert_classifier": "BERT Classifier"
+                    }[x],
+                    key="selected_models",
+                    help="Selecione um ou mais modelos para treinar e comparar resultados"
+                )
+                
+                # Salvar dataset path
+                dataset_path = settings.artifacts_dir / f"dataset_{st.session_state['experiment_id']}.csv"
+                df.to_csv(dataset_path, index=False)
+                st.session_state["dataset_path"] = str(dataset_path)
                 
                 # Configurações avançadas
                 with st.expander("Configurações Avançadas"):
                     col1, col2 = st.columns(2)
                     with col1:
-                        epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="dl_epochs")
-                        batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="dl_batch_size")
-                        learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="dl_lr")
-                        max_training_time = st.number_input("Tempo Máximo (minutos)", min_value=1, max_value=120, value=30, key="dl_max_time")
+                        epochs = st.number_input("Épocas", min_value=10, max_value=1000, value=100, key="epochs")
+                        batch_size = st.number_input("Batch Size", min_value=8, max_value=256, value=32, key="batch_size")
+                        learning_rate = st.number_input("Learning Rate", min_value=0.0001, max_value=0.1, value=0.001, key="learning_rate")
+                        max_training_time = st.number_input("Tempo Máximo (minutos)", min_value=1, max_value=120, value=30, key="max_training_time")
                     with col2:
-                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dl_dropout")
-                        optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="dl_optimizer")
-                        experiment_id = st.text_input("ID do Experimento", value=f"dl_exp_{int(time.time())}", key="dl_experiment_id")
+                        dropout_rate = st.number_input("Dropout Rate", min_value=0.0, max_value=0.8, value=0.2, key="dropout_rate")
+                        optimizer = st.selectbox("Optimizer", options=["adam", "sgd"], key="optimizer")
+                        experiment_id = st.text_input("ID do Experimento", value=st.session_state['experiment_id'], key="experiment_id")
                     
-                    # Configurações específicas por tipo de modelo
-                    if model_type == "mlp":
-                        st.write("**Configurações MLP:**")
-                        hidden_layers_input = st.text_input(
-                            "Hidden Layers (ex: 128,64,32)", 
-                            value="128,64,32",
-                            help="Lista de neurônios em cada camada oculta, separada por vírgula",
-                            key="mlp_hidden_layers"
-                        )
-                        try:
-                            hidden_layers = [int(x.strip()) for x in hidden_layers_input.split(",") if x.strip().isdigit()]
-                        except ValueError:
-                            st.error("Formato inválido para hidden layers. Use números separados por vírgula.")
-                            hidden_layers = [128, 64, 32]
-                    elif model_type == "cnn":
-                        st.write("**Configurações CNN:**")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            conv_filters_input = st.text_input(
-                                "Conv Layers Filters (ex: 32,64)", 
-                                value="32,64",
-                                help="Número de filtros em cada camada convolucional, separado por vírgula",
-                                key="cnn_conv_filters"
-                            )
-                            try:
-                                conv_filters = [int(x.strip()) for x in conv_filters_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para conv filters. Use números separados por vírgula.")
-                                conv_filters = [32, 64]
-                        with col2:
-                            dense_layers_input = st.text_input(
-                                "Dense Layers (ex: 128,64)", 
-                                value="128,64",
-                                help="Número de neurônios em cada camada densa, separado por vírgula",
-                                key="cnn_dense_layers"
-                            )
-                            try:
-                                dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
-                            except ValueError:
-                                st.error("Formato inválido para dense layers. Use números separados por vírgula.")
-                                dense_layers = [128, 64]
-                    elif model_type == "lstm":
-                        st.write("**Configurações LSTM:**")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="lstm_hidden_dim")
-                            num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="lstm_num_layers")
-                        with col2:
-                            bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="lstm_bidirectional")
-                            sequence_length = st.number_input("Sequence Length", min_value=5, max_value=100, value=10, key="lstm_seq_length")
-                    elif model_type in ["text_cnn", "text_lstm"]:
-                        st.write("**Configurações NLP:**")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            if model_type == "text_cnn":
-                                embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_cnn_embed_dim")
-                                num_filters = st.number_input("Num Filters", min_value=50, max_value=200, value=100, key="text_cnn_num_filters")
-                                filter_sizes = st.text_input("Filter Sizes (ex: 3,4,5)", value="3,4,5", key="text_cnn_filter_sizes")
+                    # Configurações específicas para Deep Learning
+                    if selected_models:
+                        dl_selected_models = [m for m in selected_models if m in ["mlp", "cnn", "lstm", "text_cnn", "text_lstm", "bert_classifier"]]
+                        
+                        if dl_selected_models:
+                            st.write("**Configurações Deep Learning:**")
+                            
+                            # Configurações MLP
+                            if "mlp" in dl_selected_models:
+                                hidden_layers_input = st.text_input(
+                                    "Hidden Layers (ex: 128,64,32)", 
+                                    value="128,64,32",
+                                    help="Lista de neurônios em cada camada oculta, separada por vírgula",
+                                    key="mlp_hidden_layers"
+                                )
                                 try:
-                                    filter_sizes_list = [int(x.strip()) for x in filter_sizes.split(",") if x.strip().isdigit()]
+                                    hidden_layers = [int(x.strip()) for x in hidden_layers_input.split(",") if x.strip().isdigit()]
                                 except ValueError:
-                                    filter_sizes_list = [3, 4, 5]
-                            else:  # text_lstm
-                                embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_lstm_embed_dim")
-                                hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="text_lstm_hidden_dim")
-                                num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="text_lstm_num_layers")
-                                bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="text_lstm_bidirectional")
-                        with col2:
-                            max_features = st.number_input("Max Features", min_value=1000, max_value=50000, value=10000, key="nlp_max_features")
-                            max_length = st.number_input("Max Sequence Length", min_value=50, max_value=500, value=256, key="nlp_max_length")
+                                    hidden_layers = [128, 64, 32]
+                            
+                            # Configurações CNN
+                            if "cnn" in dl_selected_models:
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    conv_filters_input = st.text_input(
+                                        "Conv Layers Filters (ex: 32,64)", 
+                                        value="32,64",
+                                        help="Número de filtros em cada camada convolucional, separado por vírgula",
+                                        key="cnn_conv_filters"
+                                    )
+                                    try:
+                                        conv_filters = [int(x.strip()) for x in conv_filters_input.split(",") if x.strip().isdigit()]
+                                    except ValueError:
+                                        conv_filters = [32, 64]
+                                with col2:
+                                    dense_layers_input = st.text_input(
+                                        "Dense Layers (ex: 128,64)", 
+                                        value="128,64",
+                                        help="Número de neurônios em cada camada densa, separado por vírgula",
+                                        key="cnn_dense_layers"
+                                    )
+                                    try:
+                                        dense_layers = [int(x.strip()) for x in dense_layers_input.split(",") if x.strip().isdigit()]
+                                    except ValueError:
+                                        dense_layers = [128, 64]
+                            
+                            # Configurações LSTM
+                            if "lstm" in dl_selected_models:
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=512, value=128, key="lstm_hidden_dim")
+                                    num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="lstm_num_layers")
+                                with col2:
+                                    bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="lstm_bidirectional")
+                                    sequence_length = st.number_input("Sequence Length", min_value=5, max_value=100, value=10, key="lstm_seq_length")
+                            
+                            # Configurações NLP
+                            if "text_cnn" in dl_selected_models or "text_lstm" in dl_selected_models:
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    if "text_cnn" in dl_selected_models:
+                                        embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_cnn_embed_dim")
+                                        num_filters = st.number_input("Num Filters", min_value=50, max_value=200, value=100, key="text_cnn_num_filters")
+                                        filter_sizes = st.text_input("Filter Sizes (ex: 3,4,5)", value="3,4,5", key="text_cnn_filter_sizes")
+                                        try:
+                                            filter_sizes_list = [int(x.strip()) for x in filter_sizes.split(",") if x.strip().isdigit()]
+                                        except ValueError:
+                                            filter_sizes_list = [3, 4, 5]
+                                    if "text_lstm" in dl_selected_models:
+                                        embed_dim = st.number_input("Embedding Dim", min_value=50, max_value=300, value=128, key="text_lstm_embed_dim")
+                                        hidden_dim = st.number_input("Hidden Dim", min_value=32, max_value=256, value=64, key="text_lstm_hidden_dim")
+                                        num_layers = st.number_input("Num Layers", min_value=1, max_value=4, value=2, key="text_lstm_num_layers")
+                                        bidirectional = st.checkbox("Bidirectional LSTM", value=True, key="text_lstm_bidirectional")
+                                with col2:
+                                    max_features = st.number_input("Max Features", min_value=1000, max_value=50000, value=10000, key="max_features")
+                                    max_length = st.number_input("Max Sequence Length", min_value=50, max_value=500, value=256, key="max_length")
+                        
+                        # Valores padrão para variáveis não definidas
+                        if 'hidden_layers' not in locals():
+                            hidden_layers = [128, 64, 32]
+                        if 'conv_filters' not in locals():
+                            conv_filters = [32, 64]
+                        if 'dense_layers' not in locals():
+                            dense_layers = [128, 64]
+                        if 'hidden_dim' not in locals():
+                            hidden_dim = 128
+                        if 'num_layers' not in locals():
+                            num_layers = 2
+                        if 'bidirectional' not in locals():
+                            bidirectional = True
+                        if 'sequence_length' not in locals():
+                            sequence_length = 10
+                        if 'embed_dim' not in locals():
+                            embed_dim = 128
+                        if 'num_filters' not in locals():
+                            num_filters = 100
+                        if 'filter_sizes_list' not in locals():
+                            filter_sizes_list = [3, 4, 5]
+                        if 'max_features' not in locals():
+                            max_features = 10000
+                        if 'max_length' not in locals():
+                            max_length = 256
+                    
+                    # Configurações avançadas (gerais para todos os modelos)
                 
-                if st.button("🚀 Treinar Modelo Avançado", type="primary"):
-                    with st.spinner("Treinando modelo avançado..."):
+                # Botão de treinamento unificado
+                if st.button("Treinar Modelo", type="primary"):
+                    with st.spinner("Treinando modelo..."):
                         try:
+                            # Verificar se há modelos selecionados
+                            if not selected_models:
+                                st.error("Por favor, selecione pelo menos um modelo para treinar.")
+                                return
+                            
                             # Preparar dados
-                            dl_df_clean = dl_df.dropna(subset=[dl_target]).reset_index(drop=True)
-                            feature_cols = [c for c in dl_df_clean.columns if c != dl_target]
-                            X = dl_df_clean[feature_cols]
-                            y = dl_df_clean[dl_target]
+                            df_clean = df.dropna(subset=[target_column]).reset_index(drop=True)
+                            feature_cols = [c for c in df_clean.columns if c != target_column]
+                            X = df_clean[feature_cols]
+                            y = df_clean[target_column]
                             
-                            # Detectar se é dados de texto
-                            if hasattr(X, 'columns'):
-                                text_cols = [col for col in X.columns if X[col].dtype == 'object']
-                            else:
-                                # Se for numpy array, não tem colunas de texto
-                                text_cols = []
+                            # Tratamento robusto de dados para Deep Learning
+                            # Converter para numérico e tratar NaN/infinitos
+                            import numpy as np
                             
-                            if text_cols and model_type in ["text_cnn", "text_lstm"]:
-                                # Processamento NLP
-                                from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
-                                nlp_automl = get_nlp_deep_learning_automl()
-                                
-                                # Combinar colunas de texto
-                                if len(text_cols) == 1:
-                                    X_texts = X[text_cols[0]].astype(str).tolist()
+                            # Converter features para numérico (se necessário)
+                            X_processed = X.copy()
+                            for col in X_processed.columns:
+                                if X_processed[col].dtype == 'object':
+                                    # Tentar converter colunas categóricas para numérico
+                                    try:
+                                        X_processed[col] = pd.to_numeric(X_processed[col], errors='coerce')
+                                    except:
+                                        # Se não conseguir, usar label encoding
+                                        X_processed[col] = X_processed[col].astype('category').cat.codes
                                 else:
-                                    X_texts = X[text_cols].astype(str).apply(' '.join, axis=1).tolist()
-                                
-                                y_labels = y.astype(str).tolist()
-                                
-                                # Split dados
-                                from sklearn.model_selection import train_test_split
-                                X_train, X_val, y_train, y_val = train_test_split(
-                                    X_texts, y_labels, test_size=0.2, random_state=42, stratify=y_labels
-                                )
-                                
-                                # Configuração NLP
-                                nlp_config = {
-                                    "epochs": epochs,
-                                    "batch_size": batch_size,
-                                    "learning_rate": learning_rate,
-                                    "dropout_rate": dropout_rate,
-                                    "max_features": max_features,
-                                    "max_length": max_length
-                                }
-                                
-                                if model_type == "text_cnn":
-                                    nlp_config.update({
-                                        "embed_dim": embed_dim,
-                                        "num_filters": num_filters,
-                                        "filter_sizes": filter_sizes_list,
-                                    })
-                                    result = nlp_automl.create_text_cnn(
-                                        X_train, y_train, X_val, y_val, nlp_config, dl_problem_type
-                                    )
-                                elif model_type == "text_lstm":
-                                    nlp_config.update({
-                                        "embed_dim": embed_dim,
-                                        "hidden_dim": hidden_dim,
-                                        "num_layers": num_layers,
-                                        "bidirectional": bidirectional,
-                                    })
-                                    result = nlp_automl.create_text_lstm(
-                                        X_train, y_train, X_val, y_val, nlp_config, dl_problem_type
-                                    )
+                                    # Para colunas numéricas, tratar valores problemáticos
+                                    X_processed[col] = pd.to_numeric(X_processed[col], errors='coerce')
+                            
+                            # Tratar valores NaN/infinitos
+                            X_processed = X_processed.fillna(X_processed.mean()).fillna(0)
+                            X_processed = np.nan_to_num(X_processed, nan=0.0, posinf=0.0, neginf=0.0)
+                            
+                            # Converter target para numérico se necessário
+                            if problem_type == "classification":
+                                try:
+                                    y_processed = pd.to_numeric(y, errors='coerce')
+                                    if y_processed.isna().any():
+                                        # Se houver NaN no target, usar label encoding
+                                        y_processed = y.astype('category').cat.codes
+                                    else:
+                                        y_processed = y_processed.fillna(0).astype(int)
+                                except:
+                                    y_processed = y.astype('category').cat.codes
                             else:
-                                # Processamento normal (dados numéricos)
-                                # Converter para numérico se necessário
-                                if hasattr(X, 'columns'):
-                                    for col in X.columns:
-                                        if X[col].dtype == 'object':
-                                            X[col] = pd.to_numeric(X[col], errors='coerce')
-                                # Se for numpy array, já deve ser numérico
+                                y_processed = pd.to_numeric(y, errors='coerce').fillna(y.mean())
+                            
+                            # Usar dados processados
+                            X = X_processed
+                            y = y_processed
+                            
+                            # Detectar se é Deep Learning ou clássico
+                            deep_learning_models = ["mlp", "cnn", "lstm", "text_cnn", "text_lstm", "bert_classifier"]
+                            
+                            # Separar modelos Deep Learning dos clássicos
+                            dl_selected_models = [m for m in selected_models if m in deep_learning_models]
+                            classic_selected_models = [m for m in selected_models if m not in deep_learning_models]
+                            
+                            if dl_selected_models:
+                                # Deep Learning - treinar cada modelo selecionado
+                                try:
+                                    from free_mlops.deep_learning import get_deep_learning_automl
+                                    from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
+                                    from free_mlops.advanced_deep_learning import get_advanced_deep_learning_automl
+                                except ImportError as e:
+                                    st.error(f"Erro ao importar módulos Deep Learning: {str(e)}")
+                                    st.error("Verifique se as bibliotecas PyTorch e TensorFlow estão instaladas.")
+                                    return
                                 
-                                X = X.fillna(X.mean())
+                                dl_results = []
                                 
-                                # Para classificação, converter labels para inteiros
-                                if dl_problem_type == "classification":
-                                    from sklearn.preprocessing import LabelEncoder
-                                    le = LabelEncoder()
-                                    y = le.fit_transform(y)
-                                    num_classes = len(le.classes_)
-                                else:
-                                    num_classes = 1
+                                for dl_model in dl_selected_models:
+                                    try:
+                                        # Configuração personalizada completa
+                                        custom_config = {
+                                            "epochs": epochs,
+                                            "batch_size": batch_size,
+                                            "learning_rate": learning_rate,
+                                            "dropout_rate": dropout_rate,
+                                            "optimizer": optimizer,
+                                            "activation": "relu",
+                                            "max_training_time": max_training_time,
+                                            "experiment_id": f"{experiment_id}_{dl_model}",
+                                        }
+                                        
+                                        # Adicionar configurações específicas
+                                        if dl_model == "mlp":
+                                            custom_config["hidden_layers"] = hidden_layers
+                                        elif dl_model == "cnn":
+                                            custom_config["conv_filters"] = conv_filters
+                                            custom_config["dense_layers"] = dense_layers
+                                        elif dl_model == "lstm":
+                                            custom_config["hidden_dim"] = hidden_dim
+                                            custom_config["num_layers"] = num_layers
+                                            custom_config["bidirectional"] = bidirectional
+                                            custom_config["sequence_length"] = sequence_length
+                                        elif dl_model in ["text_cnn", "text_lstm"]:
+                                            custom_config["max_features"] = max_features
+                                            custom_config["max_length"] = max_length
+                                            if dl_model == "text_cnn":
+                                                custom_config["embed_dim"] = embed_dim
+                                                custom_config["num_filters"] = num_filters
+                                                custom_config["filter_sizes"] = filter_sizes_list
+                                            else:  # text_lstm
+                                                custom_config["embed_dim"] = embed_dim
+                                                custom_config["hidden_dim"] = hidden_dim
+                                                custom_config["num_layers"] = num_layers
+                                                custom_config["bidirectional"] = bidirectional
+                                                
+                                        # Escolher framework
+                                        if dl_model in ["text_cnn", "text_lstm"]:
+                                            framework = "pytorch_nlp"
+                                            automl = get_nlp_deep_learning_automl()
+                                        elif dl_model in ["mlp", "cnn", "lstm"]:
+                                            framework = "pytorch"
+                                            automl = get_deep_learning_automl()
+                                        else:
+                                            framework = "pytorch_advanced"
+                                            automl = get_advanced_deep_learning_automl()
+                                            
+                                        # Split dados
+                                        from sklearn.model_selection import train_test_split
+                                        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+                                        
+                                        # Treinar modelo Deep Learning
+                                        result = automl.create_model(
+                                            X_train, y_train, X_val, y_val,
+                                            model_type=dl_model,
+                                            framework=framework,
+                                            problem_type=problem_type,
+                                            config=custom_config
+                                        )
+                                        
+                                    except Exception as model_error:
+                                        st.error(f"Erro ao treinar modelo {dl_model}: {str(model_error)}")
+                                        continue
+                                    
+                                    # Salvar experimento no banco de dados
+                                    from free_mlops.service import run_deep_learning_experiment
+                                    experiment_record = run_deep_learning_experiment(
+                                        dataset_path=Path(st.session_state["dataset_path"]),
+                                        target_column=target_column,
+                                        problem_type=problem_type,
+                                        settings=settings,
+                                        model_type=dl_model,
+                                        config=custom_config,
+                                        result=result
+                                    )
+                                    dl_results.append(experiment_record)
                                 
-                                # Split dados
-                                from sklearn.model_selection import train_test_split
-                                X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+                                st.success(f"Modelos Deep Learning treinados! {len(dl_results)} modelos concluidos")
                                 
-                                # Configuração personalizada completa
-                                custom_config = {
-                                    "epochs": epochs,
-                                    "batch_size": batch_size,
-                                    "learning_rate": learning_rate,
-                                    "dropout_rate": dropout_rate,
-                                    "optimizer": optimizer,
-                                    "activation": "relu",  # Default activation
-                                    "max_training_time": max_training_time,  # Tempo máximo em minutos
-                                    "experiment_id": experiment_id,  # ID do experimento
-                                }
+                                # Salvar todos os resultados para exibição
+                                if dl_results:
+                                    st.session_state["dl_results"] = dl_results
+                                    st.session_state["last_experiment"] = dl_results[-1]
                                 
-                                # Adicionar configurações específicas
-                                if model_type == "mlp":
-                                    custom_config["hidden_layers"] = hidden_layers
-                                elif model_type == "cnn":
-                                    custom_config["conv_filters"] = conv_filters
-                                    custom_config["dense_layers"] = dense_layers
-                                elif model_type == "lstm":
-                                    custom_config["hidden_dim"] = hidden_dim
-                                    custom_config["num_layers"] = num_layers
-                                    custom_config["bidirectional"] = bidirectional
-                                    custom_config["sequence_length"] = sequence_length
+                            else:
+                                # Modelos clássicos - usar AutoML tradicional
+                                max_time_seconds = max_training_time * 60  # Converter para segundos
                                 
-                                # Treinar modelo
-                                result = dl_automl.create_model(
-                                    X_train.values, y_train, X_val.values, y_val,
-                                    model_type=model_type,
-                                    framework=framework,
-                                    problem_type=dl_problem_type,
-                                    config=custom_config
+                                record = run_experiment(
+                                    dataset_path=Path(st.session_state["dataset_path"]),
+                                    target_column=target_column,
+                                    problem_type=problem_type,
+                                    settings=settings,
+                                    selected_models=classic_selected_models,
+                                    max_time_seconds=max_time_seconds,
                                 )
-                            
-                            st.success("✅ Modelo avançado treinado com sucesso!")
-                            
-                            # Display results
+                                st.session_state["last_experiment"] = record
+                                st.success(f"Modelos clássicos treinados! ID: {record['id']}")
+                                
+                        except Exception as exc:
+                            st.error(f"Erro no treinamento: {str(exc)}")
+                
+                # Mostrar resultados de todos os modelos treinados
+                dl_results = st.session_state.get("dl_results", [])
+                classic_record = st.session_state.get("last_experiment")
+                
+                if dl_results or classic_record:
+                    st.subheader("Resultados do Treinamento")
+                    
+                    # Resultados dos modelos Deep Learning
+                    if dl_results:
+                        st.write("### 🤖 Modelos Deep Learning")
+                        
+                        for i, record in enumerate(dl_results):
+                            with st.expander(f"📊 {record.get('best_model_name', 'Desconhecido').replace('_', ' ').title()}", expanded=i==len(dl_results)-1):
+                                # Informações básicas
+                                col1, col2, col3 = st.columns(3)
+                                best_model_name = record.get("best_model_name", "Desconhecido")
+                                framework = record.get("model_metadata", {}).get("framework", "pytorch")
+                                training_time = record.get('model_metadata', {}).get('training_time_seconds', 0)
+                                
+                                col1.metric("Modelo", best_model_name.replace("_", " ").title())
+                                col2.metric("Framework", framework)
+                                col3.metric("Tempo de Treino", f"{training_time:.2f}s")
+                                
+                                # Métricas
+                                st.write("**Métricas de Validação:**")
+                                metrics = record.get("best_metrics", {})
+                                
+                                if problem_type == "classification":
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    val_loss = metrics.get('val_loss', 0)
+                                    val_accuracy = metrics.get('val_accuracy', 0)
+                                    
+                                    col1.metric("Val Loss", f"{val_loss:.4f}")
+                                    col2.metric("Val Accuracy", f"{val_accuracy:.4f}")
+                                    
+                                    if 'precision' in metrics:
+                                        col3.metric("Precision", f"{metrics['precision']:.4f}")
+                                    else:
+                                        col3.metric("Precision", "N/A")
+                                    
+                                    if 'recall' in metrics:
+                                        col4.metric("Recall", f"{metrics['recall']:.4f}")
+                                    else:
+                                        col4.metric("Recall", "N/A")
+                                    
+                                    if 'f1_score' in metrics:
+                                        st.metric("F1-Score", f"{metrics['f1_score']:.4f}")
+                                    elif 'f1' in metrics:
+                                        st.metric("F1-Score", f"{metrics['f1']:.4f}")
+                                    else:
+                                        st.metric("F1-Score", "N/A")
+                                    
+                                    # Matriz de Confusão
+                                    if 'confusion_matrix' in metrics and metrics['confusion_matrix']:
+                                        st.write("**Matriz de Confusão:**")
+                                        cm = metrics['confusion_matrix']
+                                        
+                                        import plotly.graph_objects as go
+                                        fig = go.Figure(data=go.Heatmap(
+                                            z=cm,
+                                            x=[f'Pred {i}' for i in range(len(cm))],
+                                            y=[f'True {i}' for i in range(len(cm))],
+                                            colorscale='Blues',
+                                            text=cm,
+                                            texttemplate="%{text}",
+                                            textfont={"size": 12}
+                                        ))
+                                        
+                                        fig.update_layout(
+                                            title=f"Matriz de Confusão - {best_model_name.replace('_', ' ').title()}",
+                                            xaxis_title="Predito",
+                                            yaxis_title="Verdadeiro"
+                                        )
+                                        
+                                        st.plotly_chart(fig, use_container_width=True)
+                                
+                                elif problem_type == "regression":
+                                    col1, col2, col3, col4 = st.columns(4)
+                                    val_loss = metrics.get('val_loss', 0)
+                                    mae = metrics.get('mae', 0)
+                                    mse = metrics.get('mse', 0)
+                                    rmse = metrics.get('rmse', 0)
+                                    
+                                    col1.metric("Val Loss", f"{val_loss:.4f}")
+                                    col2.metric("MAE", f"{mae:.4f}")
+                                    col3.metric("MSE", f"{mse:.4f}")
+                                    col4.metric("RMSE", f"{rmse:.4f}")
+                                
+                                # Informações do experimento
+                                st.write("**Informações do Experimento:**")
+                                col1, col2 = st.columns(2)
+                                col1.write(f"**ID:** {record.get('id', 'N/A')}")
+                                col1.write(f"**Dataset:** {record.get('dataset_path', 'N/A')}")
+                                col1.write(f"**Target:** {record.get('target_column', 'N/A')}")
+                                col2.write(f"**Tipo:** {record.get('problem_type', 'N/A')}")
+                                col2.write(f"**Linhas:** {record.get('n_rows', 'N/A')}")
+                                col2.write(f"**Colunas:** {record.get('n_cols', 'N/A')}")
+                    
+                    # Resultados dos modelos clássicos (se houver)
+                    if classic_record and classic_record not in dl_results:
+                        st.write("### 📈 Modelos Clássicos")
+                        
+                        with st.expander("📊 Resultados do AutoML", expanded=True):
+                            # Informações básicas
                             col1, col2, col3 = st.columns(3)
-                            col1.metric("Modelo", result["model_type"].replace("_", " ").title())
-                            col2.metric("Framework", result["framework"].title())
-                            col3.metric("Tempo Treino", f"{result['training_time']:.2f}s")
+                            best_model_name = classic_record.get("best_model_name", "Desconhecido")
+                            framework = classic_record.get("model_metadata", {}).get("framework", "scikit-learn")
+                            training_time = classic_record.get('model_metadata', {}).get('training_time_seconds', 0)
                             
-                            # Metrics
-                            st.write("### 📊 Métricas de Validação")
-                            metrics = result["validation_metrics"]
+                            col1.metric("Melhor Modelo", best_model_name.replace("_", " ").title())
+                            col2.metric("Framework", framework)
+                            col3.metric("Tempo de Treino", f"{training_time:.2f}s")
                             
-                            # Métricas principais
-                            col1, col2, col3, col4 = st.columns(4)
-                            col1.metric("Val Loss", f"{metrics.get('val_loss', 0):.4f}")
-                            col2.metric("Val Accuracy", f"{metrics.get('val_accuracy', 0):.4f}")
+                            # Leaderboard
+                            if 'leaderboard' in classic_record and classic_record['leaderboard']:
+                                st.write("**Leaderboard Completo:**")
+                                leaderboard_df = pd.DataFrame(classic_record['leaderboard'])
+                                st.dataframe(leaderboard_df, use_container_width=True)
                             
-                            # Métricas adicionais para classificação
-                            if dl_problem_type == "classification":
+                            # Métricas do melhor modelo
+                            st.write("**Métricas do Melhor Modelo:**")
+                            metrics = classic_record.get("best_metrics", {})
+                            
+                            if problem_type == "classification":
+                                col1, col2, col3, col4 = st.columns(4)
+                                accuracy = metrics.get('accuracy', 0)
+                                f1_weighted = metrics.get('f1_weighted', 0)
+                                
+                                col1.metric("Accuracy", f"{accuracy:.4f}")
+                                col2.metric("F1-Score (Weighted)", f"{f1_weighted:.4f}")
+                                
                                 if 'precision' in metrics:
                                     col3.metric("Precision", f"{metrics['precision']:.4f}")
+                                else:
+                                    col3.metric("Precision", "N/A")
+                                
                                 if 'recall' in metrics:
                                     col4.metric("Recall", f"{metrics['recall']:.4f}")
-                                if 'f1_score' in metrics:
-                                    st.metric("F1-Score", f"{metrics['f1_score']:.4f}")
-                                
-                                # Matriz de Confusão
-                                st.write("### 🎯 Matriz de Confusão")
-                                
-                                # Debug: mostrar métricas disponíveis
-                                st.write(f"**Debug - Métricas disponíveis:** {list(metrics.keys())}")
-                                
-                                if 'confusion_matrix' in metrics:
-                                    cm = metrics['confusion_matrix']
-                                    st.write(f"**Debug - Matriz shape:** {len(cm)}x{len(cm[0]) if cm else 'N/A'}")
-                                    st.write(f"**Debug - Matriz data:** {cm}")
-                                    
-                                    import plotly.graph_objects as go
-                                    fig = go.Figure(data=go.Heatmap(
-                                        z=cm,
-                                        x=[f'Pred {i}' for i in range(len(cm))],
-                                        y=[f'True {i}' for i in range(len(cm))],
-                                        colorscale='Blues',
-                                        text=cm,
-                                        texttemplate="%{text}",
-                                        textfont={"size": 12}
-                                    ))
-                                    
-                                    fig.update_layout(
-                                        title="Matriz de Confusão",
-                                        xaxis_title="Predito",
-                                        yaxis_title="Verdadeiro"
-                                    )
-                                    
-                                    st.plotly_chart(fig, use_container_width=True)
                                 else:
-                                    st.error("Matriz de confusão não encontrada nas métricas")
-                                    st.write("**Métricas disponíveis:**", metrics)
+                                    col4.metric("Recall", "N/A")
                             
-                            # Métricas para regressão
-                            elif dl_problem_type == "regression":
-                                if 'mae' in metrics:
-                                    col3.metric("MAE", f"{metrics['mae']:.4f}")
-                                if 'mse' in metrics:
-                                    col4.metric("MSE", f"{metrics['mse']:.4f}")
-                                if 'rmse' in metrics:
-                                    st.metric("RMSE", f"{metrics['rmse']:.4f}")
-                                if 'r2_score' in metrics:
-                                    st.metric("R²", f"{metrics['r2_score']:.4f}")
-                            
-                        except Exception as e:
-                            st.error(f"❌ Erro no treinamento: {str(e)}")
-                            
+                            elif problem_type == "regression":
+                                col1, col2, col3, col4 = st.columns(4)
+                                mae = metrics.get('mae', 0)
+                                mse = metrics.get('mse', 0)
+                                rmse = metrics.get('rmse', 0)
+                                r2 = metrics.get('r2', 0)
+                                
+                                col1.metric("MAE", f"{mae:.4f}")
+                                col2.metric("MSE", f"{mse:.4f}")
+                                col3.metric("RMSE", f"{rmse:.4f}")
+                                col4.metric("R²", f"{r2:.4f}")
+                
+                # Botão para baixar modelo (se houver experimento)
+                if record:
+                    model_path = Path(record.get("model_path", ""))
+                    if model_path.exists():
+                        st.download_button(
+                            label="Baixar Modelo",
+                            data=_read_bytes(model_path),
+                            file_name=f"model_{record['id']}.pkl",
+                            mime="application/octet-stream",
+                            key=f"download_{record['id']}",
+                        )
+                    
+                    # Botão para registrar modelo
+                    if st.button("Registrar Modelo no Registry", key=f"register_{record['id']}"):
+                        try:
+                            new_record = register_model(
+                                settings=settings,
+                                experiment_id=record["id"],
+                                new_version="v1.1.0",
+                                description="Modelo treinado via UI",
+                            )
+                            st.success(f"Modelo registrado: {new_record['id']}")
+                        except Exception as exc:
+                            st.error(f"Erro ao registrar modelo: {exc}")
+
             except Exception as exc:
                 st.error(f"Erro ao ler dataset: {exc}")
 
@@ -824,21 +888,33 @@ def main() -> None:
             st.write("Detalhes do experimento base")
             st.json(selected_exp["best_metrics"])
 
-            model_name = st.selectbox(
-                "Modelo para fine-tune",
+            model_type = st.selectbox(
+                "Modelo base para fine-tune",
                 options=[
-                    "logistic_regression",
-                    "linear_svc",
-                    "random_forest",
-                    "extra_trees",
-                    "gradient_boosting",
-                    "decision_tree",
-                    "knn",
-                    "ridge",
-                    "lasso",
-                    "elastic_net",
-                    "svr",
+                    # Modelos Transformers pré-treinados
+                    "bert_classification", "bert_regression", "distilbert", "roberta",
+                    # Modelos clássicos para fine-tune
+                    "logistic_regression", "linear_svc", "decision_tree", "knn", "extra_trees", "gradient_boosting", "elastic_net", "svr"
                 ],
+                format_func=lambda x: {
+                    # Transformers
+                    "bert_classification": "🤖 BERT (Classificação)",
+                    "bert_regression": "🤖 BERT (Regressão)", 
+                    "distilbert": "🚀 DistilBERT",
+                    "roberta": "⚡ RoBERTa",
+                    # Clássicos
+                    "logistic_regression": "📈 Logistic Regression",
+                    "linear_svc": "📊 Linear SVC",
+                    "random_forest": "🌲 Random Forest",
+                    "extra_trees": "🌳 Extra Trees",
+                    "gradient_boosting": "📈 Gradient Boosting",
+                    "decision_tree": "🌳 Decision Tree",
+                    "knn": "🎯 KNN",
+                    "ridge": "📐 Ridge",
+                    "lasso": "🎯 Lasso",
+                    "elastic_net": "🔗 Elastic Net",
+                    "svr": "📊 SVR"
+                }[x],
                 index=0,
                 key="finetune_model_select",
             )
