@@ -99,6 +99,10 @@ def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.n
         "f1_weighted": float(f1_score(y_true, y_pred, average="weighted")),
         "precision_weighted": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
         "recall_weighted": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+        # Adicionar também os nomes simples para compatibilidade
+        "precision": float(precision_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, average="weighted", zero_division=0)),
+        "f1_score": float(f1_score(y_true, y_pred, average="weighted")),
     }
 
     try:
@@ -109,6 +113,25 @@ def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.n
     try:
         cm = confusion_matrix(y_true, y_pred)
         metrics["confusion_matrix"] = cm.tolist()
+        
+        # Adicionar métricas por classe para análise detalhada
+        from sklearn.metrics import precision_recall_fscore_support
+        precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(y_true, y_pred, average=None, zero_division=0)
+        
+        # Obter nomes das classes
+        if hasattr(y_true, 'unique'):
+            class_names = [str(cls) for cls in sorted(y_true.unique())]
+        else:
+            class_names = [str(cls) for cls in sorted(pd.Series(y_true).unique())]
+        
+        # Métricas detalhadas por classe
+        metrics["classification_report"] = {
+            "precision": {class_names[i]: float(precision_per_class[i]) for i in range(len(class_names))},
+            "recall": {class_names[i]: float(recall_per_class[i]) for i in range(len(class_names))},
+            "f1_score": {class_names[i]: float(f1_per_class[i]) for i in range(len(class_names))},
+            "support": {class_names[i]: int(support_per_class[i]) for i in range(len(class_names))},
+            "class_names": class_names
+        }
     except Exception:
         pass
 

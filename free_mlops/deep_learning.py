@@ -446,6 +446,8 @@ class DeepLearningAutoML:
         final_val_loss = 0.0
         final_val_correct = 0
         final_val_total = 0
+        all_predictions = []
+        all_labels = []
         
         with torch.no_grad():
             for batch_X, batch_y in val_loader:
@@ -466,6 +468,20 @@ class DeepLearningAutoML:
                 if predicted is not None:
                     final_val_correct += (predicted == batch_y).sum().item()
                     final_val_total += batch_y.size(0)
+                    
+                    # Coletar predições para métricas detalhadas
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+                else:
+                    # Para regressão, coletar valores contínuos
+                    if problem_type == "regression":
+                        pred_np = outputs.squeeze().cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
@@ -478,33 +494,33 @@ class DeepLearningAutoML:
             val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
             validation_metrics["val_accuracy"] = val_accuracy
             
-            # Coletar predições finais para métricas detalhadas
-            all_predictions = []
-            all_labels = []
-            
-            model.eval()
-            with torch.no_grad():
-                for batch_X, batch_y in val_loader:
-                    outputs = model(batch_X)
-                    
-                    # Verificar se outputs contém NaN
-                    if torch.isnan(outputs).any():
-                        continue
-                    
-                    if num_classes == 2:
-                        outputs_squeezed = outputs.squeeze()
-                        if outputs_squeezed.dim() == 0:
-                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
-                        predicted = (outputs_squeezed > 0.5).long()
-                    else:
-                        predicted = outputs.argmax(dim=1)
-                    
-                    # Garantir arrays 1D
-                    pred_np = predicted.cpu().numpy().flatten()
-                    labels_np = batch_y.cpu().numpy().flatten()
-                    
-                    all_predictions.extend(pred_np)
-                    all_labels.extend(labels_np)
+            # Coletar predições durante a avaliação final (já foi feito acima)
+            # Se não coletamos predições suficientes, usar uma abordagem simples
+            if len(all_predictions) == 0:
+                print("⚠️ No predictions collected, using simple evaluation...")
+                model.eval()
+                with torch.no_grad():
+                    for batch_X, batch_y in val_loader:
+                        outputs = model(batch_X)
+                        
+                        # Verificar se outputs contém NaN
+                        if torch.isnan(outputs).any():
+                            continue
+                        
+                        if num_classes == 2:
+                            outputs_squeezed = outputs.squeeze()
+                            if outputs_squeezed.dim() == 0:
+                                outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                            predicted = (outputs_squeezed > 0.5).long()
+                        else:
+                            predicted = outputs.argmax(dim=1)
+                        
+                        # Garantir arrays 1D
+                        pred_np = predicted.cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
             print(f"Total predictions collected: {len(all_predictions)}")
@@ -532,11 +548,28 @@ class DeepLearningAutoML:
                     validation_metrics["precision"] = float(precision)
                     validation_metrics["recall"] = float(recall)
                     validation_metrics["f1_score"] = float(f1)
+                    validation_metrics["precision_weighted"] = float(precision)
+                    validation_metrics["recall_weighted"] = float(recall)
+                    validation_metrics["f1_weighted"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    # Adicionar métricas por classe para análise detalhada
+                    precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
+                        all_labels, all_predictions, average=None, zero_division=0
+                    )
+                    
+                    # Métricas detalhadas por classe
+                    validation_metrics["classification_report"] = {
+                        "precision": {str(all_classes[i]): float(precision_per_class[i]) for i in range(len(all_classes))},
+                        "recall": {str(all_classes[i]): float(recall_per_class[i]) for i in range(len(all_classes))},
+                        "f1_score": {str(all_classes[i]): float(f1_per_class[i]) for i in range(len(all_classes))},
+                        "support": {str(all_classes[i]): int(support_per_class[i]) for i in range(len(all_classes))},
+                        "class_names": [str(cls) for cls in all_classes]
+                    }
                     
                     print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
                     print(f"✅ Confusion matrix shape: {cm.shape}")
@@ -1102,6 +1135,8 @@ class DeepLearningAutoML:
         final_val_loss = 0.0
         final_val_correct = 0
         final_val_total = 0
+        all_predictions = []
+        all_labels = []
         
         with torch.no_grad():
             for batch_X, batch_y in val_loader:
@@ -1122,6 +1157,20 @@ class DeepLearningAutoML:
                 if predicted is not None:
                     final_val_correct += (predicted == batch_y).sum().item()
                     final_val_total += batch_y.size(0)
+                    
+                    # Coletar predições para métricas detalhadas
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+                else:
+                    # Para regressão, coletar valores contínuos
+                    if problem_type == "regression":
+                        pred_np = outputs.squeeze().cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
@@ -1134,33 +1183,33 @@ class DeepLearningAutoML:
             val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
             validation_metrics["val_accuracy"] = val_accuracy
             
-            # Coletar predições finais para métricas detalhadas
-            all_predictions = []
-            all_labels = []
-            
-            model.eval()
-            with torch.no_grad():
-                for batch_X, batch_y in val_loader:
-                    outputs = model(batch_X)
-                    
-                    # Verificar se outputs contém NaN
-                    if torch.isnan(outputs).any():
-                        continue
-                    
-                    if num_classes == 2:
-                        outputs_squeezed = outputs.squeeze()
-                        if outputs_squeezed.dim() == 0:
-                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
-                        predicted = (outputs_squeezed > 0.5).long()
-                    else:
-                        predicted = outputs.argmax(dim=1)
-                    
-                    # Garantir arrays 1D
-                    pred_np = predicted.cpu().numpy().flatten()
-                    labels_np = batch_y.cpu().numpy().flatten()
-                    
-                    all_predictions.extend(pred_np)
-                    all_labels.extend(labels_np)
+            # Coletar predições durante a avaliação final (já foi feito acima)
+            # Se não coletamos predições suficientes, usar uma abordagem simples
+            if len(all_predictions) == 0:
+                print("⚠️ No predictions collected, using simple evaluation...")
+                model.eval()
+                with torch.no_grad():
+                    for batch_X, batch_y in val_loader:
+                        outputs = model(batch_X)
+                        
+                        # Verificar se outputs contém NaN
+                        if torch.isnan(outputs).any():
+                            continue
+                        
+                        if num_classes == 2:
+                            outputs_squeezed = outputs.squeeze()
+                            if outputs_squeezed.dim() == 0:
+                                outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                            predicted = (outputs_squeezed > 0.5).long()
+                        else:
+                            predicted = outputs.argmax(dim=1)
+                        
+                        # Garantir arrays 1D
+                        pred_np = predicted.cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
             print(f"Total predictions collected: {len(all_predictions)}")
@@ -1188,11 +1237,28 @@ class DeepLearningAutoML:
                     validation_metrics["precision"] = float(precision)
                     validation_metrics["recall"] = float(recall)
                     validation_metrics["f1_score"] = float(f1)
+                    validation_metrics["precision_weighted"] = float(precision)
+                    validation_metrics["recall_weighted"] = float(recall)
+                    validation_metrics["f1_weighted"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    # Adicionar métricas por classe para análise detalhada
+                    precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
+                        all_labels, all_predictions, average=None, zero_division=0
+                    )
+                    
+                    # Métricas detalhadas por classe
+                    validation_metrics["classification_report"] = {
+                        "precision": {str(all_classes[i]): float(precision_per_class[i]) for i in range(len(all_classes))},
+                        "recall": {str(all_classes[i]): float(recall_per_class[i]) for i in range(len(all_classes))},
+                        "f1_score": {str(all_classes[i]): float(f1_per_class[i]) for i in range(len(all_classes))},
+                        "support": {str(all_classes[i]): int(support_per_class[i]) for i in range(len(all_classes))},
+                        "class_names": [str(cls) for cls in all_classes]
+                    }
                     
                     print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
                     print(f"✅ Confusion matrix shape: {cm.shape}")
@@ -1508,6 +1574,8 @@ class DeepLearningAutoML:
         final_val_loss = 0.0
         final_val_correct = 0
         final_val_total = 0
+        all_predictions = []
+        all_labels = []
         
         with torch.no_grad():
             for batch_X, batch_y in val_loader:
@@ -1528,6 +1596,20 @@ class DeepLearningAutoML:
                 if predicted is not None:
                     final_val_correct += (predicted == batch_y).sum().item()
                     final_val_total += batch_y.size(0)
+                    
+                    # Coletar predições para métricas detalhadas
+                    pred_np = predicted.cpu().numpy().flatten()
+                    labels_np = batch_y.cpu().numpy().flatten()
+                    
+                    all_predictions.extend(pred_np)
+                    all_labels.extend(labels_np)
+                else:
+                    # Para regressão, coletar valores contínuos
+                    if problem_type == "regression":
+                        pred_np = outputs.squeeze().cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
         
         avg_final_val_loss = final_val_loss / len(val_loader)
         
@@ -1540,33 +1622,33 @@ class DeepLearningAutoML:
             val_accuracy = final_val_correct / final_val_total if final_val_total > 0 else 0
             validation_metrics["val_accuracy"] = val_accuracy
             
-            # Coletar predições finais para métricas detalhadas
-            all_predictions = []
-            all_labels = []
-            
-            model.eval()
-            with torch.no_grad():
-                for batch_X, batch_y in val_loader:
-                    outputs = model(batch_X)
-                    
-                    # Verificar se outputs contém NaN
-                    if torch.isnan(outputs).any():
-                        continue
-                    
-                    if num_classes == 2:
-                        outputs_squeezed = outputs.squeeze()
-                        if outputs_squeezed.dim() == 0:
-                            outputs_squeezed = outputs_squeezed.unsqueeze(0)
-                        predicted = (outputs_squeezed > 0.5).long()
-                    else:
-                        predicted = outputs.argmax(dim=1)
-                    
-                    # Garantir arrays 1D
-                    pred_np = predicted.cpu().numpy().flatten()
-                    labels_np = batch_y.cpu().numpy().flatten()
-                    
-                    all_predictions.extend(pred_np)
-                    all_labels.extend(labels_np)
+            # Coletar predições durante a avaliação final (já foi feito acima)
+            # Se não coletamos predições suficientes, usar uma abordagem simples
+            if len(all_predictions) == 0:
+                print("⚠️ No predictions collected, using simple evaluation...")
+                model.eval()
+                with torch.no_grad():
+                    for batch_X, batch_y in val_loader:
+                        outputs = model(batch_X)
+                        
+                        # Verificar se outputs contém NaN
+                        if torch.isnan(outputs).any():
+                            continue
+                        
+                        if num_classes == 2:
+                            outputs_squeezed = outputs.squeeze()
+                            if outputs_squeezed.dim() == 0:
+                                outputs_squeezed = outputs_squeezed.unsqueeze(0)
+                            predicted = (outputs_squeezed > 0.5).long()
+                        else:
+                            predicted = outputs.argmax(dim=1)
+                        
+                        # Garantir arrays 1D
+                        pred_np = predicted.cpu().numpy().flatten()
+                        labels_np = batch_y.cpu().numpy().flatten()
+                        
+                        all_predictions.extend(pred_np)
+                        all_labels.extend(labels_np)
             
             # Calcular métricas detalhadas
             print(f"Total predictions collected: {len(all_predictions)}")
@@ -1594,11 +1676,28 @@ class DeepLearningAutoML:
                     validation_metrics["precision"] = float(precision)
                     validation_metrics["recall"] = float(recall)
                     validation_metrics["f1_score"] = float(f1)
+                    validation_metrics["precision_weighted"] = float(precision)
+                    validation_metrics["recall_weighted"] = float(recall)
+                    validation_metrics["f1_weighted"] = float(f1)
                     
                     # Matriz de confusão completa
                     all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                     cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                     validation_metrics["confusion_matrix"] = cm.tolist()
+                    
+                    # Adicionar métricas por classe para análise detalhada
+                    precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
+                        all_labels, all_predictions, average=None, zero_division=0
+                    )
+                    
+                    # Métricas detalhadas por classe
+                    validation_metrics["classification_report"] = {
+                        "precision": {str(all_classes[i]): float(precision_per_class[i]) for i in range(len(all_classes))},
+                        "recall": {str(all_classes[i]): float(recall_per_class[i]) for i in range(len(all_classes))},
+                        "f1_score": {str(all_classes[i]): float(f1_per_class[i]) for i in range(len(all_classes))},
+                        "support": {str(all_classes[i]): int(support_per_class[i]) for i in range(len(all_classes))},
+                        "class_names": [str(cls) for cls in all_classes]
+                    }
                     
                     print(f"✅ Final metrics - Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
                     print(f"✅ Confusion matrix shape: {cm.shape}")

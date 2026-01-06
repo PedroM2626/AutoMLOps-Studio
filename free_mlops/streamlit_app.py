@@ -311,12 +311,10 @@ def main() -> None:
                             # Detectar se é Deep Learning ou clássico
                             deep_learning_models = ["mlp", "cnn", "lstm", "text_cnn", "text_lstm", "bert_classifier"]
                             
-                            # Separar modelos Deep Learning dos clássicos
-                            dl_selected_models = [m for m in selected_models if m in deep_learning_models]
-                            classic_selected_models = [m for m in selected_models if m not in deep_learning_models]
+                            # Treinar todos os modelos selecionados (unificado)
+                            all_results = []
                             
-                            if dl_selected_models:
-                                # Deep Learning - treinar cada modelo selecionado
+                            for model_name in selected_models:
                                 try:
                                     from free_mlops.deep_learning import get_deep_learning_automl
                                     from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
@@ -326,125 +324,117 @@ def main() -> None:
                                     st.error("Verifique se as bibliotecas PyTorch e TensorFlow estão instaladas.")
                                     return
                                 
-                                dl_results = []
+                                # Gerar ID único para este modelo específico
+                                model_experiment_id = f"{st.session_state['experiment_id']}_{model_name}_{uuid4().hex[:8]}"
                                 
-                                for dl_model in dl_selected_models:
-                                    try:
-                                        # Configuração personalizada completa
-                                        custom_config = {
-                                            "epochs": epochs,
-                                            "batch_size": batch_size,
-                                            "learning_rate": learning_rate,
-                                            "dropout_rate": dropout_rate,
-                                            "optimizer": optimizer,
-                                            "activation": "relu",
-                                            "max_training_time": max_training_time,
-                                            "experiment_id": f"{experiment_id}_{dl_model}",
+                                try:
+                                    # Configuração personalizada completa
+                                    custom_config = {
+                                        "epochs": epochs,
+                                        "batch_size": batch_size,
+                                        "learning_rate": learning_rate,
+                                        "dropout_rate": dropout_rate,
+                                        "optimizer": optimizer,
+                                        "activation": "relu",
+                                        "max_training_time": max_training_time,
+                                        "experiment_id": model_experiment_id,
                                         }
-                                        
-                                        # Adicionar configurações específicas
-                                        if dl_model == "mlp":
-                                            custom_config["hidden_layers"] = hidden_layers
-                                        elif dl_model == "cnn":
-                                            custom_config["conv_filters"] = conv_filters
-                                            custom_config["dense_layers"] = dense_layers
-                                        elif dl_model == "lstm":
+                                    
+                                    # Adicionar configurações específicas
+                                    if model_name == "mlp":
+                                        custom_config["hidden_layers"] = hidden_layers
+                                    elif model_name == "cnn":
+                                        custom_config["conv_filters"] = conv_filters
+                                        custom_config["dense_layers"] = dense_layers
+                                    elif model_name == "lstm":
+                                        custom_config["hidden_dim"] = hidden_dim
+                                        custom_config["num_layers"] = num_layers
+                                        custom_config["bidirectional"] = bidirectional
+                                        custom_config["sequence_length"] = sequence_length
+                                    elif model_name in ["text_cnn", "text_lstm"]:
+                                        custom_config["max_features"] = max_features
+                                        custom_config["max_length"] = max_length
+                                        if model_name == "text_cnn":
+                                            custom_config["embed_dim"] = embed_dim
+                                            custom_config["num_filters"] = num_filters
+                                            custom_config["filter_sizes"] = filter_sizes_list
+                                        else:  # text_lstm
+                                            custom_config["embed_dim"] = embed_dim
                                             custom_config["hidden_dim"] = hidden_dim
                                             custom_config["num_layers"] = num_layers
                                             custom_config["bidirectional"] = bidirectional
-                                            custom_config["sequence_length"] = sequence_length
-                                        elif dl_model in ["text_cnn", "text_lstm"]:
-                                            custom_config["max_features"] = max_features
-                                            custom_config["max_length"] = max_length
-                                            if dl_model == "text_cnn":
-                                                custom_config["embed_dim"] = embed_dim
-                                                custom_config["num_filters"] = num_filters
-                                                custom_config["filter_sizes"] = filter_sizes_list
-                                            else:  # text_lstm
-                                                custom_config["embed_dim"] = embed_dim
-                                                custom_config["hidden_dim"] = hidden_dim
-                                                custom_config["num_layers"] = num_layers
-                                                custom_config["bidirectional"] = bidirectional
-                                                
-                                        # Escolher framework
-                                        if dl_model in ["text_cnn", "text_lstm"]:
-                                            framework = "pytorch_nlp"
-                                            automl = get_nlp_deep_learning_automl()
-                                        elif dl_model in ["mlp", "cnn", "lstm"]:
-                                            framework = "pytorch"
-                                            automl = get_deep_learning_automl()
-                                        else:
-                                            framework = "pytorch_advanced"
-                                            automl = get_advanced_deep_learning_automl()
                                             
-                                        # Split dados
-                                        from sklearn.model_selection import train_test_split
-                                        X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+                                    # Escolher framework
+                                    if model_name in ["text_cnn", "text_lstm"]:
+                                        framework = "pytorch_nlp"
+                                        automl = get_nlp_deep_learning_automl()
+                                    elif model_name in ["mlp", "cnn", "lstm"]:
+                                        framework = "pytorch"
+                                        automl = get_deep_learning_automl()
+                                    else:
+                                        # Modelos clássicos - usar AutoML tradicional
+                                        max_time_seconds = max_training_time * 60  # Converter para segundos
                                         
-                                        # Treinar modelo Deep Learning
-                                        result = automl.create_model(
-                                            X_train, y_train, X_val, y_val,
-                                            model_type=dl_model,
-                                            framework=framework,
+                                        record = run_experiment(
+                                            dataset_path=Path(st.session_state["dataset_path"]),
+                                            target_column=target_column,
                                             problem_type=problem_type,
-                                            config=custom_config
+                                            settings=settings,
+                                            selected_models=[model_name],  # Apenas este modelo
+                                            max_time_seconds=max_time_seconds,
                                         )
-                                        
-                                    except Exception as model_error:
-                                        st.error(f"Erro ao treinar modelo {dl_model}: {str(model_error)}")
+                                        all_results.append(record)
                                         continue
+                                        
+                                    # Split dados (apenas para DL)
+                                    from sklearn.model_selection import train_test_split
+                                    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
                                     
-                                    # Salvar experimento no banco de dados
-                                    from free_mlops.service import run_deep_learning_experiment
-                                    experiment_record = run_deep_learning_experiment(
-                                        dataset_path=Path(st.session_state["dataset_path"]),
-                                        target_column=target_column,
+                                    # Treinar modelo Deep Learning
+                                    result = automl.create_model(
+                                        X_train, y_train, X_val, y_val,
+                                        model_type=model_name,
+                                        framework=framework,
                                         problem_type=problem_type,
-                                        settings=settings,
-                                        model_type=dl_model,
-                                        config=custom_config,
-                                        result=result
+                                        config=custom_config
                                     )
-                                    dl_results.append(experiment_record)
+                                    
+                                except Exception as model_error:
+                                    st.error(f"Erro ao treinar modelo {model_name}: {str(model_error)}")
+                                    continue
                                 
-                                st.success(f"Modelos Deep Learning treinados! {len(dl_results)} modelos concluidos")
-                                
-                                # Salvar todos os resultados para exibição
-                                if dl_results:
-                                    st.session_state["dl_results"] = dl_results
-                                    st.session_state["last_experiment"] = dl_results[-1]
-                                
-                            else:
-                                # Modelos clássicos - usar AutoML tradicional
-                                max_time_seconds = max_training_time * 60  # Converter para segundos
-                                
-                                record = run_experiment(
+                                # Salvar experimento no banco de dados (apenas para DL)
+                                from free_mlops.service import run_deep_learning_experiment
+                                experiment_record = run_deep_learning_experiment(
                                     dataset_path=Path(st.session_state["dataset_path"]),
                                     target_column=target_column,
                                     problem_type=problem_type,
                                     settings=settings,
-                                    selected_models=classic_selected_models,
-                                    max_time_seconds=max_time_seconds,
+                                    model_type=model_name,
+                                    config=custom_config,
+                                    result=result
                                 )
-                                st.session_state["last_experiment"] = record
-                                st.success(f"Modelos clássicos treinados! ID: {record['id']}")
+                                all_results.append(experiment_record)
                                 
+                                st.success(f"Modelos treinados! {len(all_results)} modelos concluidos")
+                                
+                                # Salvar todos os resultados para exibição
+                                if all_results:
+                                    st.session_state["all_results"] = all_results
+                                    st.session_state["last_experiment"] = all_results[-1]
+                                    
                         except Exception as exc:
                             st.error(f"Erro no treinamento: {str(exc)}")
                 
                 # Mostrar resultados de todos os modelos treinados
-                dl_results = st.session_state.get("dl_results", [])
-                classic_record = st.session_state.get("last_experiment")
+                all_results = st.session_state.get("all_results", [])
                 
-                if dl_results or classic_record:
+                if all_results:
                     st.subheader("Resultados do Treinamento")
                     
-                    # Resultados dos modelos Deep Learning
-                    if dl_results:
-                        st.write("### 🤖 Modelos Deep Learning")
-                        
-                        for i, record in enumerate(dl_results):
-                            with st.expander(f"📊 {record.get('best_model_name', 'Desconhecido').replace('_', ' ').title()}", expanded=i==len(dl_results)-1):
+                    # Mostrar cada modelo individualmente
+                    for i, record in enumerate(all_results):
+                        with st.expander(f"📊 {record.get('best_model_name', 'Desconhecido').replace('_', ' ').title()}", expanded=i==len(all_results)-1):
                                 # Informações básicas
                                 col1, col2, col3 = st.columns(3)
                                 best_model_name = record.get("best_model_name", "Desconhecido")
@@ -507,6 +497,27 @@ def main() -> None:
                                         )
                                         
                                         st.plotly_chart(fig, use_container_width=True)
+                                    
+                                    # Métricas por classe (se disponível)
+                                    if 'classification_report' in metrics:
+                                        st.write("**Métricas por Classe:**")
+                                        report = metrics['classification_report']
+                                        class_names = report.get('class_names', [])
+                                        
+                                        if class_names:
+                                            # Criar tabela de métricas por classe
+                                            class_metrics_data = []
+                                            for class_name in class_names:
+                                                class_metrics_data.append({
+                                                    'Classe': class_name,
+                                                    'Precision': report['precision'].get(class_name, 0),
+                                                    'Recall': report['recall'].get(class_name, 0),
+                                                    'F1-Score': report['f1_score'].get(class_name, 0),
+                                                    'Support': report['support'].get(class_name, 0)
+                                                })
+                                            
+                                            class_df = pd.DataFrame(class_metrics_data)
+                                            st.dataframe(class_df, use_container_width=True)
                                 
                                 elif problem_type == "regression":
                                     col1, col2, col3, col4 = st.columns(4)
@@ -532,9 +543,9 @@ def main() -> None:
                     
                     # Resultados dos modelos clássicos (se houver)
                     if classic_record and classic_record not in dl_results:
-                        st.write("### 📈 Modelos Clássicos")
+                        st.write("### 📊 Modelos e Métricas")
                         
-                        with st.expander("📊 Resultados do AutoML", expanded=True):
+                        with st.expander("📊 Resultados Completos", expanded=True):
                             # Informações básicas
                             col1, col2, col3 = st.columns(3)
                             best_model_name = classic_record.get("best_model_name", "Desconhecido")
@@ -572,6 +583,57 @@ def main() -> None:
                                     col4.metric("Recall", f"{metrics['recall']:.4f}")
                                 else:
                                     col4.metric("Recall", "N/A")
+                                
+                                # F1-Score geral
+                                if 'f1_score' in metrics:
+                                    st.metric("F1-Score", f"{metrics['f1_score']:.4f}")
+                                elif 'f1' in metrics:
+                                    st.metric("F1-Score", f"{metrics['f1']:.4f}")
+                                
+                                # Matriz de Confusão
+                                if 'confusion_matrix' in metrics and metrics['confusion_matrix']:
+                                    st.write("**Matriz de Confusão:**")
+                                    cm = metrics['confusion_matrix']
+                                    
+                                    import plotly.graph_objects as go
+                                    fig = go.Figure(data=go.Heatmap(
+                                        z=cm,
+                                        x=[f'Pred {i}' for i in range(len(cm))],
+                                        y=[f'True {i}' for i in range(len(cm))],
+                                        colorscale='Blues',
+                                        text=cm,
+                                        texttemplate="%{text}",
+                                        textfont={"size": 12}
+                                    ))
+                                    
+                                    fig.update_layout(
+                                        title=f"Matriz de Confusão - {best_model_name.replace('_', ' ').title()}",
+                                        xaxis_title="Predito",
+                                        yaxis_title="Verdadeiro"
+                                    )
+                                    
+                                    st.plotly_chart(fig, use_container_width=True)
+                                
+                                # Métricas por classe (se disponível)
+                                if 'classification_report' in metrics:
+                                    st.write("**Métricas por Classe:**")
+                                    report = metrics['classification_report']
+                                    class_names = report.get('class_names', [])
+                                    
+                                    if class_names:
+                                        # Criar tabela de métricas por classe
+                                        class_metrics_data = []
+                                        for class_name in class_names:
+                                            class_metrics_data.append({
+                                                'Classe': class_name,
+                                                'Precision': report['precision'].get(class_name, 0),
+                                                'Recall': report['recall'].get(class_name, 0),
+                                                'F1-Score': report['f1_score'].get(class_name, 0),
+                                                'Support': report['support'].get(class_name, 0)
+                                            })
+                                        
+                                        class_df = pd.DataFrame(class_metrics_data)
+                                        st.dataframe(class_df, use_container_width=True)
                             
                             elif problem_type == "regression":
                                 col1, col2, col3, col4 = st.columns(4)
