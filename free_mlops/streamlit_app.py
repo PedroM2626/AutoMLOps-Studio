@@ -316,11 +316,9 @@ def main() -> None:
                             
                             for model_name in selected_models:
                                 try:
-                                    from free_mlops.deep_learning import get_deep_learning_automl
-                                    from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
-                                    from free_mlops.advanced_deep_learning import get_advanced_deep_learning_automl
+                                    from free_mlops.unified_deep_learning import get_unified_deep_learning_automl
                                 except ImportError as e:
-                                    st.error(f"Erro ao importar módulos Deep Learning: {str(e)}")
+                                    st.error(f"Erro ao importar módulo Deep Learning unificado: {str(e)}")
                                     st.error("Verifique se as bibliotecas PyTorch e TensorFlow estão instaladas.")
                                     return
                                 
@@ -338,7 +336,7 @@ def main() -> None:
                                         "activation": "relu",
                                         "max_training_time": max_training_time,
                                         "experiment_id": model_experiment_id,
-                                        }
+                                    }
                                     
                                     # Adicionar configurações específicas
                                     if model_name == "mlp":
@@ -363,14 +361,55 @@ def main() -> None:
                                             custom_config["hidden_dim"] = hidden_dim
                                             custom_config["num_layers"] = num_layers
                                             custom_config["bidirectional"] = bidirectional
-                                            
-                                    # Escolher framework
-                                    if model_name in ["text_cnn", "text_lstm"]:
-                                        framework = "pytorch_nlp"
-                                        automl = get_nlp_deep_learning_automl()
-                                    elif model_name in ["mlp", "cnn", "lstm"]:
+                                    
+                                    # Verificar se é modelo Deep Learning ou clássico
+                                    deep_learning_models = ["mlp", "cnn", "lstm", "text_cnn", "text_lstm", "bert_classifier", "tab_transformer"]
+                                    
+                                    if model_name in deep_learning_models:
+                                        # Usar módulo unificado para todos os modelos DL
+                                        automl = get_unified_deep_learning_automl()
                                         framework = "pytorch"
-                                        automl = get_deep_learning_automl()
+                                        
+                                        # Preparar dados baseado no tipo de modelo
+                                        if model_name in ["text_cnn", "text_lstm", "bert_classifier"]:
+                                            # Modelos NLP - converter para texto
+                                            if hasattr(X, 'values'):
+                                                if len(X.columns) == 1 and X.iloc[:, 0].dtype == 'object':
+                                                    texts = X.iloc[:, 0].astype(str).tolist()
+                                                else:
+                                                    texts = X.astype(str).apply(lambda x: ' '.join(x), axis=1).tolist()
+                                            else:
+                                                texts = X.astype(str).tolist()
+                                            
+                                            labels = y.astype(str).tolist()
+                                            
+                                            # Split dados
+                                            from sklearn.model_selection import train_test_split
+                                            texts_train, texts_val, y_train, y_val = train_test_split(
+                                                texts, labels, test_size=0.2, random_state=42
+                                            )
+                                            
+                                            # Treinar modelo NLP
+                                            result = automl.create_model(
+                                                texts_train, y_train, texts_val, y_val,
+                                                model_type=model_name,
+                                                framework=framework,
+                                                problem_type=problem_type,
+                                                config=custom_config
+                                            )
+                                        else:
+                                            # Modelos DL tradicionais - dados tabulares
+                                            from sklearn.model_selection import train_test_split
+                                            X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
+                                            
+                                            # Treinar modelo DL tradicional
+                                            result = automl.create_model(
+                                                X_train, y_train, X_val, y_val,
+                                                model_type=model_name,
+                                                framework=framework,
+                                                problem_type=problem_type,
+                                                config=custom_config
+                                            )
                                     else:
                                         # Modelos clássicos - usar AutoML tradicional
                                         max_time_seconds = max_training_time * 60  # Converter para segundos
@@ -385,35 +424,39 @@ def main() -> None:
                                         )
                                         all_results.append(record)
                                         continue
-                                        
-                                    # Split dados (apenas para DL)
-                                    from sklearn.model_selection import train_test_split
-                                    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2, random_state=42)
-                                    
-                                    # Treinar modelo Deep Learning
-                                    result = automl.create_model(
-                                        X_train, y_train, X_val, y_val,
-                                        model_type=model_name,
-                                        framework=framework,
-                                        problem_type=problem_type,
-                                        config=custom_config
-                                    )
                                     
                                 except Exception as model_error:
                                     st.error(f"Erro ao treinar modelo {model_name}: {str(model_error)}")
                                     continue
                                 
-                                # Salvar experimento no banco de dados (apenas para DL)
-                                from free_mlops.service import run_deep_learning_experiment
-                                experiment_record = run_deep_learning_experiment(
-                                    dataset_path=Path(st.session_state["dataset_path"]),
-                                    target_column=target_column,
-                                    problem_type=problem_type,
-                                    settings=settings,
-                                    model_type=model_name,
-                                    config=custom_config,
-                                    result=result
-                                )
+                                # Salvar experimento no banco de dados (unificado para todos os DL)
+                                if model_name in deep_learning_models:
+                                    # Adaptar resultado para o formato esperado pelo run_deep_learning_experiment
+                                    adapted_result = {
+                                        "model": result.get("model"),
+                                        "metrics": result.get("metrics", {}),
+                                        "training_time": result.get("training_time", 0),
+                                        "config": result.get("config", {}),
+                                        "validation_metrics": result.get("metrics", {}),  # Chave esperada
+                                        "input_shape": result.get("input_shape"),
+                                        "num_classes": result.get("num_classes"),
+                                        "history": result.get("history", {}),
+                                    }
+                                    
+                                    from free_mlops.service import run_deep_learning_experiment
+                                    experiment_record = run_deep_learning_experiment(
+                                        dataset_path=Path(st.session_state["dataset_path"]),
+                                        target_column=target_column,
+                                        problem_type=problem_type,
+                                        settings=settings,
+                                        model_type=model_name,
+                                        config=custom_config,
+                                        result=adapted_result
+                                    )
+                                else:
+                                    # Modelos clássicos - já foi salvo acima
+                                    continue
+                                
                                 all_results.append(experiment_record)
                                 
                                 st.success(f"Modelos treinados! {len(all_results)} modelos concluidos")
