@@ -166,7 +166,7 @@ def run_experiment(
         "random_state": settings.random_state,
         "n_rows": int(df.shape[0]),
         "n_cols": int(df.shape[1]),
-        "best_metrics": automl_result.best_metrics,
+        "best_metrics": automl_result.best_metrics if automl_result.best_metrics else automl_result.leaderboard[0].get("metrics", {}) if automl_result.leaderboard and len(automl_result.leaderboard) > 0 else {},
         "leaderboard": automl_result.leaderboard,
         "training_time_seconds": automl_result.training_time_seconds,
     }
@@ -190,7 +190,7 @@ def run_experiment(
         "feature_columns": [str(c) for c in feature_columns],
         "leaderboard": automl_result.leaderboard,
         "best_model_name": automl_result.best_model_name,
-        "best_metrics": automl_result.best_metrics,
+        "best_metrics": automl_result.best_metrics if automl_result.best_metrics else automl_result.leaderboard[0].get("metrics", {}) if automl_result.leaderboard and len(automl_result.leaderboard) > 0 else {},
         "model_path": str(model_path),
         "model_version": model_version,
         "model_metadata": model_metadata,

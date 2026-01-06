@@ -105,7 +105,8 @@ def _classification_metrics(y_true: pd.Series, y_pred: np.ndarray, y_proba: np.n
         "f1_score": float(f1_score(y_true, y_pred, average="weighted")),
         # Adicionar métricas de validação para compatibilidade com DL
         "val_accuracy": float(accuracy_score(y_true, y_pred)),
-        "val_loss": 0.0,  # Modelos clássicos não têm loss de validação
+        "val_loss": 1.0 - float(accuracy_score(y_true, y_pred)),  # Usar 1-accuracy como proxy de loss de validação
+        "class_names": [str(cls) for cls in sorted(y_true.unique())] if hasattr(y_true, 'unique') else [str(cls) for cls in sorted(pd.Series(y_true).unique())]
     }
 
     try:
@@ -179,6 +180,7 @@ def _regression_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, Any]
         # Adicionar métricas de validação para compatibilidade com DL
         "val_loss": rmse,  # Usar RMSE como val_loss para regressão
         "val_accuracy": 0.0,  # Não aplicável para regressão
+        "class_names": []  # Não aplicável para regressão
     }
 
 
