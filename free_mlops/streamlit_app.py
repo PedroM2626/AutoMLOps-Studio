@@ -38,6 +38,34 @@ def _read_bytes(path: Path) -> bytes:
     return path.read_bytes()
 
 
+def get_class_names_unified(record, metrics, cm):
+    """Função unificada para obter nomes das classes de forma robusta."""
+    class_names = []
+    
+    # 1. Tentar do classification_report (scikit-learn)
+    if 'classification_report' in metrics:
+        class_names = metrics['classification_report'].get('class_names', [])
+    
+    # 2. Tentar das métricas diretas (PyTorch)
+    if not class_names and 'class_names' in metrics:
+        class_names = metrics['class_names']
+    
+    # 3. Tentar do validation_metadata (ambos)
+    if not class_names:
+        val_metrics = record.get('model_metadata', {}).get('validation_metrics', {})
+        class_names = val_metrics.get('class_names', [])
+    
+    # 4. Tentar do original_class_names (PyTorch)
+    if not class_names:
+        class_names = record.get('model_metadata', {}).get('original_class_names', [])
+    
+    # 5. Último recurso: usar índices
+    if not class_names:
+        class_names = [str(i) for i in range(len(cm))]
+    
+    return class_names
+
+
 def main() -> None:
     st.set_page_config(page_title="Free MLOps", layout="wide")
 
@@ -409,20 +437,26 @@ def main() -> None:
                                                 config=custom_config
                                             )
                                     else:
-                                        # Modelos clássicos - usar AutoML tradicional
-                                        max_time_seconds = max_training_time * 60  # Converter para segundos
+                                        record = None  # Inicializar variável para evitar erro de escopo
+                                        try:
+                                            # Modelos clássicos - usar AutoML tradicional
+                                            max_time_seconds = max_training_time * 60  # Converter para segundos
+                                            
+                                            record = run_experiment(
+                                                dataset_path=Path(st.session_state["dataset_path"]),
+                                                target_column=target_column,
+                                                problem_type=problem_type,
+                                                settings=settings,
+                                                selected_models=[model_name],  # Apenas este modelo
+                                                max_time_seconds=max_time_seconds,
+                                            )
+                                            all_results.append(record)
+                                            continue
                                         
-                                        record = run_experiment(
-                                            dataset_path=Path(st.session_state["dataset_path"]),
-                                            target_column=target_column,
-                                            problem_type=problem_type,
-                                            settings=settings,
-                                            selected_models=[model_name],  # Apenas este modelo
-                                            max_time_seconds=max_time_seconds,
-                                        )
-                                        all_results.append(record)
-                                        continue
-                                    
+                                        except Exception as model_error:
+                                            st.error(f"Erro ao treinar modelo {model_name}: {str(model_error)}")
+                                            continue
+                                        
                                 except Exception as model_error:
                                     st.error(f"Erro ao treinar modelo {model_name}: {str(model_error)}")
                                     continue
@@ -528,22 +562,7 @@ def main() -> None:
                                         st.write("**Matriz de Confusão:**")
                                         cm = metrics['confusion_matrix']
                                         
-                                        # Obter nomes reais das classes
-                                        class_names = []
-                                        
-                                        # Tentar obter de várias fontes
-                                        if 'classification_report' in metrics:
-                                            class_names = metrics['classification_report'].get('class_names', [])
-                                        
-                                        if not class_names and 'class_names' in metrics:
-                                            class_names = metrics['class_names']
-                                        
-                                        if not class_names and record.get('model_metadata', {}).get('validation_metrics', {}).get('class_names'):
-                                            class_names = record['model_metadata']['validation_metrics']['class_names']
-                                        
-                                        # Se não tiver nomes das classes, usar números
-                                        if not class_names:
-                                            class_names = [str(i) for i in range(len(cm))]
+                                        class_names = get_class_names_unified(record, metrics, cm)
                                         
                                         import plotly.graph_objects as go
                                         fig = go.Figure(data=go.Heatmap(
@@ -663,22 +682,17 @@ def main() -> None:
                                     st.write("**Matriz de Confusão:**")
                                     cm = metrics['confusion_matrix']
                                     
-                                    # Obter nomes reais das classes
-                                    class_names = []
+                                    class_names = get_class_names_unified(record, metrics, cm)
                                     
-                                    # Tentar obter de várias fontes
-                                    if 'classification_report' in metrics:
-                                        class_names = metrics['classification_report'].get('class_names', [])
-                                    
-                                    if not class_names and 'class_names' in metrics:
-                                        class_names = metrics['class_names']
-                                    
-                                    if not class_names and record.get('model_metadata', {}).get('validation_metrics', {}).get('class_names'):
-                                        class_names = record['model_metadata']['validation_metrics']['class_names']
-                                    
-                                    # Se não tiver nomes das classes, usar números
-                                    if not class_names:
-                                        class_names = [str(i) for i in range(len(cm))]
+                                    # Debug para PyTorch
+                                    if 'pytorch' in str(record.get('model_metadata', {}).get('framework', '')).lower():
+                                        print(f"DEBUG PYTORCH: class_names encontrados: {class_names}")
+                                        print(f"DEBUG PYTORCH: cm shape: {len(cm)}x{len(cm[0]) if cm else '0x0'}")
+                                        print(f"DEBUG PYTORCH: fontes verificadas:")
+                                        print(f"  - classification_report: {'✓' if 'classification_report' in metrics else '✗'}")
+                                        print(f"  - class_names: {'✓' if 'class_names' in metrics else '✗'}")
+                                        print(f"  - validation_metrics: {'✓' if record.get('model_metadata', {}).get('validation_metrics') else '✗'}")
+                                        print(f"  - original_class_names: {'✓' if record.get('model_metadata', {}).get('original_class_names') else '✗'}")
                                     
                                     import plotly.graph_objects as go
                                     fig = go.Figure(data=go.Heatmap(

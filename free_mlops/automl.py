@@ -214,7 +214,7 @@ def run_automl(
             ),
             "gradient_boosting": GradientBoostingClassifier(random_state=random_state),
             "decision_tree": DecisionTreeClassifier(random_state=random_state),
-            "knn": KNeighborsClassifier(),
+            "knn": KNeighborsClassifier(n_neighbors=5, algorithm='auto'),
         }
     elif problem_type == "regression":
         all_candidates = {

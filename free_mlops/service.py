@@ -138,7 +138,38 @@ def run_experiment(
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
     model_path = artifact_dir / "model.pkl"
-    joblib.dump(automl_result.best_pipeline, model_path)
+    
+    # Verificar tamanho do modelo antes de salvar (evitar erro "string or blob too big")
+    try:
+        # Tentar salvar em buffer primeiro para verificar tamanho
+        import io
+        buffer = io.BytesIO()
+        joblib.dump(automl_result.best_pipeline, buffer)
+        buffer_size = buffer.tell()
+        
+        # Se o modelo for muito grande (>50MB), não salvar o pipeline completo
+        if buffer_size > 50 * 1024 * 1024:  # 50MB
+            print(f"AVISO: Modelo muito grande ({buffer_size / 1024 / 1024:.1f}MB), salvando apenas metadados")
+            # Salvar apenas informações básicas do modelo
+            model_info = {
+                "model_type": str(type(automl_result.best_pipeline.named_steps['model']).__name__),
+                "model_params": automl_result.best_pipeline.named_steps['model'].get_params(),
+                "preprocessor_type": "ColumnTransformer",
+                "note": "Modelo muito grande para salvar completamente"
+            }
+            joblib.dump(model_info, model_path)
+        else:
+            joblib.dump(automl_result.best_pipeline, model_path)
+    except Exception as e:
+        print(f"ERRO ao salvar modelo: {e}")
+        # Salvar apenas informações básicas
+        model_info = {
+            "model_type": str(type(automl_result.best_pipeline.named_steps['model']).__name__),
+            "model_params": automl_result.best_pipeline.named_steps['model'].get_params(),
+            "preprocessor_type": "ColumnTransformer",
+            "note": f"Erro ao salvar: {str(e)}"
+        }
+        joblib.dump(model_info, model_path)
 
     leaderboard_path = artifact_dir / "leaderboard.json"
     leaderboard_path.write_text(

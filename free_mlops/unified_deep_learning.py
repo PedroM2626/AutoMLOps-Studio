@@ -211,7 +211,7 @@ class UnifiedDeepLearningAutoML:
         
         # Train model
         result = self._train_pytorch_model(
-            model, train_loader, val_loader, problem_type, config
+            model, train_loader, val_loader, problem_type, config, original_class_names=processor.label_encoder.classes_.tolist()
         )
         
         # Add NLP-specific metadata
@@ -258,29 +258,42 @@ class UnifiedDeepLearningAutoML:
             X_train_tensor = torch.FloatTensor(X_train_clean)
             X_val_tensor = torch.FloatTensor(X_val_clean)
             
-        if hasattr(y_train, 'values'):
-            if problem_type == "classification":
-                # Garantir que labels sejam inteiros para classificação
-                y_train_clean = y_train.astype(int)
-                y_val_clean = y_val.astype(int)
-                y_train_tensor = torch.LongTensor(y_train_clean.values)
-                y_val_tensor = torch.LongTensor(y_val_clean.values)
-                print(f"DEBUG: Labels de treino únicos: {sorted(y_train_clean.unique())}")
-                print(f"DEBUG: Labels de validação únicos: {sorted(y_val_clean.unique())}")
-            else:
-                y_train_tensor = torch.FloatTensor(y_train.values)
-                y_val_tensor = torch.FloatTensor(y_val.values)
+        if problem_type == "classification":
+            # Converter labels para numpy array e garantir que sejam inteiros
+            y_train_array = np.array(y_train).astype(int)
+            y_val_array = np.array(y_val).astype(int)
+            
+            # Verificar se os labels estão no formato correto (0, 1, 2, ...)
+            unique_labels = np.unique(y_train_array)
+            print(f"DEBUG: Labels únicos no treinamento: {unique_labels}")
+            print(f"DEBUG: Min label: {unique_labels.min()}, Max label: {unique_labels.max()}")
+            print(f"DEBUG: Número de classes: {len(unique_labels)}")
+            
+            # CRÍTICO: Sempre remapear labels para 0, 1, 2, ..., n-1
+            # Isso evita o erro "Target X is out of bounds"
+            label_mapping = {old: new for new, old in enumerate(sorted(unique_labels))}
+            print(f"DEBUG: Mapeamento de labels: {label_mapping}")
+            
+            y_train_array = np.array([label_mapping[label] for label in y_train_array])
+            y_val_array = np.array([label_mapping[label] for label in y_val_array])
+            
+            new_unique_labels = np.unique(y_train_array)
+            print(f"DEBUG: Novos labels únicos: {new_unique_labels}")
+            print(f"DEBUG: Novo min label: {new_unique_labels.min()}, Novo max label: {new_unique_labels.max()}")
+            
+            # Verificar se o número de classes corresponde ao max label + 1
+            num_classes = len(new_unique_labels)
+            max_label = new_unique_labels.max()
+            print(f"DEBUG: Número de classes: {num_classes}, Max label: {max_label}")
+            
+            if max_label >= num_classes:
+                raise ValueError(f"Erro: Max label ({max_label}) >= número de classes ({num_classes})")
+            
+            y_train_tensor = torch.tensor(y_train_array, dtype=torch.long)
+            y_val_tensor = torch.tensor(y_val_array, dtype=torch.long)
         else:
-            if problem_type == "classification":
-                y_train_clean = pd.Series(y_train).astype(int)
-                y_val_clean = pd.Series(y_val).astype(int)
-                y_train_tensor = torch.LongTensor(y_train_clean.values)
-                y_val_tensor = torch.LongTensor(y_val_clean.values)
-                print(f"DEBUG: Labels de treino únicos (array): {sorted(np.unique(y_train_clean))}")
-                print(f"DEBUG: Labels de validação únicos (array): {sorted(np.unique(y_val_clean))}")
-            else:
-                y_train_tensor = torch.FloatTensor(y_train)
-                y_val_tensor = torch.FloatTensor(y_val)
+            y_train_tensor = torch.tensor(np.array(y_train), dtype=torch.float32)
+            y_val_tensor = torch.tensor(np.array(y_val), dtype=torch.float32)
         
         # Create datasets and loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -318,9 +331,20 @@ class UnifiedDeepLearningAutoML:
         else:
             raise ValueError(f"Model type not supported: {model_type}")
         
+        # Para modelos tradicionais, obter nomes das classes dos dados originais ANTES do treinamento
+        original_class_names = None
+        if problem_type == "classification":
+            if hasattr(y_train, 'unique'):
+                # Obter valores originais antes da conversão para inteiros
+                original_classes = y_train.unique()
+                original_class_names = [str(cls) for cls in sorted(original_classes)]
+            else:
+                original_classes = np.unique(y_train)
+                original_class_names = [str(cls) for cls in sorted(original_classes)]
+        
         # Train model
         result = self._train_pytorch_model(
-            model, train_loader, val_loader, problem_type, config
+            model, train_loader, val_loader, problem_type, config, original_class_names=original_class_names
         )
         
         # Add traditional model metadata
@@ -331,14 +355,10 @@ class UnifiedDeepLearningAutoML:
         if "validation_metrics" not in result:
             result["validation_metrics"] = result.get("metrics", {})
         
-        # Para modelos tradicionais, obter nomes das classes dos dados originais
-        if problem_type == "classification":
-            if hasattr(y_train, 'unique'):
-                class_names = [str(cls) for cls in sorted(y_train.unique())]
-            else:
-                class_names = [str(cls) for cls in sorted(np.unique(y_train))]
-            
-            result["validation_metrics"]["class_names"] = class_names
+        # Para modelos tradicionais, guardar nomes das classes
+        if original_class_names:
+            result["validation_metrics"]["class_names"] = original_class_names
+            result["original_class_names"] = original_class_names  # Guardar referência
         
         return result
     
@@ -349,6 +369,7 @@ class UnifiedDeepLearningAutoML:
         val_loader: DataLoader,
         problem_type: str,
         config: Dict[str, Any],
+        original_class_names: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Unified training method for all PyTorch models."""
         
@@ -508,15 +529,18 @@ class UnifiedDeepLearningAutoML:
                 # Obter classes únicas dos labels e predições
                 label_classes = sorted(list(set(all_labels)))
                 pred_classes = sorted(list(set(all_predictions)))
-                all_classes = sorted(list(set(all_labels) | set(all_predictions)))
                 
-                print(f"DEBUG: Classes dos labels: {label_classes}")
+                # IMPORTANTE: Usar todas as classes dos labels (dataset original)
+                # não apenas as que aparecem nas predições
+                all_classes = label_classes  # Todas as classes do dataset original
+                
+                print(f"DEBUG: Classes dos labels (dataset): {label_classes}")
                 print(f"DEBUG: Classes das predições: {pred_classes}")
-                print(f"DEBUG: Classes combinadas: {all_classes}")
+                print(f"DEBUG: Classes usadas na matriz: {all_classes}")
                 print(f"DEBUG: Total predições: {len(all_predictions)}")
                 print(f"DEBUG: Total labels: {len(all_labels)}")
                 
-                # Criar matriz com todas as classes
+                # Criar matriz com TODAS as classes do dataset
                 cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
                 print(f"DEBUG: Matriz de confusão shape: {cm.shape}")
                 print(f"DEBUG: Matriz de confusão:\n{cm}")
@@ -531,12 +555,20 @@ class UnifiedDeepLearningAutoML:
                 all_labels, all_predictions, average=None, zero_division=0
             )
             
+            # Usar nomes originais das classes se disponíveis
+            if original_class_names and len(original_class_names) == len(all_classes):
+                class_names_for_report = original_class_names
+                print(f"DEBUG: Usando nomes originais das classes: {class_names_for_report}")
+            else:
+                class_names_for_report = [str(cls) for cls in all_classes]
+                print(f"DEBUG: Usando índices das classes: {class_names_for_report}")
+            
             metrics["classification_report"] = {
-                "precision": {str(all_classes[i]): float(precision_per_class[i]) for i in range(len(all_classes))},
-                "recall": {str(all_classes[i]): float(recall_per_class[i]) for i in range(len(all_classes))},
-                "f1_score": {str(all_classes[i]): float(f1_per_class[i]) for i in range(len(all_classes))},
-                "support": {str(all_classes[i]): int(support_per_class[i]) for i in range(len(all_classes))},
-                "class_names": [str(cls) for cls in all_classes]
+                "precision": {class_names_for_report[i]: float(precision_per_class[i]) for i in range(len(all_classes))},
+                "recall": {class_names_for_report[i]: float(recall_per_class[i]) for i in range(len(all_classes))},
+                "f1_score": {class_names_for_report[i]: float(f1_per_class[i]) for i in range(len(all_classes))},
+                "support": {class_names_for_report[i]: int(support_per_class[i]) for i in range(len(all_classes))},
+                "class_names": class_names_for_report
             }
         
         return {
