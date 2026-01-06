@@ -539,7 +539,7 @@ def main() -> None:
                                             yaxis_title="Verdadeiro"
                                         )
                                         
-                                        st.plotly_chart(fig, use_container_width=True)
+                                        st.plotly_chart(fig, use_container_width=True, key=f"classic_confusion_matrix_{best_model_name}_{i}")
                                     
                                     # Métricas por classe (se disponível)
                                     if 'classification_report' in metrics:
@@ -585,12 +585,14 @@ def main() -> None:
                                 col2.write(f"**Colunas:** {record.get('n_cols', 'N/A')}")
                     
                     # Resultados dos modelos clássicos (se houver)
-                    if classic_record and classic_record not in dl_results:
+                    classic_records = [r for r in all_results if r.get("model_metadata", {}).get("framework") == "scikit-learn"]
+                    if classic_records:
                         st.write("### 📊 Modelos e Métricas")
                         
                         with st.expander("📊 Resultados Completos", expanded=True):
                             # Informações básicas
                             col1, col2, col3 = st.columns(3)
+                            classic_record = classic_records[0]  # Pegar o primeiro registro clássico
                             best_model_name = classic_record.get("best_model_name", "Desconhecido")
                             framework = classic_record.get("model_metadata", {}).get("framework", "scikit-learn")
                             training_time = classic_record.get('model_metadata', {}).get('training_time_seconds', 0)
@@ -655,7 +657,7 @@ def main() -> None:
                                         yaxis_title="Verdadeiro"
                                     )
                                     
-                                    st.plotly_chart(fig, use_container_width=True)
+                                    st.plotly_chart(fig, use_container_width=True, key=f"dl_confusion_matrix_{best_model_name}_{i}")
                                 
                                 # Métricas por classe (se disponível)
                                 if 'classification_report' in metrics:
@@ -1966,7 +1968,7 @@ def main() -> None:
                                         hovermode="x unified"
                                     )
                                     
-                                    st.plotly_chart(fig, use_container_width=True)
+                                    st.plotly_chart(fig, use_container_width=True, key=f"timeseries_forecast_{model_type}_{model_name}")
                                 
                                 # Salvar modelo
                                 model_name = f"{model_type}_ts_model"
@@ -2213,7 +2215,7 @@ def main() -> None:
                                     hovermode="x unified"
                                 )
                                 
-                                st.plotly_chart(fig, use_container_width=True)
+                                st.plotly_chart(fig, use_container_width=True, key=f"timeseries_plot_{model_type}_{model_name}")
                                 
                             except Exception as exc:
                                 st.error(f"Erro na análise: {exc}")
