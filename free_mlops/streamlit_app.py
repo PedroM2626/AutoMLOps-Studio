@@ -30,9 +30,7 @@ from free_mlops.concept_drift import get_concept_drift_detector
 from free_mlops.hyperopt import get_hyperparameter_optimizer
 from free_mlops.dvc_integration import get_dvc_integration
 from free_mlops.data_validation import get_data_validator
-from free_mlops.deep_learning import get_deep_learning_automl
-from free_mlops.advanced_deep_learning import get_advanced_deep_learning_automl
-from free_mlops.nlp_deep_learning import get_nlp_deep_learning_automl
+from free_mlops.unified_deep_learning import get_unified_deep_learning_automl
 from free_mlops.time_series import get_time_series_automl
 
 
@@ -316,7 +314,7 @@ def main() -> None:
                             
                             for model_name in selected_models:
                                 try:
-                                    from free_mlops.unified_deep_learning import get_unified_deep_learning_automl
+                                    automl = get_unified_deep_learning_automl()
                                 except ImportError as e:
                                     st.error(f"Erro ao importar módulo Deep Learning unificado: {str(e)}")
                                     st.error("Verifique se as bibliotecas PyTorch e TensorFlow estão instaladas.")
@@ -377,11 +375,11 @@ def main() -> None:
                                                 if len(X.columns) == 1 and X.iloc[:, 0].dtype == 'object':
                                                     texts = X.iloc[:, 0].astype(str).tolist()
                                                 else:
-                                                    texts = X.astype(str).apply(lambda x: ' '.join(x), axis=1).tolist()
+                                                    texts = X.astype(str).apply(lambda x: ' '.join(x) if isinstance(x, (list, tuple)) else str(x), axis=1).tolist()
                                             else:
                                                 texts = X.astype(str).tolist()
                                             
-                                            labels = y.astype(str).tolist()
+                                            labels = [str(label) for label in y]
                                             
                                             # Split dados
                                             from sklearn.model_selection import train_test_split
@@ -490,7 +488,15 @@ def main() -> None:
                                 
                                 # Métricas
                                 st.write("**Métricas de Validação:**")
+                                # Tentar obter métricas de diferentes fontes
                                 metrics = record.get("best_metrics", {})
+                                if not metrics:
+                                    metrics = record.get("validation_metrics", {})
+                                if not metrics and "leaderboard" in record:
+                                    # Tentar obter do leaderboard
+                                    leaderboard = record.get("leaderboard", [])
+                                    if leaderboard and len(leaderboard) > 0:
+                                        metrics = leaderboard[0].get("metrics", {})
                                 
                                 if problem_type == "classification":
                                     col1, col2, col3, col4 = st.columns(4)
@@ -522,11 +528,28 @@ def main() -> None:
                                         st.write("**Matriz de Confusão:**")
                                         cm = metrics['confusion_matrix']
                                         
+                                        # Obter nomes reais das classes
+                                        class_names = []
+                                        
+                                        # Tentar obter de várias fontes
+                                        if 'classification_report' in metrics:
+                                            class_names = metrics['classification_report'].get('class_names', [])
+                                        
+                                        if not class_names and 'class_names' in metrics:
+                                            class_names = metrics['class_names']
+                                        
+                                        if not class_names and record.get('model_metadata', {}).get('validation_metrics', {}).get('class_names'):
+                                            class_names = record['model_metadata']['validation_metrics']['class_names']
+                                        
+                                        # Se não tiver nomes das classes, usar números
+                                        if not class_names:
+                                            class_names = [str(i) for i in range(len(cm))]
+                                        
                                         import plotly.graph_objects as go
                                         fig = go.Figure(data=go.Heatmap(
                                             z=cm,
-                                            x=[f'Pred {i}' for i in range(len(cm))],
-                                            y=[f'True {i}' for i in range(len(cm))],
+                                            x=[f'Pred: {cls}' for cls in class_names],
+                                            y=[f'True: {cls}' for cls in class_names],
                                             colorscale='Blues',
                                             text=cm,
                                             texttemplate="%{text}",
@@ -640,11 +663,28 @@ def main() -> None:
                                     st.write("**Matriz de Confusão:**")
                                     cm = metrics['confusion_matrix']
                                     
+                                    # Obter nomes reais das classes
+                                    class_names = []
+                                    
+                                    # Tentar obter de várias fontes
+                                    if 'classification_report' in metrics:
+                                        class_names = metrics['classification_report'].get('class_names', [])
+                                    
+                                    if not class_names and 'class_names' in metrics:
+                                        class_names = metrics['class_names']
+                                    
+                                    if not class_names and record.get('model_metadata', {}).get('validation_metrics', {}).get('class_names'):
+                                        class_names = record['model_metadata']['validation_metrics']['class_names']
+                                    
+                                    # Se não tiver nomes das classes, usar números
+                                    if not class_names:
+                                        class_names = [str(i) for i in range(len(cm))]
+                                    
                                     import plotly.graph_objects as go
                                     fig = go.Figure(data=go.Heatmap(
                                         z=cm,
-                                        x=[f'Pred {i}' for i in range(len(cm))],
-                                        y=[f'True {i}' for i in range(len(cm))],
+                                        x=[f'Pred: {cls}' for cls in class_names],
+                                        y=[f'True: {cls}' for cls in class_names],
                                         colorscale='Blues',
                                         text=cm,
                                         texttemplate="%{text}",

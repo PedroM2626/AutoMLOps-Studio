@@ -219,6 +219,11 @@ class UnifiedDeepLearningAutoML:
         result["class_names"] = processor.label_encoder.classes_.tolist()
         result["processor"] = processor
         
+        # Adicionar class_names ao validation_metrics para compatibilidade
+        if "validation_metrics" not in result:
+            result["validation_metrics"] = result.get("metrics", {})
+        result["validation_metrics"]["class_names"] = processor.label_encoder.classes_.tolist()
+        
         return result
     
     def _create_traditional_model(
@@ -237,14 +242,45 @@ class UnifiedDeepLearningAutoML:
         config = config or self.default_configs.get(model_type, {})
         
         # Prepare data
-        X_train_clean = X_train.fillna(X_train.mean()).select_dtypes(include=[np.number])
-        X_val_clean = X_val.fillna(X_val.mean()).select_dtypes(include=[np.number])
+        if hasattr(X_train, 'fillna'):
+            X_train_clean = X_train.fillna(X_train.mean()).select_dtypes(include=[np.number])
+            X_val_clean = X_val.fillna(X_val.mean()).select_dtypes(include=[np.number])
+        else:
+            # Se for numpy array, não precisa de fillna
+            X_train_clean = pd.DataFrame(X_train).fillna(pd.DataFrame(X_train).mean()).select_dtypes(include=[np.number])
+            X_val_clean = pd.DataFrame(X_val).fillna(pd.DataFrame(X_val).mean()).select_dtypes(include=[np.number])
         
         # Convert to tensors
-        X_train_tensor = torch.FloatTensor(X_train_clean.values)
-        y_train_tensor = torch.LongTensor(y_train.values) if problem_type == "classification" else torch.FloatTensor(y_train.values)
-        X_val_tensor = torch.FloatTensor(X_val_clean.values)
-        y_val_tensor = torch.LongTensor(y_val.values) if problem_type == "classification" else torch.FloatTensor(y_val.values)
+        if hasattr(X_train_clean, 'values'):
+            X_train_tensor = torch.FloatTensor(X_train_clean.values)
+            X_val_tensor = torch.FloatTensor(X_val_clean.values)
+        else:
+            X_train_tensor = torch.FloatTensor(X_train_clean)
+            X_val_tensor = torch.FloatTensor(X_val_clean)
+            
+        if hasattr(y_train, 'values'):
+            if problem_type == "classification":
+                # Garantir que labels sejam inteiros para classificação
+                y_train_clean = y_train.astype(int)
+                y_val_clean = y_val.astype(int)
+                y_train_tensor = torch.LongTensor(y_train_clean.values)
+                y_val_tensor = torch.LongTensor(y_val_clean.values)
+                print(f"DEBUG: Labels de treino únicos: {sorted(y_train_clean.unique())}")
+                print(f"DEBUG: Labels de validação únicos: {sorted(y_val_clean.unique())}")
+            else:
+                y_train_tensor = torch.FloatTensor(y_train.values)
+                y_val_tensor = torch.FloatTensor(y_val.values)
+        else:
+            if problem_type == "classification":
+                y_train_clean = pd.Series(y_train).astype(int)
+                y_val_clean = pd.Series(y_val).astype(int)
+                y_train_tensor = torch.LongTensor(y_train_clean.values)
+                y_val_tensor = torch.LongTensor(y_val_clean.values)
+                print(f"DEBUG: Labels de treino únicos (array): {sorted(np.unique(y_train_clean))}")
+                print(f"DEBUG: Labels de validação únicos (array): {sorted(np.unique(y_val_clean))}")
+            else:
+                y_train_tensor = torch.FloatTensor(y_train)
+                y_val_tensor = torch.FloatTensor(y_val)
         
         # Create datasets and loaders
         train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
@@ -290,6 +326,19 @@ class UnifiedDeepLearningAutoML:
         # Add traditional model metadata
         result["input_shape"] = input_shape
         result["feature_names"] = X_train_clean.columns.tolist()
+        
+        # Adicionar class_names ao validation_metrics para compatibilidade
+        if "validation_metrics" not in result:
+            result["validation_metrics"] = result.get("metrics", {})
+        
+        # Para modelos tradicionais, obter nomes das classes dos dados originais
+        if problem_type == "classification":
+            if hasattr(y_train, 'unique'):
+                class_names = [str(cls) for cls in sorted(y_train.unique())]
+            else:
+                class_names = [str(cls) for cls in sorted(np.unique(y_train))]
+            
+            result["validation_metrics"]["class_names"] = class_names
         
         return result
     
@@ -381,8 +430,24 @@ class UnifiedDeepLearningAutoML:
                         # Collect predictions for metrics
                         pred_np = predicted.cpu().numpy().flatten()
                         labels_np = batch_y.cpu().numpy().flatten()
+                        
+                        # Debug: Mostrar primeiras predições do batch
+                        if len(all_predictions) == 0:  # Primeiro batch
+                            print(f"DEBUG: Primeiro batch - Predições: {pred_np[:5]}")
+                            print(f"DEBUG: Primeiro batch - Labels: {labels_np[:5]}")
+                            print(f"DEBUG: Predições únicas: {np.unique(pred_np)}")
+                            print(f"DEBUG: Labels únicos: {np.unique(labels_np)}")
+                            print(f"DEBUG: Batch size: {len(pred_np)}")
+                        
                         all_predictions.extend(pred_np)
                         all_labels.extend(labels_np)
+                        
+                        # Debug final após coletar todas as predições
+                        if len(all_predictions) >= len(val_loader.dataset):  # Último batch
+                            print(f"DEBUG: Total coletado - Predições: {len(all_predictions)}")
+                            print(f"DEBUG: Total coletado - Labels: {len(all_labels)}")
+                            print(f"DEBUG: Todas as predições únicas: {np.unique(all_predictions)}")
+                            print(f"DEBUG: Todos os labels únicos: {np.unique(all_labels)}")
                     else:
                         # For regression, collect continuous values
                         if problem_type == "regression":
@@ -414,6 +479,11 @@ class UnifiedDeepLearningAutoML:
         # Calculate final metrics
         metrics = {"val_loss": best_val_loss}
         
+        # Debug information
+        print(f"DEBUG: all_predictions length: {len(all_predictions)}")
+        print(f"DEBUG: all_labels length: {len(all_labels)}")
+        print(f"DEBUG: problem_type: {problem_type}")
+        
         if problem_type == "classification" and len(all_predictions) > 0:
             from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix, precision_recall_fscore_support
             
@@ -433,9 +503,28 @@ class UnifiedDeepLearningAutoML:
             })
             
             # Confusion matrix
-            all_classes = sorted(list(set(all_labels) | set(all_predictions)))
-            cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
-            metrics["confusion_matrix"] = cm.tolist()
+            # Garantir que todas as classes possíveis sejam incluídas
+            if len(all_labels) > 0 and len(all_predictions) > 0:
+                # Obter classes únicas dos labels e predições
+                label_classes = sorted(list(set(all_labels)))
+                pred_classes = sorted(list(set(all_predictions)))
+                all_classes = sorted(list(set(all_labels) | set(all_predictions)))
+                
+                print(f"DEBUG: Classes dos labels: {label_classes}")
+                print(f"DEBUG: Classes das predições: {pred_classes}")
+                print(f"DEBUG: Classes combinadas: {all_classes}")
+                print(f"DEBUG: Total predições: {len(all_predictions)}")
+                print(f"DEBUG: Total labels: {len(all_labels)}")
+                
+                # Criar matriz com todas as classes
+                cm = confusion_matrix(all_labels, all_predictions, labels=all_classes)
+                print(f"DEBUG: Matriz de confusão shape: {cm.shape}")
+                print(f"DEBUG: Matriz de confusão:\n{cm}")
+                
+                metrics["confusion_matrix"] = cm.tolist()
+            else:
+                print("DEBUG: Sem predições ou labels para criar matriz de confusão")
+                metrics["confusion_matrix"] = []
             
             # Detailed metrics per class
             precision_per_class, recall_per_class, f1_per_class, support_per_class = precision_recall_fscore_support(
@@ -467,7 +556,7 @@ class UnifiedDeepLearningAutoML:
     
     def _get_optimizer(self, model: nn.Module, config: Dict[str, Any]) -> optim.Optimizer:
         """Get appropriate optimizer."""
-        optimizer_name = config.get("optimizer", "adam").lower()
+        optimizer_name = str(config.get("optimizer", "adam")).lower()
         lr = config.get("learning_rate", 0.001)
         
         if optimizer_name == "adam":
@@ -769,19 +858,40 @@ class NLPProcessor:
         
     def fit_transform(self, texts: List[str], labels: List[str]):
         """Fit processor and transform texts."""
+        # Garantir que todos os textos sejam strings
+        clean_texts = []
+        for text in texts:
+            if isinstance(text, (list, tuple)):
+                # Se for lista/tupla, juntar os elementos
+                clean_text = ' '.join(str(item) for item in text)
+            else:
+                # Se não for lista, converter para string
+                clean_text = str(text)
+            clean_texts.append(clean_text)
+        
         if self.method == "tfidf":
             self.vectorizer = TfidfVectorizer(
                 max_features=10000,
                 ngram_range=(1, 2),
-                stop_words='english'
+                stop_words=None,  # Removido para evitar erro
+                lowercase=True,  # Deixar o sklearn cuidar do lower
+                preprocessor=None  # Não usar pré-processamento customizado
             )
         else:
-            self.vectorizer = CountVectorizer(max_features=10000)
+            self.vectorizer = CountVectorizer(
+                max_features=10000,
+                stop_words=None,
+                lowercase=True,
+                preprocessor=None
+            )
         
-        X = self.vectorizer.fit_transform(texts).toarray()
+        X = self.vectorizer.fit_transform(clean_texts).toarray()
+        
+        # Garantir que labels sejam strings
+        clean_labels = [str(label) for label in labels]
         
         self.label_encoder = LabelEncoder()
-        y = self.label_encoder.fit_transform(labels)
+        y = self.label_encoder.fit_transform(clean_labels)
         
         self.vocab_size = len(self.vectorizer.vocabulary_)
         return X, y
@@ -791,7 +901,18 @@ class NLPProcessor:
         if self.vectorizer is None:
             raise ValueError("Processor not fitted. Call fit_transform first.")
         
-        X = self.vectorizer.transform(texts).toarray()
+        # Garantir que todos os textos sejam strings
+        clean_texts = []
+        for text in texts:
+            if isinstance(text, (list, tuple)):
+                # Se for lista/tupla, juntar os elementos
+                clean_text = ' '.join(str(item) for item in text)
+            else:
+                # Se não for lista, converter para string
+                clean_text = str(text)
+            clean_texts.append(clean_text)
+        
+        X = self.vectorizer.transform(clean_texts).toarray()
         return X
     
     def inverse_transform_labels(self, y_encoded):
