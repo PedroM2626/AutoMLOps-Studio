@@ -1,0 +1,9 @@
+services:
+  ml_api:
+    build: .
+    container_name: mlops_enterprise_api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: always

@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: free-mlops
-  labels:
-    name: free-mlops
-    app: free-mlops

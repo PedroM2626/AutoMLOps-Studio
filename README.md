@@ -1,555 +1,425 @@
-# Free MLOps Platform 🚀
+# 🎯 MLOps Enterprise - Universal Framework
 
-Plataforma **Enterprise-Grade**, **100% gratuita** e **self-hosted** para criar, treinar, avaliar e fazer deploy de modelos de Machine Learning com recursos avançados comparáveis às principais plataformas comerciais.
+## 📋 Visão Geral
 
-## 🎯 Status da Plataforma: **PRODUCTION-READY**
+Framework MLOps completo e universal para treinamento, rastreamento e deploy de modelos de Machine Learning com integração total com DagsHub + MLflow.
 
-### ✅ Funcionalidades Implementadas (9/20)
+## 🚀 Recursos Principais
 
-#### 📊 **Model Monitoring & Observability** ✅
-- **Performance Monitoring:** accuracy, latency, throughput em tempo real
-- **Data Drift Detection:** análise estatística de mudanças nos dados
-- **Concept Drift Detection:** detecção de mudanças no comportamento do modelo
-- **Alert System:** alertas automáticos baseados em thresholds configuráveis
+### ✅ **Módulos Disponíveis:**
 
-#### 🔬 **Experiment Management Avançado** ✅
-- **Hyperparameter Optimization:** otimização com Optuna (TPE Sampler)
-- **Cross-validation:** validação cruzada configurável
-- **Study Management:** histórico completo de otimizações
-- **Best Model Selection:** seleção automática dos melhores hiperparâmetros
+#### **1. 🤖 Machine Learning Clássico**
+- **Algoritmos**: RandomForest, LogisticRegression, SVM, etc.
+- **Suporte**: Classificação e Regressão
+- **Auto-detecção**: Dados tabulares e NLP (TF-IDF)
+- **Rastreamento**: Métricas completas no DagsHub
 
-#### 📦 **Data Versioning & Lineage** ✅
-- **DVC Integration:** controle de versão de datasets e pipelines
-- **Data Lineage:** rastreabilidade completa de upstream/downstream
-- **Data Validation:** validação automática com Pandera schemas
-- **Schema Management:** criação, comparação e exportação de schemas
+#### **2. 📈 Time Series (Prophet)**
+- **Framework**: Facebook Prophet
+- **Funcionalidade**: Previsão de séries temporais
+- **Dados**: Sintéticos ou reais
+- **Exportação**: Modelo registrado no MLflow
 
-#### 🤖 **Extended AutoML** ✅
-- **Deep Learning:** TensorFlow e PyTorch (MLP, CNN, LSTM)
-- **Advanced DL:** TabTransformer, Vision Transformer, Attention mechanisms
-- **Time Series:** ARIMA, Prophet, LSTM para séries temporais
-- **Multi-framework:** suporte a múltiplos frameworks de ML/DL
-- **Auto-tuning:** configuração automática de hiperparâmetros
-- **MLflow Tracking:** experiment tracking profissional
-- **Model Explainability:** SHAP e Captum para interpretabilidade
+#### **3. 🧬 Clustering (K-Means)**
+- **Algoritmo**: K-Means com otimização automática
+- **Métricas**: Silhouette Score
+- **Visualização**: Plot PCA automático
+- **Flexibilidade**: Dados numéricos ou fallback sintético
 
----
+#### **4. 🖼️ Computer Vision (YOLOv8)**
+- **Modelos**: YOLOv8 (classify, detect, segment)
+- **Fine-tuning**: Transfer learning com dados customizados
+- **Exportação**: ONNX e outros formatos
+- **Versões**: yolov8n, yolov8s, yolov8m, yolov8l, yolov8x
 
-## 🏆 Comparação com Plataformas Comerciais
+#### **5. 🔍 Monitoramento (Evidently)**
+- **Drift Detection**: Data drift e Target drift
+- **Relatórios**: HTML interativos
+- **Integração**: Log automático no MLflow
+- **Alertas**: Configuráveis
 
-| Funcionalidade | Free MLOps | Azure ML | SageMaker | Vertex AI | Databricks |
-|---|---|---|---|---|---|
-| **AutoML Clássico** | ✅ Scikit-learn | ✅ | ✅ | ✅ | ✅ |
-| **Deep Learning** | ✅ TF/PyTorch | ✅ | ✅ | ✅ | ✅ |
-| **Advanced DL** | ✅ Transformers | ❌ | ❌ | ✅ | ✅ |
-| **Time Series** | ✅ ARIMA/Prophet/LSTM | ✅ | ✅ | ✅ | ✅ |
-| **Hyperparameter Opt** | ✅ Optuna | ✅ | ✅ | ✅ | ✅ |
-| **Model Monitoring** | ✅ Performance/Drift | ✅ | ✅ | ✅ | ✅ |
-| **Data Versioning** | ✅ DVC | ✅ | ✅ | ✅ | ✅ |
-| **Data Validation** | ✅ Pandera | ✅ | ✅ | ✅ | ✅ |
-| **Experiment Tracking** | ✅ SQLite | ✅ | ✅ | ✅ | ✅ |
-| **Model Registry** | ✅ Versionamento | ✅ | ✅ | ✅ | ✅ |
-| **API Deployment** | ✅ FastAPI | ✅ | ✅ | ✅ | ✅ |
-| **Custo** | **GRATIS** | $$$$ | $$$$ | $$$$ | $$$$ |
-| **Self-Hosted** | ✅ | ❌ | ❌ | ❌ | ❌ |
-
-**🎉 Free MLOps oferece recursos enterprise-grade com 100% controle dos dados e zero custo!**
+#### **6. 🚀 Model Serving (FastAPI)**
+- **API REST**: Auto-gerada para qualquer modelo
+- **Deploy**: Docker-ready
+- **Carregamento**: Dinâmico do MLflow Registry
+- **Documentação**: OpenAPI/Swagger automática
 
 ---
 
-## 🚀 Funcionalidades Principais
+## 📁 Estrutura do Projeto
 
-### 📈 **Core MLOps**
-- **AutoML Clássico:** 13 algoritmos scikit-learn com tuning automático
-- **Experiment Tracking:** SQLite com versionamento completo
-- **Model Registry:** registro e versionamento de modelos
-- **Fine-Tuning:** GridSearchCV e RandomizedSearchCV
-- **Model Testing:** testes individuais e em lote
-
-### 🤖 **Advanced AutoML**
-- **Deep Learning:** MLP, CNN, LSTM com TensorFlow/PyTorch
-- **Time Series:** ARIMA, Prophet, LSTM para forecasting
-- **Hyperparameter Optimization:** Optuna com TPE Sampler
-- **Neural Architecture Search:** planejado para implementação
-
-### 📊 **Enterprise Monitoring**
-- **Real-time Performance:** accuracy, latency, throughput
-- **Drift Detection:** data drift e concept drift
-- **Alert System:** thresholds configuráveis
-- **Dashboard Completo:** visualizações interativas
-
-### 📦 **Data Management**
-- **DVC Integration:** versionamento de datasets e pipelines
-- **Data Validation:** schemas Pandera com validação automática
-- **Data Lineage:** rastreabilidade completa
-- **Schema Management:** criação e comparação de schemas
-
----
-
-## 🛠️ Instalação Completa
-
-### Requisitos Base
-- Python **3.10+**
-
-### Instalação Básica
-```bash
-pip install -r requirements.txt
 ```
-
-### Instalação Completa (todas as funcionalidades)
-```bash
-pip install -r requirements-full.txt
-```
-
-### Instalação Flexível (recomendado)
-
-#### 🎯 **Opção 1: Instalação Guiada**
-```bash
-# Instalar dependências essenciais
-pip install -r requirements.txt
-
-# Instalar dependências opcionais conforme necessidade
-python install_optional.py --all                    # Todas as funcionalidades
-python install_optional.py --deep-learning          # Apenas Deep Learning
-python install_optional.py --time-series            # Apenas Time Series
-python install_optional.py --monitoring             # Apenas Monitoring
-python install_optional.py --data-validation         # Apenas Data Validation
-```
-
-#### 🎯 **Opção 2: Arquivos de Requirements**
-```bash
-# Mínimo para funcionamento básico
-pip install -r requirements-base.txt
-
-# Funcionalidades básicas + visualizações
-pip install -r requirements.txt
-
-# Todas as funcionalidades (produção completa)
-pip install -r requirements-full.txt
-```
-
-#### 🎯 **Opção 3: Manual por Funcionalidade**
-```bash
-# 🤖 Deep Learning
-pip install tensorflow torch
-
-# 🚀 Advanced Deep Learning (Transformers)
-pip install transformers mlflow shap captum
-
-# 📈 Time Series  
-pip install statsmodels pmdarima prophet
-
-# 🔬 Hyperparameter Optimization
-pip install optuna
-
-# 📦 Data Versioning & Validation
-pip install dvc pandera
-
-# 📊 Visualizações Avançadas
-pip install plotly
-```
-
----
-
-## 🎮 Como Usar
-
-### Interface Web (Recomendado)
-```bash
-streamlit run free_mlops/streamlit_app.py
-```
-
-Acesse: `http://localhost:8501`
-
-### 🚀 MLflow Tracking (Opcional)
-```bash
-# Iniciar MLflow UI para experiment tracking
-python start_mlflow.py
-```
-
-Acesse: `http://localhost:5000`
-
-### 🐳 Docker (Recomendado para produção)
-```bash
-# Build e iniciar todos os serviços
-./docker-run.sh run
-
-# Ou individualmente
-./docker-run.sh streamlit    # Apenas Streamlit
-./docker-run.sh mlflow       # Apenas MLflow
-./docker-run.sh api          # Apenas API
-
-# Parar serviços
-./docker-run.sh stop
-
-# Ver logs
-./docker-run.sh logs
-
-# Limpar tudo
-./docker-run.sh cleanup
-```
-
-**Acessar serviços:**
-- 🌐 Streamlit: http://localhost:8501
-- 📊 MLflow UI: http://localhost:5000
-- 🔌 API Docs: http://localhost:8000/docs
-
-### ☸️ Kubernetes (Para clusters)
-```bash
-# Deploy completo
-./k8s-deploy.sh deploy
-
-# Com ingress
-./k8s-deploy.sh deploy --ingress
-
-# Ver status
-./k8s-deploy.sh status
-
-# Ver logs
-./k8s-deploy.sh logs free-mlops-app
-
-# Escalar
-./k8s-deploy.sh scale free-mlops-app 3
-
-# Atualizar
-./k8s-deploy.sh update
-
-# Remover
-./k8s-deploy.sh delete
-```
-
-### API REST
-```bash
-python -m free_mlops.api
-```
-
-Acesse: `http://localhost:8000/docs`
-
----
-
-## 📋 Estrutura do Projeto
-
-```text
 free-mlops/
-├── free_mlops/
-│   ├── 🎯 Core MLOps
-│   │   ├── automl.py              # AutoML clássico
-│   │   ├── service.py             # Serviços principais
-│   │   ├── db.py                  # Banco de dados
-│   │   ├── registry.py            # Model Registry
-│   │   ├── finetune.py            # Fine-tuning
-│   │   └── test_models.py         # Teste de modelos
-│   │
-│   ├── 📊 Monitoring & Observability
-│   │   ├── monitoring.py          # Performance monitoring
-│   │   ├── drift_detection.py     # Data drift detection
-│   │   ├── concept_drift.py       # Concept drift detection
-│   │   └── alert_manager.py       # Sistema de alertas
-│   │
-│   ├── 🔬 Advanced Experiment Management
-│   │   └── hyperopt.py            # Hyperparameter optimization
-│   │
-│   ├── 📦 Data Versioning & Lineage
-│   │   ├── dvc_integration.py     # DVC integration
-│   │   └── data_validation.py     # Data validation com Pandera
-│   │
-│   ├── 🤖 Extended AutoML
-│   │   ├── deep_learning.py       # TensorFlow/PyTorch (MLP, CNN, LSTM)
-│   │   ├── advanced_deep_learning.py  # Transformers, Attention, ViT
-│   │   └── time_series.py         # ARIMA/Prophet/LSTM
-│   │
-│   ├── 🔧 Infrastructure
-│   │   ├── api.py                  # API REST
-│   │   ├── streamlit_app.py       # Interface web
-│   │   ├── config.py               # Configurações
-│   │   └── schemas.py              # Schemas Pydantic
-│   │
-│   └── 🗂️ Management
-│       ├── db_delete.py            # Exclusão de experimentos
-│       └── registry_delete.py      # Exclusão de modelos registrados
-│
-├── tests/                          # Testes unitários, integração e aceitação
-├── data/                           # Datasets importados
-├── artifacts/                      # Artefatos de experimentos
-├── .env                            # Configurações locais
-├── .env.example                    # Exemplo de configurações
-├── requirements.txt                # Dependências básicas + visualizações
-├── requirements-base.txt           # Dependências mínimas essenciais
-├── requirements-full.txt           # Todas as dependências (produção completa)
-├── requirements-dev.txt            # Dependências de desenvolvimento
-├── install_optional.py             # Instalador guiado de dependências opcionais
-├── start_mlflow.py                 # Script para iniciar MLflow UI
-├── docker-run.sh                   # Script Docker para automação
-├── k8s-deploy.sh                   # Script Kubernetes para deploy
-├── Dockerfile                      # Docker image definition
-├── docker-compose.yml              # Docker Compose configuration
-├── .dockerignore                   # Docker ignore file
-├── k8s/                            # Kubernetes manifests
-│   ├── namespace.yaml              # Namespace definition
-│   ├── app-deployment.yaml         # Streamlit app deployment
-│   ├── mlflow-deployment.yaml      # MLflow deployment
-│   ├── api-deployment.yaml         # API deployment
-│   ├── persistent-volumes.yaml     # PVCs for data persistence
-│   ├── ingress.yaml                # Ingress configuration
-│   └── configmap.yaml              # Configuration maps
-└── README.md                       # Este arquivo
+├── experiments/
+│   ├── train_and_save_professional.py    # Framework principal
+│   ├── main.py                        # Entry point FLAML/AutoGluon
+│   ├── .env                          # Configurações de ambiente
+│   ├── Dockerfile                     # Containerização
+│   ├── docker-compose.yml              # Orquestração
+│   ├── app_serving.py               # API de serving gerada
+│   ├── requirements.txt               # Dependências
+│   ├── src/                         # Módulos auxiliares
+│   │   ├── utils.py
+│   │   ├── flaml_train.py
+│   │   └── autogluon_train.py
+│   └── tests/                       # Testes automatizados
+└── README.md                        # Este arquivo
 ```
 
 ---
 
-## 🎯 Fluxo de Trabalho Recomendado
+## 🛠️ Instalação e Configuração
 
-### 1. **Data Preparation**
-- Upload do dataset CSV
-- Data validation com Pandera schemas
-- Versionamento com DVC
+### **Pré-requisitos:**
+```bash
+# Python 3.8+
+pip install python>=3.8
 
-### 2. **Model Development**
-- AutoML clássico para baseline
-- Hyperparameter optimization com Optuna
-- Deep Learning (TensorFlow/PyTorch)
-- Time Series forecasting
+# Git LFS (para modelos grandes)
+git lfs install
+```
 
-### 3. **Model Management**
-- Experiment tracking completo
-- Model Registry com versionamento
-- Fine-tuning de hiperparâmetros
+### **Dependências Principais:**
+```bash
+# MLOps & Tracking
+pip install mlflow dagshub optuna
 
-### 4. **Testing & Validation**
-- Testes individuais e em lote
-- Model validation automatizada
-- Performance monitoring
+# Machine Learning
+pip install scikit-learn pandas numpy matplotlib
 
-### 5. **Production Deployment**
-- API REST para predições
-- Real-time monitoring
-- Alert system
-- Drift detection
+# Deep Learning
+pip install torch transformers datasets
+
+# Time Series
+pip install prophet
+
+# Computer Vision
+pip install ultralytics
+
+# Monitoramento
+pip install evidently
+
+# Serving
+pip install fastapi uvicorn python-dotenv
+```
+
+### **Configuração do Ambiente:**
+```bash
+# Copiar arquivo de ambiente
+cp .env.example .env
+
+# Editar configurações
+nano .env
+```
+
+**Variáveis de ambiente (.env):**
+```bash
+DAGSHUB_REPO_OWNER=PedroM2626
+DAGSHUB_REPO_NAME=free-mlops
+DAGSHUB_TOKEN=seu_token_aqui
+MLFLOW_TRACKING_URI=https://dagshub.com/PedroM2626/free-mlops.mlflow
+```
+
+---
+
+## 🚀 Uso Rápido
+
+### **1. Executar Todos os Módulos:**
+```bash
+cd experiments
+python train_and_save_professional.py --task all
+```
+
+### **2. Executar Módulo Específico:**
+```bash
+# Machine Learning Clássico
+python train_and_save_professional.py --task classic
+
+# Time Series
+python train_and_save_professional.py --task ts
+
+# Clustering
+python train_and_save_professional.py --task cluster
+
+# Computer Vision
+python train_and_save_professional.py --task cv
+```
+
+### **3. Exemplos de Uso:**
+
+#### **🤖 Machine Learning Clássico:**
+```python
+from experiments.train_and_save_professional import MLOpsEnterprise
+
+# Inicializar framework
+ml = MLOpsEnterprise()
+
+# Treinar modelo de classificação
+ml.train_classic_ml(task='classification', data_path='seus_dados.csv')
+
+# Treinar modelo de regressão
+ml.train_classic_ml(task='regression', data_path='seus_dados.csv')
+```
+
+#### **🧬 Clustering:**
+```python
+# Treinar K-Means com 5 clusters
+ml.train_clustering(n_clusters=5, data_path='seus_dados.csv')
+
+# Resultados salvos automaticamente no DagsHub
+# - Modelo K-Means
+# - Plot PCA visualização
+# - Silhouette Score
+```
+
+#### **🖼️ Computer Vision:**
+```python
+# Treinar YOLO para detecção
+ml.train_cv(
+    task='detect',
+    data_config='path/to/dataset.yaml',
+    model_type='yolov8n.pt',
+    epochs=50
+)
+
+# Treinar YOLO para classificação
+ml.train_cv(
+    task='classify',
+    data_config='path/to/dataset.yaml',
+    model_type='yolov8s.pt',
+    epochs=30
+)
+```
+
+#### **📈 Time Series:**
+```python
+# Com dados reais
+ml.train_time_series(data_path='vendas_mensais.csv')
+
+# Com dados sintéticos (para testes)
+ml.train_time_series()
+```
+
+---
+
+## 📊 Resultados no DagsHub
+
+### **🔗 Experimentos Criados:**
+- **`/classic_classification`**: Modelos de classificação clássicos
+- **`/classic_regression`**: Modelos de regressão clássicos
+- **`/time_series`**: Modelos Prophet
+- **`/clustering`**: Modelos K-Means
+- **`/cv_detect`**: YOLO detecção
+- **`/cv_classify`**: YOLO classificação
+- **`/cv_segment`**: YOLO segmentação
+
+### **📁 Artefatos Salvos:**
+- **Modelos**: `.pkl`, `.pt`, `.onnx`
+- **Métricas**: JSON com todas as métricas
+- **Visualizações**: PNG (matriz confusão, PCA plots)
+- **Configurações**: YAML com hiperparâmetros
+- **Ambiente**: `requirements.txt`, `conda.yaml`
+
+### **🎯 Model Registry:**
+- **`classic_classification_model`**: Melhor modelo de classificação
+- **`classic_regression_model`**: Melhor modelo de regressão
+- **`ts_prophet_model`**: Modelo Prophet
+- **`clustering_model`**: Modelo K-Means
+- **`cv_yolo_model`**: Modelo YOLO
+
+---
+
+## 🐳 Docker e Deploy
+
+### **Build da Imagem:**
+```bash
+docker build -t mlops-enterprise .
+```
+
+### **Executar com Docker Compose:**
+```bash
+docker-compose up -d
+```
+
+### **Deploy da API:**
+```bash
+# Gerar API automaticamente
+python train_and_save_professional.py --task all
+# Isso cria app_serving.py
+
+# Iniciar servidor
+uvicorn app_serving:app --host 0.0.0.0 --port 8000
+
+# Ou com Docker
+docker run -p 8000:8000 mlops-enterprise
+```
+
+---
+
+## 📈 Monitoramento e Otimização
+
+### **🔍 Detecção de Drift:**
+```python
+# Comparar dados de referência vs atuais
+ml.detect_drift(
+    reference_df=dados_treino,
+    current_df=dados_producao
+)
+
+# Relatório gerado automaticamente no DagsHub
+```
+
+### **⚡ Otimização com Optuna:**
+```python
+# Framework já integrado com Optuna
+# Hiperparâmetros otimizados automaticamente
+# Resultados logados no MLflow
+```
 
 ---
 
 ## 🧪 Testes
 
-### Executar todos os testes
+### **Executar Testes:**
 ```bash
-pytest
+cd experiments
+python -m pytest tests/ -v
 ```
 
-### Testes específicos
+### **Testes de Integração:**
 ```bash
-pytest tests/unit/          # Testes unitários
-pytest tests/integration/    # Testes de integração
-pytest tests/acceptance/     # Testes de aceitação
+# Testar conexão DagsHub
+python -c "from experiments.train_and_save_professional import MLOpsEnterprise; MLOpsEnterprise()"
+
+# Testar todos os módulos
+python train_and_save_professional.py --task all
 ```
 
 ---
 
-## 🚀 Advanced Deep Learning
+## 🔧 Configurações Avançadas
 
-### **🤖 TabTransformer**
-Modelo Transformer especializado para dados tabulares com:
-- **Embeddings automáticos** para features categóricas
-- **Multi-head attention** para capturar relações complexas
-- **Layer normalization** para treinamento estável
-- **Performance superior** em dados mistos (numéricos + categóricos)
+### **Customizar Modelos:**
+```python
+# Configuração customizada para clustering
+ml.train_clustering(
+    n_clusters=10,
+    data_path='custom_data.csv'
+)
 
-**Casos de uso:**
-- Dados com muitas features categóricas
-- Features com alta cardinalidade
-- Relações complexas entre variáveis
-- Dados tabulares estruturados
-
-### **👁️ Vision Transformer (ViT)**
-Adaptação do Vision Transformer para dados tabulares:
-- **Patch-based approach** - divide features em "patches"
-- **Global self-attention** - captura padrões globais
-- **Position embeddings** - mantém informação posicional
-- **Hierarchical features** - aprende representações em múltiplos níveis
-
-**Casos de uso:**
-- Dados com padrões espaciais/temporais
-- Features altamente correlacionadas
-- Problemas não-lineares complexos
-- Dados de séries temporais
-
-### **📊 MLflow Integration**
-Experiment tracking profissional com:
-- **Automatic logging** de parâmetros e métricas
-- **Model registry** integrado
-- **Artifact management** para modelos e logs
-- **Web UI** para visualização de experimentos
-
-**Como usar:**
-```bash
-# Iniciar MLflow UI
-python start_mlflow.py
-
-# Acessar interface web
-http://localhost:5000
+# Configuração customizada para CV
+ml.train_cv(
+    task='detect',
+    data_config='custom_dataset.yaml',
+    model_type='yolov8l.pt',
+    epochs=100
+)
 ```
 
-### **🔍 Model Explainability**
-Interpretação de modelos com SHAP e Captum:
-- **SHAP values** para feature importance
-- **DeepLift** para modelos PyTorch
-- **Gradient attribution** para entender decisões
-- **Visualizações interativas** de importância
-
-**Benefícios:**
-- Transparência nas decisões do modelo
-- Identificação de features importantes
-- Conformidade regulatória (GDPR, etc.)
-- Debugging e melhoria de modelos
-
----
-
-## 🐳 Docker & Kubernetes
-
-### **Por que usar Docker/Kubernetes?**
-- ✅ **Consistência**: Mesmo ambiente em qualquer máquina
-- ✅ **Portabilidade**: Roda em qualquer lugar com Docker/K8s
-- ✅ **Escalabilidade**: Fácil escalar horizontalmente
-- ✅ **Isolamento**: Dependências isoladas e reproduzíveis
-- ✅ **Deploy**: Deploy automatizado e versionado
-
-### **🐳 Docker Features**
-- **Multi-service**: Streamlit + MLflow + API
-- **Volumes persistentes**: Dados preservados entre restarts
-- **Health checks**: Monitoramento automático de saúde
-- **Environment variables**: Configuração externa
-- **Optimized images**: Python slim base + cache eficiente
-
-### **☸️ Kubernetes Features**
-- **Auto-scaling**: HPA e VPA support
-- **Self-healing**: Restart automático de pods falhos
-- **Rolling updates**: Deploy sem downtime
-- **Load balancing**: Distribuição automática de tráfego
-- **Persistent storage**: PVCs para dados duráveis
-- **Ingress**: Single endpoint com TLS
-
-### **🔧 Arquitetura de Containers**
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   Streamlit     │    │     MLflow      │    │   FastAPI       │
-│   (UI Web)      │    │   (Tracking)    │    │   (REST API)    │
-│   Port: 8501    │    │   Port: 5000    │    │   Port: 8000    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         └───────────────────────┼───────────────────────┘
-                                 │
-                    ┌─────────────────┐
-                    │   Shared Data   │
-                    │   Volumes:       │
-                    │   • /data        │
-                    │   • /artifacts   │
-                    │   • /models      │
-                    │   • /mlruns      │
-                    └─────────────────┘
-```
-
-### **🚀 Quick Start Docker**
-```bash
-# 1. Build e run tudo
-./docker-run.sh run
-
-# 2. Acessar serviços
-open http://localhost:8501  # Streamlit
-open http://localhost:5000  # MLflow
-open http://localhost:8000/docs  # API
-
-# 3. Ver status
-docker-compose ps
-
-# 4. Ver logs
-./docker-run.sh logs app
-```
-
-### **☸️ Quick Start Kubernetes**
-```bash
-# 1. Deploy no cluster
-./k8s-deploy.sh deploy
-
-# 2. Ver status
-./k8s-deploy.sh status
-
-# 3. Acessar (port-forward)
-kubectl port-forward svc/free-mlops-app-service 8501:8501 -n free-mlops
-
-# 4. Escalar
-./k8s-deploy.sh scale free-mlops-app 3
+### **Integração CI/CD:**
+```yaml
+# .github/workflows/mlflow.yml
+name: MLOps Pipeline
+on: [push]
+jobs:
+  mlflow:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Setup Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run MLOps Pipeline
+        run: python experiments/train_and_save_professional.py --task all
+        env:
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
 ```
 
 ---
 
-## 🏗️ Arquitetura
+## 📚 Documentação e Recursos
 
-### **Local-First Design**
-- ✅ Zero dependência de cloud
-- ✅ Dados sempre no seu controle
-- ✅ Processamento local
-- ✅ Privacidade garantida
+### **🔗 Links Úteis:**
+- **DagsHub**: https://dagshub.com/PedroM2626/free-mlops
+- **MLflow**: https://dagshub.com/PedroM2626/free-mlops.mlflow
+- **Documentação**: https://docs.dagshub.com
+- **Prophet**: https://facebook.github.io/prophet/
+- **YOLOv8**: https://docs.ultralytics.com/
+- **Evidently**: https://evidentlyai.com/
 
-### **Modular & Extensible**
-- ✅ Arquitetura em módulos independentes
-- ✅ Fácil adição de novas funcionalidades
-- ✅ Plugins para diferentes frameworks
-- ✅ API limpa e documentada
-
-### **Enterprise Features**
-- ✅ Monitoring em tempo real
-- ✅ Versionamento completo
-- ✅ Validação automática
-- ✅ Alertas e notificações
-
----
-
-## 🎚️ Configuração
-
-### Variáveis de Ambiente (.env)
-```bash
-# Diretórios
-DATA_DIR=./data
-ARTIFACTS_DIR=./artifacts
-
-# API
-API_HOST=127.0.0.1
-API_PORT=8000
-
-# Database
-DB_PATH=./free_mlops.db
-
-# Streamlit
-STREAMLIT_HOST=localhost
-STREAMLIT_PORT=8501
-```
+### **📖 Tutoriais:**
+1. **Setup Inicial**: Configuração do ambiente
+2. **Primeiro Experimento**: ML clássico
+3. **Computer Vision**: Treinar YOLO
+4. **Time Series**: Previsão com Prophet
+5. **Clustering**: K-Means avançado
+6. **Deploy**: API em produção
+7. **Monitoramento**: Detecção de drift
 
 ---
 
 ## 🤝 Contribuição
 
-Contribuições são bem-vindas! Por favor:
+### **📋 Como Contribuir:**
+1. Fork do projeto
+2. Criar feature branch
+3. Implementar mudanças
+4. Adicionar testes
+5. Submeter Pull Request
 
-1. Fork o repositório
-2. Crie uma branch para sua feature (`git checkout -b feature/amazing-feature`)
-3. Commit suas mudanças (`git commit -m 'Add amazing feature'`)
-4. Push para a branch (`git push origin feature/amazing-feature`)
-5. Abra um Pull Request
+### **🏗️ Arquitetura:**
+- **Modular**: Cada módulo independente
+- **Extensível**: Fácil adicionar novos algoritmos
+- **Testável**: Cobertura completa de testes
+- **Documentado**: Código auto-explicativo
 
 ---
 
-## 📄 Licença
+## 📝 Licença
 
-Este projeto está licenciado sob a MIT License - veja o arquivo [LICENSE](LICENSE) para detalhes.
+MIT License - Ver arquivo LICENSE para detalhes.
 
 ---
 
-## 🎉 Conclusão
+## 🎯 Roadmap
 
-**Free MLOps Platform** é uma solução **enterprise-grade**, **open-source** e **self-hosted** que oferece recursos comparáveis às principais plataformas comerciais, mas com:
+### **✅ Implementado:**
+- [x] ML Clássico com DagsHub
+- [x] Time Series (Prophet)
+- [x] Clustering (K-Means)
+- [x] Computer Vision (YOLOv8)
+- [x] Monitoramento (Evidently)
+- [x] Model Serving (FastAPI)
+- [x] Dockerização
 
-- 💰 **Custo ZERO**
-- 🔒 **100% controle dos dados**
-- 🏠 **Self-hosted**
-- 🚀 **Production-ready**
-- 🧩 **Modular e extensível**
+### **🚧 Próximo:**
+- [ ] Integração com mais frameworks (HuggingFace, Weights & Biases)
+- [ ] AutoML avançado (Auto-sklearn, TPOT)
+- [ ] Model explainability (SHAP, LIME)
+- [ ] Distributed training
+- [ ] Kubernetes deployment
+- [ ] Real-time monitoring dashboard
 
-**Perfeita para empresas que querem poder e flexibilidade sem os custos e dependências das plataformas cloud!**
+---
+
+## 🆘 Suporte
+
+### **📋 Problemas Comuns:**
+1. **DagsHub Connection**: Verificar token e permissões
+2. **CUDA Memory**: Reduzir batch size ou usar CPU
+3. **Dependencies**: Usar requirements.txt exato
+4. **Port Conflicts**: Mudar portas no docker-compose.yml
+
+### **📞 Contato:**
+- **Issues**: GitHub Issues
+- **Discussions**: GitHub Discussions
+- **Email**: [seu-email]
+
+---
+
+**🎉 Framework MLOps Enterprise completo e pronto para uso!**
+
+**Todos os módulos integrados com DagsHub + MLflow para rastreamento completo e versionamento automático.**

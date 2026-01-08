@@ -1,0 +1,17 @@
+mlflow
+dagshub
+fastapi
+uvicorn
+pandas
+scikit-learn
+optuna
+python-dotenv
+matplotlib
+torch
+torchvision
+ultralytics
+opencv-python
+evidently
+prophet
+datasets
+transformers
