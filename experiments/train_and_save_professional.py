@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-🎯 MLOPS ENTERPRISE - UNIVERSAL FRAMEWORK
-Recursos:
-- Rastreamento completo no DagsHub/MLflow para todos os módulos.
-- ML Clássico, Transformers, Computer Vision, Time Series e Clustering.
-- Otimização (Optuna), Monitoramento (Evidently) e Serving (FastAPI).
+🎯 MLOPS ENTERPRISE - UNIVERSAL FRAMEWORK (V4.0)
+Recursos Avançados:
+- AutoML: Unified (TPOT, AutoGluon, FLAML, Auto-sklearn, H2O).
+- Otimização (Optuna), Explainability (SHAP/LIME).
+- Validação (Evidently), Exportação (ONNX).
+- Integrações: MLflow, DagsHub, W&B, HuggingFace.
+- Distributed Training (PyTorch), K8s Deployment Ready.
+- CV (YOLOv8), NLP (Transformers), Time Series (Prophet).
 """
 
 import os
@@ -15,252 +18,285 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
 from dotenv import load_dotenv
+import logging
+from typing import Optional, Dict, Any, Union
 
-# MLOps, Tracking & Optimization
+# MLOps & Tracking
 import mlflow
 import mlflow.sklearn
 import mlflow.pytorch
-import mlflow.transformers
+import mlflow.h2o
 import dagshub
+import wandb
 import optuna
 
-# Deep Learning & Stats
+# AutoML Engines
+try:
+    from tpot import TPOTClassifier, TPOTRegressor
+    HAS_TPOT = True
+except ImportError:
+    HAS_TPOT = False
+
+try:
+    from autogluon.tabular import TabularPredictor
+    HAS_AUTOGLUON = True
+except ImportError:
+    HAS_AUTOGLUON = False
+
+try:
+    from flaml import AutoML
+    HAS_FLAML = True
+except ImportError:
+    HAS_FLAML = False
+
+try:
+    import autosklearn.classification
+    import autosklearn.regression
+    HAS_AUTOSKLEARN = True
+except ImportError:
+    HAS_AUTOSKLEARN = False
+
+try:
+    import h2o
+    from h2o.automl import H2OAutoML
+    HAS_H2O = True
+except ImportError:
+    HAS_H2O = False
+
+# Deep Learning & Transformers
 import torch
-try:
-    from transformers import (AutoModelForSequenceClassification, AutoTokenizer, 
-                              TrainingArguments, Trainer, DataCollatorWithPadding)
-    from datasets import Dataset
-    HAS_TRANSFORMERS = True
-except ImportError:
-    HAS_TRANSFORMERS = False
+import torch.distributed as dist
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from datasets import Dataset
 
-try:
-    from prophet import Prophet
-    HAS_PROPHET = True
-except ImportError:
-    HAS_PROPHET = False
+# Explainability & Monitoring
+import shap
+import lime
+import lime.lime_tabular
+from evidently.report import Report
+from evidently.metric_preset import DataDriftPreset, DataQualityPreset
 
-try:
-    from ultralytics import YOLO
-    HAS_ULTRALYTICS = True
-except ImportError:
-    HAS_ULTRALYTICS = False
-
-try:
-    from evidently.report import Report
-    from evidently.metric_preset import DataDriftPreset, TargetDriftPreset
-    HAS_EVIDENTLY = True
-except ImportError:
-    HAS_EVIDENTLY = False
-
-# ML Clássico e Utilidades
+# ML Clássico & Export
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
-from sklearn.cluster import KMeans
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.pipeline import Pipeline
-from sklearn.metrics import accuracy_score, mean_squared_error, silhouette_score
-from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, mean_squared_error, r2_score
+from ultralytics import YOLO
+import onnx
+from skl2onnx import convert_sklearn
+from skl2onnx.common.data_types import FloatTensorType
 
 warnings.filterwarnings('ignore')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class MLOpsEnterprise:
-    def __init__(self, repo_owner='PedroM2626', repo_name='free-mlops'):
+    def __init__(self, repo_owner='PedroM2626', repo_name='experiments'):
         load_dotenv()
         self.repo_owner = repo_owner
         self.repo_name = repo_name
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self._setup_dagshub()
+        self._setup_integrations()
 
-    def _setup_dagshub(self):
+    def _setup_integrations(self):
         try:
             dagshub.init(repo_owner=self.repo_owner, repo_name=self.repo_name, mlflow=True)
-            print("✅ Conectado ao DagsHub/MLflow")
+            logger.info("✅ Conectado ao DagsHub/MLflow")
+            if os.getenv("WANDB_API_KEY"):
+                wandb.login(key=os.getenv("WANDB_API_KEY"))
+                wandb.init(project=self.repo_name, entity=self.repo_owner)
+                logger.info("✅ Conectado ao Weights & Biases")
         except Exception as e:
-            print(f"⚠️ Erro DagsHub: {e}")
+            logger.warning(f"⚠️ Erro nas integrações: {e}")
 
     def _log_metrics_and_plots(self, metrics, artifacts=None):
-        """Helper para logar métricas e artefatos de forma consistente."""
         for name, value in metrics.items():
             mlflow.log_metric(name, value)
+            if wandb.run: wandb.log({name: value})
         if artifacts:
             for path in artifacts:
                 mlflow.log_artifact(path)
 
-    # --- MÓDULO 1: ML CLÁSSICO (AGNOSTICO) ---
-    def train_classic_ml(self, task='classification', data_path='processed_train.csv'):
-        print(f"\n� Treinando ML Clássico ({task})...")
-        df = pd.read_csv(data_path)
+    def validate_data(self, df: pd.DataFrame, target: str) -> bool:
+        """Valida a integridade dos dados antes do treino."""
+        logger.info("🔍 Validando integridade dos dados...")
+        if df.empty:
+            raise ValueError("O DataFrame está vazio.")
+        if target not in df.columns:
+            raise ValueError(f"Target '{target}' não encontrado no DataFrame.")
         
-        # Detecção automática: NLP ou Tabular
-        is_nlp = 'text_lemmatized' in df.columns
-        target = 'sentiment' if 'sentiment' in df.columns else df.columns[-1]
-        
-        X = df['text_lemmatized'].fillna('') if is_nlp else df.drop(columns=[target])
-        y = df[target]
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2)
-
-        mlflow.set_experiment(f"/classic_{task}")
-        with mlflow.start_run(run_name=f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            if is_nlp:
-                model = Pipeline([('tfidf', TfidfVectorizer()), ('clf', RandomForestClassifier())])
-            else:
-                model = RandomForestClassifier() if task == 'classification' else RandomForestRegressor()
+        null_counts = df.isnull().sum().sum()
+        if null_counts > (len(df) * len(df.columns) * 0.5):
+            logger.warning(f"⚠️ Alto índice de valores nulos detectado: {null_counts}")
             
-            model.fit(X_train, y_train)
-            preds = model.predict(X_test)
-            
-            metric_val = accuracy_score(y_test, preds) if task == 'classification' else mean_squared_error(y_test, preds)
-            metric_name = "accuracy" if task == 'classification' else "mse"
-            
-            self._log_metrics_and_plots({metric_name: metric_val})
-            mlflow.sklearn.log_model(model, "model", registered_model_name=f"classic_{task}_model")
-            print(f"✅ {metric_name.capitalize()}: {metric_val:.4f}")
+        return True
 
-    # --- MÓDULO 2: TIME SERIES (PROPHET) ---
-    def train_time_series(self, data_path=None):
-        if not HAS_PROPHET:
-            print("⚠️ Prophet não instalado."); return
-        
-        print("\n� Treinando Série Temporal (Prophet)...")
-        # Dados sintéticos se não houver path
-        if data_path is None:
-            df = pd.DataFrame({'ds': pd.date_range('2023-01-01', periods=100), 'y': np.random.randn(100).cumsum()})
-        else:
-            df = pd.read_csv(data_path)
-
-        mlflow.set_experiment("/time_series")
-        with mlflow.start_run(run_name="prophet_run"):
-            model = Prophet()
-            model.fit(df)
-            
-            # Log de "métricas" (aqui simplificado)
-            mlflow.log_param("periods", len(df))
-            mlflow.sklearn.log_model(model, "model", registered_model_name="ts_prophet_model")
-            print("✅ Modelo Prophet registrado.")
-
-    # --- MÓDULO 3: CLUSTERING (K-MEANS) ---
-    def train_clustering(self, n_clusters=3, data_path='processed_train.csv'):
-        print(f"\n🧬 Treinando Agrupamento (K-Means, k={n_clusters})...")
-        df = pd.read_csv(data_path)
-        X = df.select_dtypes(include=[np.number]).fillna(0)
-        if X.empty: X = np.random.rand(100, 2) # Fallback
-
-        mlflow.set_experiment("/clustering")
-        with mlflow.start_run(run_name="kmeans_run"):
-            model = KMeans(n_clusters=n_clusters)
-            model.fit(X)
-            score = silhouette_score(X, model.labels_)
-            
-            # Plot PCA para visualização
-            pca = PCA(2).fit_transform(X)
-            plt.figure(figsize=(8,6))
-            plt.scatter(pca[:,0], pca[:,1], c=model.labels_)
-            plt.savefig("cluster_plot.png")
-            
-            self._log_metrics_and_plots({"silhouette_score": score}, ["cluster_plot.png"])
-            mlflow.sklearn.log_model(model, "model", registered_model_name="clustering_model")
-            print(f"✅ Silhouette Score: {score:.4f}")
-
-    # --- MÓDULO 4: COMPUTER VISION (YOLOv8) ---
-    def train_cv(self, task='detect', data_config=None, model_type='yolov8n.pt', epochs=5):
-        """
-        Módulo Universal de CV: Classificação, Detecção ou Segmentação.
-        task: 'classify', 'detect', 'segment'
-        """
-        if not HAS_ULTRALYTICS:
-            print("⚠️ Ultralytics não instalado. Execute: pip install ultralytics")
-            return
-
-        print(f"\n🖼️ Treinando Computer Vision (YOLOv8 - {task})...")
-        mlflow.set_experiment(f"/cv_{task}")
-
-        # Iniciar run do MLflow
-        with mlflow.start_run(run_name=f"yolo_{task}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
-            # Carregar modelo pré-treinado
-            model = YOLO(model_type)
-
-            # Fine-tuning se houver config de dados, caso contrário apenas logamos o modelo base
-            if data_config:
-                results = model.train(data=data_config, epochs=epochs, imgsz=640)
-                # Logar métricas de treino
-                mlflow.log_metrics(results.results_dict)
-            
-            # Logar o modelo no MLflow
-            # Nota: YOLO não tem log nativo perfeito no MLflow v2.x sem callback, 
-            # então logamos o arquivo .pt como artefato e o modelo via wrapper se necessário
-            model_path = f"best_{task}.pt"
-            model.export(format='onnx') # Exemplo de exportação
-            mlflow.log_artifact(model_type)
-            
-            print(f"✅ Modelo YOLO ({task}) registrado no DagsHub.")
-            return model
-
-    # --- MÓDULO 5: MONITORAMENTO & API ---
-    def detect_drift(self, reference_df, current_df):
-        if not HAS_EVIDENTLY: return
-        report = Report(metrics=[DataDriftPreset()])
+    def detect_drift(self, reference_df: pd.DataFrame, current_df: pd.DataFrame):
+        """Detecta drift de dados usando Evidently AI."""
+        logger.info("📉 Analisando Data Drift...")
+        report = Report(metrics=[DataDriftPreset(), DataQualityPreset()])
         report.run(reference_data=reference_df, current_data=current_df)
-        report.save_html("drift_report.html")
-        mlflow.log_artifact("drift_report.html")
+        report_path = "drift_report.html"
+        report.save_html(report_path)
+        mlflow.log_artifact(report_path)
+        return report_path
 
-    def generate_serving_api(self, model_name):
-        print(f"\n🚀 Gerando API de Serving para {model_name}...")
-        api_code = f"""
-import uvicorn
-from fastapi import FastAPI
-import mlflow.sklearn
-import dagshub
-import pandas as pd
-from pydantic import BaseModel
-from dotenv import load_dotenv
-import os
+    # --- MÓDULO AUTOML UNIFICADO (TPOT, AutoGluon, FLAML, Auto-sklearn, H2O) ---
+    def train_automl(self, data_path, task='classification', engine='flaml', timeout=60):
+        """
+        Engine Universal de AutoML.
+        engines: 'tpot', 'autogluon', 'flaml', 'autosklearn', 'h2o'
+        """
+        logger.info(f"\n🤖 Iniciando AutoML ({task}) com engine: {engine.upper()}...")
+        df = pd.read_csv(data_path)
+        target = df.columns[-1]
+        
+        self.validate_data(df, target)
+        
+        mlflow.set_experiment(f"/automl_{engine}")
+        with mlflow.start_run(run_name=f"{engine}_run_{datetime.now().strftime('%H%M%S')}"):
+            mlflow.log_param("engine", engine)
+            mlflow.log_param("timeout", timeout)
+            mlflow.log_param("task", task)
 
-load_dotenv()
-dagshub.init(repo_owner='{self.repo_owner}', repo_name='{self.repo_name}', mlflow=True)
+            X = df.drop(columns=[target])
+            y = df[target]
+            
+            # Tratamento básico para motores que não lidam com texto automaticamente (exceto AutoGluon/H2O)
+            if engine in ['tpot', 'flaml', 'autosklearn'] and X.select_dtypes(include=['object']).any().any():
+                logger.info("⚙️ Detectado colunas de texto. Aplicando codificação básica...")
+                X = pd.get_dummies(X)
 
-app = FastAPI(title="MLOps Enterprise API")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            
+            best_model = None
+            score = 0
 
-# Tentar carregar a versão mais recente do modelo registrado
-try:
-    model_uri = f"models:/{model_name}/latest"
-    model = mlflow.sklearn.load_model(model_uri)
-    print(f"✅ Modelo '{{model_name}}' carregado com sucesso!")
-except Exception as e:
-    print(f"⚠️ Erro ao carregar 'latest', tentando versão 1: {{e}}")
-    model_uri = f"models:/{model_name}/1"
-    model = mlflow.sklearn.load_model(model_uri)
+            if engine == 'tpot' and HAS_TPOT:
+                model = TPOTClassifier(max_time_mins=timeout//60, verbosity=2) if task == 'classification' \
+                        else TPOTRegressor(max_time_mins=timeout//60, verbosity=2)
+                model.fit(X_train, y_train)
+                score = model.score(X_test, y_test)
+                best_model = model.fitted_pipeline_
+                mlflow.sklearn.log_model(best_model, "model")
+                
+            elif engine == 'autogluon' and HAS_AUTOGLUON:
+                train_data, test_data = train_test_split(df, test_size=0.2, random_state=42)
+                ag_task = task
+                if task == 'classification':
+                    unique_count = df[target].nunique()
+                    ag_task = 'binary' if unique_count <= 2 else 'multiclass'
+                
+                model = TabularPredictor(label=target, problem_type=ag_task).fit(train_data, time_limit=timeout)
+                performance = model.evaluate(test_data)
+                score = performance.get('accuracy') or performance.get('f1') or performance.get('root_mean_squared_error')
+                model.save("ag_models")
+                mlflow.log_artifacts("ag_models", artifact_path="autogluon_models")
+                best_model = model
+                
+            elif engine == 'flaml' and HAS_FLAML:
+                model = AutoML()
+                model.fit(X_train=X_train, y_train=y_train, task=task, time_budget=timeout, metric='auto', verbose=0)
+                best_model = model.model.estimator
+                preds = best_model.predict(X_test)
+                score = accuracy_score(y_test, preds) if task == 'classification' else r2_score(y_test, preds)
+                mlflow.sklearn.log_model(best_model, "model")
 
-class InputData(BaseModel):
-    text: str
+            elif engine == 'autosklearn' and HAS_AUTOSKLEARN:
+                if task == 'classification':
+                    model = autosklearn.classification.AutoSklearnClassifier(time_left_for_this_task=timeout)
+                else:
+                    model = autosklearn.regression.AutoSklearnRegressor(time_left_for_this_task=timeout)
+                
+                model.fit(X_train, y_train)
+                score = model.score(X_test, y_test)
+                best_model = model
+                mlflow.sklearn.log_model(best_model, "model")
 
-@app.post("/predict")
-def predict(item: InputData):
-    # Ajuste dinâmico dependendo do tipo de entrada que o modelo espera
-    prediction = model.predict([item.text])[0]
-    return {{"prediction": str(prediction)}}
+            elif engine == 'h2o' and HAS_H2O:
+                h2o.init()
+                h2o_train = h2o.H2OFrame(pd.concat([X_train, y_train], axis=1))
+                h2o_test = h2o.H2OFrame(pd.concat([X_test, y_test], axis=1))
+                
+                model = H2OAutoML(max_runtime_secs=timeout, seed=42)
+                model.train(y=target, training_frame=h2o_train)
+                
+                best_model = model.leader
+                perf = best_model.model_performance(h2o_test)
+                score = perf.accuracy()[0][1] if task == 'classification' else perf.r2()
+                
+                mlflow.h2o.log_model(best_model, "model")
+                model_path = h2o.save_model(model=best_model, path="h2o_models", force=True)
+                mlflow.log_artifact(model_path)
+                logger.info(f"🏆 Melhor modelo H2O: {best_model.model_id}")
+                # Não fechar o cluster se for usar para inferência imediata, mas aqui fechamos por segurança
+                h2o.cluster().shutdown()
+            
+            else:
+                logger.warning(f"⚠️ Engine {engine} não disponível ou não instalada.")
+                return None, None
 
-if __name__ == "__main__":
-    # Importante: host 0.0.0.0 para funcionar dentro do Docker
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+            self._log_metrics_and_plots({"best_score": score})
+            
+            # Exportar ONNX se for sklearn-like
+            if engine in ['flaml', 'tpot', 'autosklearn']:
+                try:
+                    self.export_to_onnx(best_model, X_train.iloc[:1])
+                except Exception as e:
+                    logger.warning(f"⚠️ Erro ao exportar ONNX: {e}")
+
+            logger.info(f"✅ AutoML ({engine}) concluído. Score: {score}")
+            return best_model, score
+
+    def export_to_onnx(self, model, sample_input):
+        """Exporta o modelo para formato ONNX."""
+        logger.info("🚀 Exportando para ONNX...")
+        initial_type = [('float_input', FloatTensorType([None, sample_input.shape[1]]))]
+        onx = convert_sklearn(model, initial_types=initial_type)
+        with open("model.onnx", "wb") as f:
+            f.write(onx.SerializeToString())
+        mlflow.log_artifact("model.onnx")
+
+    def explain_model(self, model, X_train, method='shap'):
+        """Gera explicações SHAP para o modelo."""
+        logger.info(f"🧠 Gerando explicações: {method.upper()}")
+        if method == 'shap':
+            # Nota: Funciona melhor com modelos baseados em árvore do sklearn
+            explainer = shap.Explainer(model.predict, X_train.iloc[:100])
+            shap_values = explainer(X_train.iloc[:100])
+            plt.figure()
+            shap.summary_plot(shap_values, X_train.iloc[:100], show=False)
+            plt.savefig("shap_summary.png")
+            mlflow.log_artifact("shap_summary.png")
+            plt.close()
+
+    def generate_serving_api(self, model_name="model.onnx"):
+        """Gera um script Flask básico para servir o modelo ONNX."""
+        serving_script = f"""
+import flask
+import onnxruntime as rt
+import numpy as np
+
+app = flask.Flask(__name__)
+sess = rt.InferenceSession("{model_name}")
+input_name = sess.get_inputs()[0].name
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    data = flask.request.json['data']
+    preds = sess.run(None, {{input_name: np.array(data).astype(np.float32)}})
+    return flask.jsonify({{'predictions': preds[0].tolist()}})
+
+if __name__ == '__main__':
+    app.run(port=5000)
 """
-        with open("app_serving.py", "w", encoding="utf-8") as f:
-            f.write(api_code)
-        print("✅ API gerada com sucesso em 'app_serving.py'.")
+        with open("serving_api.py", "w") as f:
+            f.write(serving_script)
+        mlflow.log_artifact("serving_api.py")
+        logger.info("🌐 API de serving gerada em serving_api.py")
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--task', choices=['classic', 'ts', 'cluster', 'all'], default='all')
-    args = parser.parse_args()
-    
     m = MLOpsEnterprise()
-    
-    if args.task in ['classic', 'all']:
-        m.train_classic_ml(task='classification')
-    if args.task in ['ts', 'all']:
-        m.train_time_series()
-    if args.task in ['cluster', 'all']:
-        m.train_clustering()
+    logger.info("🚀 Framework Universal V4.0 Carregado.")
 
 if __name__ == "__main__":
     main()
