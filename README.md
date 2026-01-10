@@ -44,26 +44,27 @@ Framework MLOps completo e universal para treinamento, rastreamento e deploy de 
 - **Carregamento**: Dinâmico do MLflow Registry
 - **Documentação**: OpenAPI/Swagger automática
 
+#### **7. 🖥️ Dashboard Interativo (Streamlit)**
+- **Análise de Dados**: Upload de CSV e análise exploratória automática.
+- **Visualização**: Gráficos interativos com Plotly.
+- **Gestão de Experimentos**: Visualização detalhada de resultados do MLflow.
+- **Configuração**: Interface amigável para parâmetros do sistema.
+
 ---
 
 ## 📁 Estrutura do Projeto
 
 ```
 free-mlops/
-├── experiments/
-│   ├── train_and_save_professional.py    # Framework principal
-│   ├── main.py                        # Entry point FLAML/AutoGluon
-│   ├── .env                          # Configurações de ambiente
-│   ├── Dockerfile                     # Containerização
-│   ├── docker-compose.yml              # Orquestração
-│   ├── app_serving.py               # API de serving gerada
-│   ├── requirements.txt               # Dependências
-│   ├── src/                         # Módulos auxiliares
-│   │   ├── utils.py
-│   │   ├── flaml_train.py
-│   │   └── autogluon_train.py
-│   └── tests/                       # Testes automatizados
-└── README.md                        # Este arquivo
+├── experiments/                    # Core do framework de treinamento
+│   ├── train_and_save_professional.py
+│   ├── main.py
+│   ├── .env
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   ├── app_serving.py
+│   └── requirements.txt
+└── README.md                       # Este arquivo
 ```
 
 ---
@@ -84,8 +85,8 @@ git lfs install
 # MLOps & Tracking
 pip install mlflow dagshub optuna
 
-# Machine Learning
-pip install scikit-learn pandas numpy matplotlib
+# Machine Learning & Dashboard
+pip install scikit-learn pandas numpy matplotlib streamlit plotly
 
 # Deep Learning
 pip install torch transformers datasets
@@ -106,10 +107,10 @@ pip install fastapi uvicorn python-dotenv
 ### **Configuração do Ambiente:**
 ```bash
 # Copiar arquivo de ambiente
-cp .env.example .env
+cp experiments/.env.example experiments/.env
 
 # Editar configurações
-nano .env
+nano experiments/.env
 ```
 
 **Variáveis de ambiente (.env):**
@@ -124,13 +125,18 @@ MLFLOW_TRACKING_URI=https://dagshub.com/PedroM2626/free-mlops.mlflow
 
 ## 🚀 Uso Rápido
 
-### **1. Executar Todos os Módulos:**
+### **1. Executar o Dashboard (Streamlit):**
+```bash
+streamlit run streamlit_app/app_refactored.py
+```
+
+### **2. Executar Todos os Módulos de Treinamento:**
 ```bash
 cd experiments
 python train_and_save_professional.py --task all
 ```
 
-### **2. Executar Módulo Específico:**
+### **3. Executar Módulo Específico:**
 ```bash
 # Machine Learning Clássico
 python train_and_save_professional.py --task classic
@@ -143,61 +149,6 @@ python train_and_save_professional.py --task cluster
 
 # Computer Vision
 python train_and_save_professional.py --task cv
-```
-
-### **3. Exemplos de Uso:**
-
-#### **🤖 Machine Learning Clássico:**
-```python
-from experiments.train_and_save_professional import MLOpsEnterprise
-
-# Inicializar framework
-ml = MLOpsEnterprise()
-
-# Treinar modelo de classificação
-ml.train_classic_ml(task='classification', data_path='seus_dados.csv')
-
-# Treinar modelo de regressão
-ml.train_classic_ml(task='regression', data_path='seus_dados.csv')
-```
-
-#### **🧬 Clustering:**
-```python
-# Treinar K-Means com 5 clusters
-ml.train_clustering(n_clusters=5, data_path='seus_dados.csv')
-
-# Resultados salvos automaticamente no DagsHub
-# - Modelo K-Means
-# - Plot PCA visualização
-# - Silhouette Score
-```
-
-#### **🖼️ Computer Vision:**
-```python
-# Treinar YOLO para detecção
-ml.train_cv(
-    task='detect',
-    data_config='path/to/dataset.yaml',
-    model_type='yolov8n.pt',
-    epochs=50
-)
-
-# Treinar YOLO para classificação
-ml.train_cv(
-    task='classify',
-    data_config='path/to/dataset.yaml',
-    model_type='yolov8s.pt',
-    epochs=30
-)
-```
-
-#### **📈 Time Series:**
-```python
-# Com dados reais
-ml.train_time_series(data_path='vendas_mensais.csv')
-
-# Com dados sintéticos (para testes)
-ml.train_time_series()
 ```
 
 ---
@@ -220,13 +171,6 @@ ml.train_time_series()
 - **Configurações**: YAML com hiperparâmetros
 - **Ambiente**: `requirements.txt`, `conda.yaml`
 
-### **🎯 Model Registry:**
-- **`classic_classification_model`**: Melhor modelo de classificação
-- **`classic_regression_model`**: Melhor modelo de regressão
-- **`ts_prophet_model`**: Modelo Prophet
-- **`clustering_model`**: Modelo K-Means
-- **`cv_yolo_model`**: Modelo YOLO
-
 ---
 
 ## 🐳 Docker e Deploy
@@ -241,39 +185,14 @@ docker build -t mlops-enterprise .
 docker-compose up -d
 ```
 
-### **Deploy da API:**
+### **Deploy da API (FastAPI):**
 ```bash
 # Gerar API automaticamente
-python train_and_save_professional.py --task all
+python experiments/train_and_save_professional.py --task all
 # Isso cria app_serving.py
 
 # Iniciar servidor
-uvicorn app_serving:app --host 0.0.0.0 --port 8000
-
-# Ou com Docker
-docker run -p 8000:8000 mlops-enterprise
-```
-
----
-
-## 📈 Monitoramento e Otimização
-
-### **🔍 Detecção de Drift:**
-```python
-# Comparar dados de referência vs atuais
-ml.detect_drift(
-    reference_df=dados_treino,
-    current_df=dados_producao
-)
-
-# Relatório gerado automaticamente no DagsHub
-```
-
-### **⚡ Otimização com Optuna:**
-```python
-# Framework já integrado com Optuna
-# Hiperparâmetros otimizados automaticamente
-# Resultados logados no MLflow
+uvicorn experiments.app_serving:app --host 0.0.0.0 --port 8000
 ```
 
 ---
@@ -286,79 +205,6 @@ cd experiments
 python -m pytest tests/ -v
 ```
 
-### **Testes de Integração:**
-```bash
-# Testar conexão DagsHub
-python -c "from experiments.train_and_save_professional import MLOpsEnterprise; MLOpsEnterprise()"
-
-# Testar todos os módulos
-python train_and_save_professional.py --task all
-```
-
----
-
-## 🔧 Configurações Avançadas
-
-### **Customizar Modelos:**
-```python
-# Configuração customizada para clustering
-ml.train_clustering(
-    n_clusters=10,
-    data_path='custom_data.csv'
-)
-
-# Configuração customizada para CV
-ml.train_cv(
-    task='detect',
-    data_config='custom_dataset.yaml',
-    model_type='yolov8l.pt',
-    epochs=100
-)
-```
-
-### **Integração CI/CD:**
-```yaml
-# .github/workflows/mlflow.yml
-name: MLOps Pipeline
-on: [push]
-jobs:
-  mlflow:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Setup Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.8
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-      - name: Run MLOps Pipeline
-        run: python experiments/train_and_save_professional.py --task all
-        env:
-          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
-```
-
----
-
-## 📚 Documentação e Recursos
-
-### **🔗 Links Úteis:**
-- **DagsHub**: https://dagshub.com/PedroM2626/free-mlops
-- **MLflow**: https://dagshub.com/PedroM2626/free-mlops.mlflow
-- **Documentação**: https://docs.dagshub.com
-- **Prophet**: https://facebook.github.io/prophet/
-- **YOLOv8**: https://docs.ultralytics.com/
-- **Evidently**: https://evidentlyai.com/
-
-### **📖 Tutoriais:**
-1. **Setup Inicial**: Configuração do ambiente
-2. **Primeiro Experimento**: ML clássico
-3. **Computer Vision**: Treinar YOLO
-4. **Time Series**: Previsão com Prophet
-5. **Clustering**: K-Means avançado
-6. **Deploy**: API em produção
-7. **Monitoramento**: Detecção de drift
-
 ---
 
 ## 🤝 Contribuição
@@ -369,12 +215,6 @@ jobs:
 3. Implementar mudanças
 4. Adicionar testes
 5. Submeter Pull Request
-
-### **🏗️ Arquitetura:**
-- **Modular**: Cada módulo independente
-- **Extensível**: Fácil adicionar novos algoritmos
-- **Testável**: Cobertura completa de testes
-- **Documentado**: Código auto-explicativo
 
 ---
 
@@ -393,15 +233,8 @@ MIT License - Ver arquivo LICENSE para detalhes.
 - [x] Computer Vision (YOLOv8)
 - [x] Monitoramento (Evidently)
 - [x] Model Serving (FastAPI)
+- [x] Dashboard Interativo (Streamlit)
 - [x] Dockerização
-
-### **🚧 Próximo:**
-- [ ] Integração com mais frameworks (HuggingFace, Weights & Biases)
-- [ ] AutoML avançado (Auto-sklearn, TPOT)
-- [ ] Model explainability (SHAP, LIME)
-- [ ] Distributed training
-- [ ] Kubernetes deployment
-- [ ] Real-time monitoring dashboard
 
 ---
 
@@ -413,13 +246,4 @@ MIT License - Ver arquivo LICENSE para detalhes.
 3. **Dependencies**: Usar requirements.txt exato
 4. **Port Conflicts**: Mudar portas no docker-compose.yml
 
-### **📞 Contato:**
-- **Issues**: GitHub Issues
-- **Discussions**: GitHub Discussions
-- **Email**: [seu-email]
-
----
-
 **🎉 Framework MLOps Enterprise completo e pronto para uso!**
-
-**Todos os módulos integrados com DagsHub + MLflow para rastreamento completo e versionamento automático.**
