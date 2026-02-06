@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+ENV/
+mlruns/
+models/
+data/
+data_lake/
+.pytest_cache/
+.streamlit/
+*.log

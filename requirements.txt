@@ -1,46 +1,29 @@
-# MLOps & Tracking
-mlflow
-dagshub
-wandb
-fastapi
-uvicorn
-python-dotenv
-
-# Data Science & AutoML
-pandas
-numpy
-scikit-learn
-tpot
-autogluon
-flaml
-auto-sklearn
-h2o
-optuna
-shap
-lime
-evidently
-scipy
-
-# Export & Serving
-onnx
-onnxruntime
-skl2onnx
-flask
-
-# Computer Vision & Deep Learning
-torch
-torchvision
-ultralytics
-opencv-python
-
-# NLP & Transformers
-transformers
-datasets
-huggingface_hub
-
-# Monitoring & Testing
-pytest
-httpx
-
-# Time Series
-prophet
+pandas==3.0.0
+numpy==2.2.6
+scikit-learn==1.7.1
+xgboost==3.1.2
+lightgbm==4.6.0
+catboost==1.2.7
+optuna==4.6.0
+streamlit==1.51.0
+fastapi==0.128.1
+uvicorn==0.40.0
+pydantic==2.12.4
+mlflow==3.1.2
+shap==0.50.0
+lime==0.2.0.1
+matplotlib==3.10.8
+seaborn==0.13.2
+torch==2.9.1
+torchvision==0.25.0
+Pillow==12.1.0
+tqdm==4.67.1
+python-dotenv==1.0.1
+plotly==6.5.2
+scipy==1.16.1
+joblib==1.5.2
+flet==0.80.5
+pytest==9.0.2
+playwright==1.50.0
+pytest-playwright==0.7.0
+pytest-asyncio==1.3.0

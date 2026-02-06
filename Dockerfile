@@ -1,28 +1,34 @@
-# Usar imagem base oficial de Python
-FROM python:3.10-slim
+# Usar uma imagem base leve com Python 3.11
+FROM python:3.11-slim
 
 # Definir diretório de trabalho
 WORKDIR /app
 
-# Instalar dependências do sistema necessárias para Prophet e outras bibliotecas
+# Instalar dependências do sistema necessárias para algumas bibliotecas (ex: LightGBM, XGBoost, OpenCV)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    libgomp1 \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
     curl \
-    git \
     && rm -rf /var/lib/apt/lists/*
 
-# Copiar apenas o arquivo de requisitos primeiro para aproveitar o cache do Docker
+# Copiar os arquivos de dependências
 COPY requirements.txt .
 
-# Instalar dependências do Python
+# Instalar as dependências do Python
+# Usando --no-cache-dir para reduzir o tamanho da imagem
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copiar o restante do código e o arquivo .env
+# Copiar o restante do código do projeto
 COPY . .
 
-# Expor a porta que a FastAPI usará
-EXPOSE 8000
+# Criar diretórios para persistência
+RUN mkdir -p mlruns data_lake models
 
-# Comando para rodar a aplicação
-# Nota: app_serving.py deve ser gerado antes ou durante o build
-CMD ["python", "app_serving.py"]
+# Expor as portas necessárias
+# 8000: FastAPI, 8501: Streamlit
+EXPOSE 8000 8501
+
+# O comando padrão será sobrescrito pelo Docker Compose
+CMD ["python", "-m", "streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

@@ -1,249 +1,122 @@
-# 🎯 MLOps Enterprise - Universal Framework
+# 🚀 AutoMLOps Studio
+### Visual ML & MLOps Workflow Engine
 
-## 📋 Visão Geral
+Uma plataforma de AutoML completa, pronta para produção e com capacidades abrangentes de MLOps. Este projeto automatiza todo o ciclo de vida do Machine Learning, desde o pré-processamento de dados até o monitoramento e serving de modelos.
 
-Framework MLOps completo e universal para treinamento, rastreamento e deploy de modelos de Machine Learning com integração total com DagsHub + MLflow.
+## 🎯 Problemática
+O desenvolvimento de modelos de Machine Learning muitas vezes é fragmentado, com ferramentas isoladas para treinamento, versionamento de dados e monitoramento de modelos. Isso gera:
+- **Dificuldade de Reproduzibilidade**: Perda de rastreio de quais dados e parâmetros geraram qual modelo.
+- **Complexidade de Deploy**: Gargalos na transição do modelo do ambiente de pesquisa para produção.
+- **Degradação Silenciosa**: Modelos em produção que perdem performance sem que a equipe seja alertada (Data Drift).
+- **Sobrecarga de Engenharia**: Cientistas de dados gastando mais tempo configurando infraestrutura do que otimizando modelos.
 
-## 🚀 Recursos Principais
+## 👥 Público Alvo
+- **Cientistas de Dados**: Que precisam acelerar o ciclo de experimentação e garantir a rastreabilidade dos seus modelos.
+- **Engenheiros de Machine Learning (MLOps)**: Que buscam uma solução padronizada para servir e monitorar modelos de forma escalável.
+- **Desenvolvedores Full Stack**: Que desejam integrar capacidades inteligentes em suas aplicações sem a necessidade de expertise profunda em algoritmos de ML.
+- **Analistas de Big Data**: Que necessitam de ferramentas de treinamento eficientes com suporte a checkpoint e early stopping para grandes volumes de dados.
 
-### ✅ **Módulos Disponíveis:**
+## ✨ Funcionalidades
 
-#### **1. 🤖 Machine Learning Clássico**
-- **Algoritmos**: RandomForest, LogisticRegression, SVM, etc.
-- **Suporte**: Classificação e Regressão
-- **Auto-detecção**: Dados tabulares e NLP (TF-IDF)
-- **Rastreamento**: Métricas completas no DagsHub
+- **AutoML Tabular**: Suporte para Classificação, Regressão, Agrupamento (Clustering), Séries Temporais e Detecção de Anomalias com **Hiperparâmetros Automáticos ou Manuais**.
+- **Modelos Existentes (Fine-Tune)**: Aba integrada ao AutoML para carregar modelos do **Model Registry** ou arquivos locais para predição (Inference) ou retreinamento (Retraining) contra Data Drift.
+- **Visualização Avançada**: Gráficos dinâmicos de performance, Matrizes de Confusão interativas, Curvas Real vs Predito e **Projeções PCA** para visualização de clusters e anomalias.
+- **Computer Vision**: Fine-tuning de modelos para Classificação e **Segmentação Semântica** (DeepLabV3).
+- **Modelos Expandidos**: Inclui RandomForest, XGBoost, LightGBM, SVM, LinearSVC, KNN, Naive Bayes, MLP, Ridge, Lasso, ElasticNet, e muito mais.
+- **Estratégias de Split Inteligentes**: Split aleatório e **Split Temporal** automático para séries temporais.
+- **Explicabilidade (SHAP)**: Integração com SHAP para entender a importância das features em modelos de classificação.
+- **🐳 Docker Ready**: Orquestração multi-serviço (API, Dashboard, MLflow) pronta para deploy.
+- **🔌 REST API**: Camada de serving baseada em FastAPI com autenticação via API Key.
 
-#### **2. 📈 Time Series (Prophet)**
-- **Framework**: Facebook Prophet
-- **Funcionalidade**: Previsão de séries temporais
-- **Dados**: Sintéticos ou reais
-- **Exportação**: Modelo registrado no MLflow
+## 📂 Estrutura do Projeto
 
-#### **3. 🧬 Clustering (K-Means)**
-- **Algoritmo**: K-Means com otimização automática
-- **Métricas**: Silhouette Score
-- **Visualização**: Plot PCA automático
-- **Flexibilidade**: Dados numéricos ou fallback sintético
+- `app.py`: Dashboard interativo em Streamlit.
+- `flet_app.py`: Versão cross-platform (Desktop/Mobile/Web) baseada em Flet.
+- `simple_flet_app.py`: Interface simples de teste com Flet para verificação rápida do ambiente.
+- `automl_engine.py`: Core de pré-processamento, treinamento e otimização.
+- `cv_engine.py`: Motor para tarefas de Visão Computacional.
+- `mlops_utils.py`: Utilitários de MLOps (MLflow, Data Lake, Drift, SHAP).
+- `api.py`: API de serving de modelos.
+- `docker-compose.yml` & `Dockerfile`: Configurações de containerização.
+- `tests.py`: Suíte de testes unitários, integração e aceitação.
 
-#### **4. 🖼️ Computer Vision (YOLOv8)**
-- **Modelos**: YOLOv8 (classify, detect, segment)
-- **Fine-tuning**: Transfer learning com dados customizados
-- **Exportação**: ONNX e outros formatos
-- **Versões**: yolov8n, yolov8s, yolov8m, yolov8l, yolov8x
+## 🚀 Como Começar
 
-#### **5. 🔍 Monitoramento (Evidently)**
-- **Drift Detection**: Data drift e Target drift
-- **Relatórios**: HTML interativos
-- **Integração**: Log automático no MLflow
-- **Alertas**: Configuráveis
+### Via Docker (Recomendado)
 
-#### **6. 🚀 Model Serving (FastAPI)**
-- **API REST**: Auto-gerada para qualquer modelo
-- **Deploy**: Docker-ready
-- **Carregamento**: Dinâmico do MLflow Registry
-- **Documentação**: OpenAPI/Swagger automática
+A forma mais rápida de rodar toda a stack (Dashboard, API e MLflow):
 
-#### **7. 🖥️ Dashboard Interativo (Streamlit)**
-- **Análise de Dados**: Upload de CSV e análise exploratória automática.
-- **Visualização**: Gráficos interativos com Plotly.
-- **Gestão de Experimentos**: Visualização detalhada de resultados do MLflow.
-- **Configuração**: Interface amigável para parâmetros do sistema.
-
----
-
-## 📁 Estrutura do Projeto
-
-```
-free-mlops/
-├── experiments/                    # Core do framework de treinamento
-│   ├── train_and_save_professional.py
-│   ├── main.py
-│   ├── .env
-│   ├── Dockerfile
-│   ├── docker-compose.yml
-│   ├── app_serving.py
-│   └── requirements.txt
-└── README.md                       # Este arquivo
-```
-
----
-
-## 🛠️ Instalação e Configuração
-
-### **Pré-requisitos:**
 ```bash
-# Python 3.8+
-pip install python>=3.8
-
-# Git LFS (para modelos grandes)
-git lfs install
+docker-compose up --build
 ```
 
-### **Dependências Principais:**
+- **Dashboard**: http://localhost:8501
+- **API**: http://localhost:8000
+- **MLflow UI**: http://localhost:5000
+
+### Instalação Local
+
+1. **Instale as dependências**:
 ```bash
-# MLOps & Tracking
-pip install mlflow dagshub optuna
-
-# Machine Learning & Dashboard
-pip install scikit-learn pandas numpy matplotlib streamlit plotly
-
-# Deep Learning
-pip install torch transformers datasets
-
-# Time Series
-pip install prophet
-
-# Computer Vision
-pip install ultralytics
-
-# Monitoramento
-pip install evidently
-
-# Serving
-pip install fastapi uvicorn python-dotenv
+pip install -r requirements.txt
 ```
 
-### **Configuração do Ambiente:**
+2. **Execute o Dashboard (Streamlit)**:
 ```bash
-# Copiar arquivo de ambiente
-cp experiments/.env.example experiments/.env
-
-# Editar configurações
-nano experiments/.env
+python -m streamlit run app.py
 ```
 
-**Variáveis de ambiente (.env):**
+3. **Execute o Dashboard Modular (Flet)**:
 ```bash
-DAGSHUB_REPO_OWNER=PedroM2626
-DAGSHUB_REPO_NAME=free-mlops
-DAGSHUB_TOKEN=seu_token_aqui
-MLFLOW_TRACKING_URI=https://dagshub.com/PedroM2626/free-mlops.mlflow
+python flet_app/src/main.py
 ```
 
----
-
-## 🚀 Uso Rápido
-
-### **1. Executar o Dashboard (Streamlit):**
+4. **Execute a API**:
 ```bash
-streamlit run streamlit_app/app_refactored.py
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-### **2. Executar Todos os Módulos de Treinamento:**
-```bash
-cd experiments
-python train_and_save_professional.py --task all
-```
+## 🏗️ Arquitetura do Flet App (Modular)
 
-### **3. Executar Módulo Específico:**
-```bash
-# Machine Learning Clássico
-python train_and_save_professional.py --task classic
+O novo Dashboard em Flet segue uma arquitetura modularizada inspirada no `gallery-main`, facilitando a manutenção e escalabilidade:
 
-# Time Series
-python train_and_save_professional.py --task ts
+- **`flet_app/src/main.py`**: Ponto de entrada que inicializa os contextos e a estrutura principal.
+- **`flet_app/src/contexts/`**: Provedores de estado global (Tema, Roteamento).
+- **`flet_app/src/components/`**: Componentes reutilizáveis (AppBar, Navigation).
+- **`flet_app/src/views/`**: Telas individuais da aplicação (Data, Train, CV, Experiments, Registry).
+- **`flet_app/src/models/`**: Gerenciamento de estado centralizado (`app_state.py`).
 
-# Clustering
-python train_and_save_professional.py --task cluster
+## 🛠️ Guia de Uso do Dashboard
 
-# Computer Vision
-python train_and_save_professional.py --task cv
-```
-
----
-
-## 📊 Resultados no DagsHub
-
-### **🔗 Experimentos Criados:**
-- **`/classic_classification`**: Modelos de classificação clássicos
-- **`/classic_regression`**: Modelos de regressão clássicos
-- **`/time_series`**: Modelos Prophet
-- **`/clustering`**: Modelos K-Means
-- **`/cv_detect`**: YOLO detecção
-- **`/cv_classify`**: YOLO classificação
-- **`/cv_segment`**: YOLO segmentação
-
-### **📁 Artefatos Salvos:**
-- **Modelos**: `.pkl`, `.pt`, `.onnx`
-- **Métricas**: JSON com todas as métricas
-- **Visualizações**: PNG (matriz confusão, PCA plots)
-- **Configurações**: YAML com hiperparâmetros
-- **Ambiente**: `requirements.txt`, `conda.yaml`
-
----
-
-## 🐳 Docker e Deploy
-
-### **Build da Imagem:**
-```bash
-docker build -t mlops-enterprise .
-```
-
-### **Executar com Docker Compose:**
-```bash
-docker-compose up -d
-```
-
-### **Deploy da API (FastAPI):**
-```bash
-# Gerar API automaticamente
-python experiments/train_and_save_professional.py --task all
-# Isso cria app_serving.py
-
-# Iniciar servidor
-uvicorn experiments.app_serving:app --host 0.0.0.0 --port 8000
-```
-
----
+1.  **📊 Data**: Faça o upload do seu CSV e salve no **Data Lake** para habilitar o versionamento.
+2.  **🤖 AutoML**: 
+    - **Novo Treino**: Configure o treino automático ou manual. Selecione modelos, defina a estratégia de hiperparâmetros e acompanhe o progresso em tempo real.
+    - **Modelos Existentes (Fine-Tune)**: Gerencie modelos já treinados. Carregue do Registry ou via upload para prever novos dados ou retreinar o modelo com dados atualizados do Data Lake.
+3.  **🧪 Experiments**: Explore o histórico de treinos, compare métricas e registre os melhores modelos.
+4.  **🖼️ Computer Vision**: Treine modelos de classificação de imagens.
+5.  **📈 Drift/Monitoring**: Detecte desvios estatísticos entre dados de referência e atuais.
+6.  **🗂️ Model Registry**: Catálogo oficial de modelos aprovados para produção.
 
 ## 🧪 Testes
 
-### **Executar Testes:**
+A plataforma inclui uma suíte completa de testes:
 ```bash
-cd experiments
-python -m pytest tests/ -v
+# Testes do Core
+pytest tests.py
+
+# Testes da Interface Flet
+pytest tests_flet_app.py
+pytest tests_acceptance_flet.py
 ```
+- **Unitários**: Processamento de dados, instanciação de modelos e lógica de interface.
+- **Integração**: Salvamento de pipelines, utilitários de MLOps e carregamento de componentes UI.
+- **Aceitação**: Fluxos completos de treino simulados e interação via browser (Playwright) para a interface Flet.
+
+## 🛠️ Configuração
+
+Configure as variáveis de ambiente no arquivo `.env`:
+- `API_SECRET_KEY`: Chave de segurança para a API REST.
+- `MLFLOW_TRACKING_URI`: Localização dos logs do MLflow (padrão: `./mlruns`).
 
 ---
-
-## 🤝 Contribuição
-
-### **📋 Como Contribuir:**
-1. Fork do projeto
-2. Criar feature branch
-3. Implementar mudanças
-4. Adicionar testes
-5. Submeter Pull Request
-
----
-
-## 📝 Licença
-
-MIT License - Ver arquivo LICENSE para detalhes.
-
----
-
-## 🎯 Roadmap
-
-### **✅ Implementado:**
-- [x] ML Clássico com DagsHub
-- [x] Time Series (Prophet)
-- [x] Clustering (K-Means)
-- [x] Computer Vision (YOLOv8)
-- [x] Monitoramento (Evidently)
-- [x] Model Serving (FastAPI)
-- [x] Dashboard Interativo (Streamlit)
-- [x] Dockerização
-
----
-
-## 🆘 Suporte
-
-### **📋 Problemas Comuns:**
-1. **DagsHub Connection**: Verificar token e permissões
-2. **CUDA Memory**: Reduzir batch size ou usar CPU
-3. **Dependencies**: Usar requirements.txt exato
-4. **Port Conflicts**: Mudar portas no docker-compose.yml
-
-**🎉 Framework MLOps Enterprise completo e pronto para uso!**
+Desenvolvido por Pedro Morato Lahoz
