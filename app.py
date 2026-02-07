@@ -3,7 +3,13 @@ from cv_engine import CVAutoMLTrainer, get_cv_explanation
 import streamlit as st
 import pandas as pd
 import numpy as np
-from mlops_utils import MLFlowTracker, DriftDetector, ModelExplainer, get_model_registry, DataLake, register_model_from_run, get_registered_models, get_all_runs
+from mlops_utils import (
+    MLFlowTracker, DriftDetector, ModelExplainer, get_model_registry, 
+    DataLake, register_model_from_run, get_registered_models, get_all_runs,
+    get_model_details, load_registered_model
+)
+import joblib # type: ignore
+import pickle
 import os
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -119,7 +125,8 @@ tabs = st.tabs([
     "🧪 Experiments", 
     "🖼️ Computer Vision", 
     "📈 Drift/Monitoring", 
-    "🗂️ Model Registry"
+    "🗂️ Model Registry",
+    "🧪 Teste de Modelos"
 ])
 
 # --- TAB 0: DATA ---
@@ -883,3 +890,185 @@ with tabs[5]:
                     st.success(f"Deployment pipeline started for {m.name}!")
     else:
         st.warning("Nenhum modelo registrado no catálogo oficial ainda.")
+
+# --- TAB 6: TESTE DE MODELOS ---
+with tabs[6]:
+    st.header("🧪 Teste de Modelos")
+    st.markdown("Teste modelos registrados ou faça upload de um arquivo de modelo local (.pkl, .joblib).")
+    
+    test_mode = st.radio("Origem do Modelo", ["Model Registry", "Upload Local"], horizontal=True)
+    
+    # Adicionar botão para limpar o modelo atual do teste
+    if 'test_model' in st.session_state:
+        if st.button("🗑️ Limpar Modelo Carregado"):
+            del st.session_state['test_model']
+            if 'test_metadata' in st.session_state: del st.session_state['test_metadata']
+            st.rerun()
+
+    if test_mode == "Model Registry":
+        reg_models = get_registered_models()
+        if reg_models:
+            model_names = [m.name for m in reg_models]
+            sel_model_name = st.selectbox("Selecione o Modelo Registrado", model_names)
+            
+            # Pegar versões do modelo
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            versions = [v.version for v in client.search_model_versions(f"name='{sel_model_name}'")]
+            sel_version = st.selectbox("Versão", versions)
+            
+            if st.button("Carregar Modelo do Registry"):
+                with st.spinner("Carregando modelo e metadados..."):
+                    try:
+                        loaded_model = load_registered_model(sel_model_name, sel_version)
+                        if loaded_model is not None:
+                            st.session_state['test_model'] = loaded_model
+                            st.session_state['test_metadata'] = get_model_details(sel_model_name, sel_version)
+                            st.success(f"Modelo {sel_model_name} (v{sel_version}) carregado!")
+                            st.rerun()
+                        else:
+                            st.error("Falha ao carregar o objeto do modelo do Registry.")
+                    except Exception as e:
+                        st.error(f"Erro ao carregar modelo: {e}")
+        else:
+            st.warning("Nenhum modelo registrado encontrado.")
+            
+    else:
+        uploaded_model = st.file_uploader("Upload do arquivo do modelo (.pkl, .joblib)", type=["pkl", "joblib"])
+        if uploaded_model:
+            if st.button("Carregar Modelo Uploaded"):
+                try:
+                    if uploaded_model.name.endswith(".pkl"):
+                        loaded_model = pickle.load(uploaded_model)
+                    else:
+                        loaded_model = joblib.load(uploaded_model)
+                    
+                    if loaded_model is not None:
+                        st.session_state['test_model'] = loaded_model
+                        st.session_state['test_metadata'] = {"name": uploaded_model.name, "version": "Local", "params": "N/A", "source": "Upload"}
+                        st.success("Modelo local carregado com sucesso!")
+                        st.rerun()
+                    else:
+                        st.error("O arquivo carregado resultou em um objeto nulo.")
+                except Exception as e:
+                    st.error(f"Erro ao carregar modelo: {e}")
+
+    # Exibição de Metadados e Teste de Previsão
+    if 'test_model' in st.session_state:
+        model = st.session_state['test_model']
+        meta = st.session_state['test_metadata']
+        
+        st.divider()
+        col_m1, col_m2 = st.columns([1, 2])
+        
+        with col_m1:
+            st.subheader("📋 Informações do Modelo")
+            st.write(f"**Nome:** {meta.get('name')}")
+            st.write(f"**Versão:** {meta.get('version')}")
+            st.write(f"**Fonte:** {meta.get('source', 'Registry')}")
+            
+            if 'params' in meta and meta['params'] != "N/A":
+                with st.expander("⚙️ Parâmetros"):
+                    st.json(meta['params'])
+            
+            if 'metrics' in meta:
+                with st.expander("📊 Métricas de Treino"):
+                    st.json(meta['metrics'])
+                    
+        with col_m2:
+            st.subheader("🔮 Realizar Previsão")
+            
+            test_input_mode = st.radio("Entrada de Dados", ["Manual (JSON/Campos)", "Upload CSV"], horizontal=True)
+            
+            prediction_result = None
+            
+            if test_input_mode == "Upload CSV":
+                test_csv = st.file_uploader("Upload CSV para Previsão", type="csv", key="test_csv_upload")
+                if test_csv:
+                    test_df = pd.read_csv(test_csv)
+                    st.write("Preview dos Dados:", test_df.head(3))
+                    
+                    if st.button("🚀 Gerar Previsões"):
+                        try:
+                            # Tentar usar o processador se disponível no session_state (opcional)
+                            if 'processor' in st.session_state:
+                                proc = st.session_state['processor']
+                                # Garantir que o target não esteja no CSV de teste para o transform
+                                if proc.target_column in test_df.columns:
+                                    X_test = test_df.drop(columns=[proc.target_column])
+                                else:
+                                    X_test = test_df
+                                X_proc, _ = proc.transform(X_test)
+                                preds = model.predict(X_proc)
+                            else:
+                                preds = model.predict(test_df)
+                                
+                            test_df['PREDICTION'] = preds
+                            st.write("Resultados:")
+                            st.dataframe(test_df.head(10))
+                            
+                            csv = test_df.to_csv(index=False).encode('utf-8')
+                            st.download_button("Baixar Resultados (CSV)", csv, "predictions.csv", "text/csv")
+                        except Exception as e:
+                            st.error(f"Erro na previsão: {e}. Verifique se os dados de entrada possuem as mesmas colunas do treino.")
+            
+            else:
+                # Entrada manual - Tenta inferir colunas
+                cols_to_input = []
+                if 'processor' in st.session_state:
+                    cols_to_input = [c for c in st.session_state['processor'].feature_columns]
+                elif hasattr(model, "feature_names_in_"):
+                    cols_to_input = list(model.feature_names_in_)
+                elif hasattr(model, "feature_names"): # Para alguns modelos como CatBoost/XGBoost
+                    cols_to_input = list(model.feature_names)
+                
+                if not cols_to_input and test_input_mode == "Manual (JSON/Campos)":
+                    st.warning("⚠️ Não foi possível detectar as colunas automaticamente. Você pode colar um JSON com as características abaixo:")
+                    json_input = st.text_area("JSON de entrada (ex: {'feat1': 10, 'feat2': 20})", value="{}")
+                    
+                    if st.button("🚀 Prever (via JSON)"):
+                        try:
+                            import json
+                            data = json.loads(json_input)
+                            input_df = pd.DataFrame([data])
+                            
+                            if 'processor' in st.session_state:
+                                X_proc, _ = st.session_state['processor'].transform(input_df)
+                                pred = model.predict(X_proc)
+                            else:
+                                pred = model.predict(input_df)
+                            st.success(f"Resultado da Previsão: **{pred[0]}**")
+                        except Exception as e:
+                            st.error(f"Erro no JSON ou Previsão: {e}")
+                
+                elif cols_to_input:
+                    st.info("Insira os valores para cada característica:")
+                    input_data = {}
+                    col_idx = 0
+                    cols_layout = st.columns(3)
+                    for col_name in cols_to_input:
+                        with cols_layout[col_idx % 3]:
+                            input_data[col_name] = st.text_input(col_name, value="0")
+                        col_idx += 1
+                    
+                    if st.button("🚀 Prever (Manual)"):
+                        try:
+                            # Converter para DataFrame de uma linha
+                            input_df = pd.DataFrame([input_data])
+                            # Converter tipos se possível (tentar float)
+                            for c in input_df.columns:
+                                try:
+                                    input_df[c] = pd.to_numeric(input_df[c])
+                                except: pass
+                            
+                            if 'processor' in st.session_state:
+                                X_proc, _ = st.session_state['processor'].transform(input_df)
+                                pred = model.predict(X_proc)
+                            else:
+                                pred = model.predict(input_df)
+                                
+                            st.success(f"Resultado da Previsão: **{pred[0]}**")
+                        except Exception as e:
+                            st.error(f"Erro: {e}")
+                else:
+                    st.warning("Não foi possível identificar as colunas necessárias. Use o Upload CSV ou certifique-se de que o modelo foi treinado nesta sessão.")

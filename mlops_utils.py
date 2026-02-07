@@ -161,3 +161,52 @@ def get_registered_models():
     except Exception as e:
         print(f"Error fetching registered models: {e}")
         return []
+
+def get_model_details(model_name, version=None):
+    """Get details of a registered model version."""
+    try:
+        from mlflow.tracking import MlflowClient
+        client = MlflowClient()
+        
+        if version is None:
+            # Get latest version
+            versions = client.get_latest_versions(model_name, stages=["Production", "Staging", "None"])
+            if not versions:
+                return None
+            model_version = versions[0]
+        else:
+            model_version = client.get_model_version(model_name, version)
+            
+        run = client.get_run(model_version.run_id)
+        
+        # Extract metadata
+        details = {
+            "name": model_name,
+            "version": model_version.version,
+            "run_id": model_version.run_id,
+            "params": run.data.params,
+            "metrics": run.data.metrics,
+            "tags": run.data.tags,
+            "creation_timestamp": model_version.creation_timestamp,
+            "status": model_version.status,
+            "description": model_version.description,
+            "source": model_version.source
+        }
+        
+        return details
+    except Exception as e:
+        print(f"Error fetching model details: {e}")
+        return None
+
+def load_registered_model(model_name, version=None):
+    """Load a registered model from MLflow."""
+    try:
+        if version:
+            model_uri = f"models:/{model_name}/{version}"
+        else:
+            model_uri = f"models:/{model_name}/latest"
+            
+        return mlflow.sklearn.load_model(model_uri)
+    except Exception as e:
+        print(f"Error loading registered model: {e}")
+        return None
