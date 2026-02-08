@@ -1,20 +1,20 @@
 # 🚀 AutoMLOps Studio
-### Visual ML & MLOps Workflow Engine
+### Exploratory ML & MLOps Learning Engine
 
-Uma plataforma de AutoML completa, pronta para produção e com capacidades abrangentes de MLOps. Este projeto automatiza todo o ciclo de vida do Machine Learning, desde o pré-processamento de dados até o monitoramento e serving de modelos.
+O **AutoMLOps Studio** é um projeto educacional desenvolvido de um **estudante para estudantes**. O objetivo principal é fornecer uma ferramenta prática para quem deseja explorar o mundo do Machine Learning ou criar modelos rapidamente para prototipagem e aprendizado. 
 
-## 🎯 Problemática
-O desenvolvimento de modelos de Machine Learning muitas vezes é fragmentado, com ferramentas isoladas para treinamento, versionamento de dados e monitoramento de modelos. Isso gera:
-- **Dificuldade de Reproduzibilidade**: Perda de rastreio de quais dados e parâmetros geraram qual modelo.
-- **Complexidade de Deploy**: Gargalos na transição do modelo do ambiente de pesquisa para produção.
-- **Degradação Silenciosa**: Modelos em produção que perdem performance sem que a equipe seja alertada (Data Drift).
-- **Sobrecarga de Engenharia**: Cientistas de dados gastando mais tempo configurando infraestrutura do que otimizando modelos.
+**Este projeto não é uma solução empresarial**, mas sim um laboratório interativo para aprender conceitos de AutoML, MLOps e Visão Computacional na prática, facilitando a experimentação rápida sem a necessidade de escrever centenas de linhas de código de infraestrutura.
+
+## 🎯 Objetivo e Problemática
+Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e código complexo. Este projeto resolve isso ao centralizar:
+- **Aprendizado Prático**: Entenda como o pré-processamento, o treinamento e o monitoramento se conectam.
+- **Prototipagem Rápida**: Teste ideias de modelos em segundos com arquivos CSV ou imagens.
+- **Desmistificação de MLOps**: Veja na prática como o versionamento de modelos (MLflow) e a detecção de desvios (Drift) funcionam em um fluxo real.
 
 ## 👥 Público Alvo
-- **Cientistas de Dados**: Que precisam acelerar o ciclo de experimentação e garantir a rastreabilidade dos seus modelos.
-- **Engenheiros de Machine Learning (MLOps)**: Que buscam uma solução padronizada para servir e monitorar modelos de forma escalável.
-- **Desenvolvedores Full Stack**: Que desejam integrar capacidades inteligentes em suas aplicações sem a necessidade de expertise profunda em algoritmos de ML.
-- **Analistas de Big Data**: Que necessitam de ferramentas de treinamento eficientes com suporte a checkpoint e early stopping para grandes volumes de dados.
+- **Estudantes de Ciência de Dados**: Que querem ver a teoria aplicada em uma interface visual.
+- **Curiosos e Entusiastas de ML**: Que buscam uma ferramenta ágil para explorar datasets sem barreiras técnicas.
+- **Desenvolvedores em Aprendizado**: Que desejam entender como integrar modelos de ML em APIs e Dashboards de forma simplificada.
 
 ## ✨ Funcionalidades
 
