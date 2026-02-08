@@ -1,9 +1,0 @@
-__pycache__/
-*.pyc
-.env
-.pytest_cache/
-mlruns/
-data_lake/
-models/
-dist/
-build/

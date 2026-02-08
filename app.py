@@ -205,6 +205,35 @@ with tabs[1]:
             if task == "time_series":
                 st.info("💡 Split temporal obrigatório para séries temporais.")
 
+        st.divider()
+        st.subheader("🌱 Configuração de Reprodutibilidade (Seed)")
+        seed_mode = st.radio("Modo de Seed", 
+                             ["Automático (Diferente por modelo)", 
+                              "Automático (Mesma para todos)", 
+                              "Manual (Mesma para todos)", 
+                              "Manual (Diferente por modelo)"], 
+                             horizontal=True)
+        
+        random_seed_config = 42 # Default
+        
+        effective_models = selected_models if selected_models else available_models
+        
+        if seed_mode == "Automático (Diferente por modelo)":
+            random_seed_config = {m: np.random.randint(0, 999999) for m in effective_models}
+            st.info("🎲 Seeds aleatórias serão geradas para cada modelo.")
+        elif seed_mode == "Automático (Mesma para todos)":
+            random_seed_config = np.random.randint(0, 999999)
+            st.info(f"🎲 Uma única seed aleatória será usada para todos: {random_seed_config}")
+        elif seed_mode == "Manual (Mesma para todos)":
+            random_seed_config = st.number_input("🌱 Digite a Seed Global", 0, 999999, 42)
+        elif seed_mode == "Manual (Diferente por modelo)":
+            st.markdown("##### Digite a Seed para cada modelo:")
+            random_seed_config = {}
+            cols_seed = st.columns(min(len(effective_models), 3))
+            for i, m in enumerate(effective_models):
+                with cols_seed[i % 3]:
+                    random_seed_config[m] = st.number_input(f"Seed: {m}", 0, 999999, 42, key=f"seed_{m}")
+
         # Hiperparâmetros Manuais integrados nas opções de tuning
         if training_strategy == "Manual":
             st.divider()
@@ -370,7 +399,8 @@ with tabs[1]:
                         selected_models=selected_models, 
                         early_stopping_rounds=early_stopping if training_strategy == "Automático" else 0,
                         manual_params=manual_params,
-                        experiment_name=experiment_name
+                        experiment_name=experiment_name,
+                        random_state=random_seed_config
                     )
                     best_params = trainer.best_params
                     
@@ -441,13 +471,26 @@ with tabs[1]:
                                                      labels=dict(x="Predito", y="Real", color="Quantidade"))
                                     st.plotly_chart(fig_cm)
                             with col_v2:
-                                # Feature Importance (Shap simplified)
-                                st.info("Calculando importância das features...")
-                                try:
-                                    explainer = ModelExplainer(best_model, X_train_proc[:100])
-                                    st.pyplot(explainer.plot_importance(X_test_proc[:100]))
-                                except:
-                                    st.warning("Não foi possível gerar SHAP plot para este modelo.")
+                                # Feature Importance
+                                if hasattr(trainer, 'feature_importance') and trainer.feature_importance:
+                                    st.markdown("#### 📈 Importância das Features")
+                                    fi_data = pd.DataFrame({
+                                        'Feature': processor.get_feature_names(),
+                                        'Importância': trainer.feature_importance
+                                    }).sort_values(by='Importância', ascending=False)
+                                    
+                                    fig_fi = px.bar(fi_data.head(15), x='Importância', y='Feature', orientation='h',
+                                                  title="Top 15 Features mais Importantes")
+                                    fig_fi.update_layout(yaxis={'categoryorder':'total ascending'})
+                                    st.plotly_chart(fig_fi, use_container_width=True)
+                                else:
+                                    # Fallback for complex models
+                                    st.info("Calculando importância das features via SHAP...")
+                                    try:
+                                        explainer = ModelExplainer(best_model, X_train_proc[:100])
+                                        st.pyplot(explainer.plot_importance(X_test_proc[:100]))
+                                    except:
+                                        st.warning("Não foi possível gerar SHAP plot para este modelo.")
 
                         elif task in ["regression", "time_series"]:
                             df_res = pd.DataFrame({"Real": y_test_proc, "Predito": y_pred})

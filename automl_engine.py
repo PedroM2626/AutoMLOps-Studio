@@ -289,6 +289,26 @@ class AutoMLDataProcessor:
         
         return X_final, y
 
+    def get_feature_names(self):
+        """Returns the names of the features after preprocessing."""
+        if self.preprocessor is None:
+            return []
+        
+        feature_names = []
+        for name, transformer, columns in self.preprocessor.transformers_:
+            if name == 'remainder' and transformer == 'drop':
+                continue
+            
+            if hasattr(transformer, 'get_feature_names_out'):
+                # Para OneHotEncoder e outros que mudam o número de colunas
+                names = transformer.get_feature_names_out(columns)
+                feature_names.extend(names)
+            else:
+                # Para StandardScaler, SimpleImputer, etc. que mantêm o número de colunas
+                feature_names.extend(columns)
+        
+        return feature_names
+
 class AutoMLTrainer:
     def __init__(self, task_type='classification'):
         self.task_type = task_type
@@ -296,67 +316,76 @@ class AutoMLTrainer:
         self.best_params = None
         self.results = []
 
-    def _get_models(self, trial=None, name=None):
+    def _get_models(self, trial=None, name=None, random_state=None):
         """
         Retorna a lista de nomes dos modelos ou uma instância específica com parâmetros sugeridos.
         Se name for None, retorna apenas os nomes dos modelos disponíveis.
         """
         if self.task_type == 'classification':
             models_config = {
-                'logistic_regression': lambda t: LogisticRegression(max_iter=1000),
+                'logistic_regression': lambda t: LogisticRegression(max_iter=1000, random_state=random_state),
                 'random_forest': lambda t: RandomForestClassifier(
                     n_estimators=t.suggest_int('rf_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('rf_max_depth', 3, 20)
+                    max_depth=t.suggest_int('rf_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
                     n_estimators=t.suggest_int('xgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3),
                     use_label_encoder=False,
-                    eval_metric='logloss'
+                    eval_metric='logloss',
+                    random_state=random_state
                 ),
                 'lightgbm': lambda t: lgb.LGBMClassifier(
                     n_estimators=t.suggest_int('lgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('lgb_lr', 0.01, 0.3),
-                    verbosity=-1
+                    verbosity=-1,
+                    random_state=random_state
                 ),
                 'extra_trees': lambda t: ExtraTreesClassifier(
                     n_estimators=t.suggest_int('et_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('et_max_depth', 3, 20)
+                    max_depth=t.suggest_int('et_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'adaboost': lambda t: AdaBoostClassifier(
                     n_estimators=t.suggest_int('ada_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('ada_lr', 0.01, 1.0)
+                    learning_rate=t.suggest_float('ada_lr', 0.01, 1.0),
+                    random_state=random_state
                 ),
                 'decision_tree': lambda t: DecisionTreeClassifier(
-                    max_depth=t.suggest_int('dt_max_depth', 3, 20)
+                    max_depth=t.suggest_int('dt_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'svm': lambda t: SVC(
                     C=t.suggest_float('svm_C', 0.1, 10.0, log=True),
                     kernel=t.suggest_categorical('svm_kernel', ['linear', 'rbf']),
                     probability=False, # Desativado durante busca para velocidade
                     cache_size=1000,
-                    max_iter=5000
+                    max_iter=5000,
+                    random_state=random_state
                 ),
-                'linear_svc': lambda t: LinearSVC(max_iter=2000, dual=False),
+                'linear_svc': lambda t: LinearSVC(max_iter=2000, dual=False, random_state=random_state),
                 'knn': lambda t: KNeighborsClassifier(
                     n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
                 ),
                 'naive_bayes': lambda t: GaussianNB(),
-                'ridge_classifier': lambda t: RidgeClassifier(),
-                'sgd_classifier': lambda t: SGDClassifier(max_iter=1000),
+                'ridge_classifier': lambda t: RidgeClassifier(random_state=random_state),
+                'sgd_classifier': lambda t: SGDClassifier(max_iter=1000, random_state=random_state),
                 'mlp': lambda t: MLPClassifier(
                     hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
                     max_iter=t.suggest_int('mlp_max_iter', 200, 1000),
                     early_stopping=True,
                     validation_fraction=0.1,
-                    n_iter_no_change=10
+                    n_iter_no_change=10,
+                    random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostClassifier(
                     iterations=t.suggest_int('cb_iterations', 50, 200),
                     learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
                     depth=t.suggest_int('cb_depth', 3, 10),
                     verbose=0,
-                    thread_count=1
+                    thread_count=1,
+                    random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
@@ -370,27 +399,33 @@ class AutoMLTrainer:
                 'linear_regression': lambda t: LinearRegression(),
                 'random_forest': lambda t: RandomForestRegressor(
                     n_estimators=t.suggest_int('rf_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('rf_max_depth', 3, 20)
+                    max_depth=t.suggest_int('rf_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBRegressor(
                     n_estimators=t.suggest_int('xgb_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3)
+                    learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3),
+                    random_state=random_state
                 ),
                 'lightgbm': lambda t: lgb.LGBMRegressor(
                     n_estimators=t.suggest_int('lgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('lgb_lr', 0.01, 0.3),
-                    verbosity=-1
+                    verbosity=-1,
+                    random_state=random_state
                 ),
                 'extra_trees': lambda t: ExtraTreesRegressor(
                     n_estimators=t.suggest_int('et_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('et_max_depth', 3, 20)
+                    max_depth=t.suggest_int('et_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'adaboost': lambda t: AdaBoostRegressor(
                     n_estimators=t.suggest_int('ada_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('ada_lr', 0.01, 1.0)
+                    learning_rate=t.suggest_float('ada_lr', 0.01, 1.0),
+                    random_state=random_state
                 ),
                 'decision_tree': lambda t: DecisionTreeRegressor(
-                    max_depth=t.suggest_int('dt_max_depth', 3, 20)
+                    max_depth=t.suggest_int('dt_max_depth', 3, 20),
+                    random_state=random_state
                 ),
                 'svm': lambda t: SVR(
                     C=t.suggest_float('svr_C', 0.1, 10.0, log=True),
@@ -402,29 +437,34 @@ class AutoMLTrainer:
                     n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
                 ),
                 'ridge': lambda t: Ridge(
-                    alpha=t.suggest_float('ridge_alpha', 0.1, 10.0)
+                    alpha=t.suggest_float('ridge_alpha', 0.1, 10.0),
+                    random_state=random_state
                 ),
                 'lasso': lambda t: Lasso(
-                    alpha=t.suggest_float('lasso_alpha', 0.01, 1.0)
+                    alpha=t.suggest_float('lasso_alpha', 0.01, 1.0),
+                    random_state=random_state
                 ),
                 'elastic_net': lambda t: ElasticNet(
                     alpha=t.suggest_float('en_alpha', 0.01, 1.0),
-                    l1_ratio=t.suggest_float('en_l1_ratio', 0.1, 0.9)
+                    l1_ratio=t.suggest_float('en_l1_ratio', 0.1, 0.9),
+                    random_state=random_state
                 ),
-                'sgd_regressor': lambda t: SGDRegressor(max_iter=1000),
+                'sgd_regressor': lambda t: SGDRegressor(max_iter=1000, random_state=random_state),
                 'mlp': lambda t: MLPRegressor(
                     hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
                     max_iter=t.suggest_int('mlp_max_iter', 200, 1000),
                     early_stopping=True,
                     validation_fraction=0.1,
-                    n_iter_no_change=10
+                    n_iter_no_change=10,
+                    random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_iterations', 50, 200),
                     learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
                     depth=t.suggest_int('cb_depth', 3, 10),
                     verbose=0,
-                    thread_count=1
+                    thread_count=1,
+                    random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
@@ -527,8 +567,9 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=10, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, **kwargs):
+    def train(self, X_train, y_train=None, n_trials=10, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, **kwargs):
         self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
+        self.random_state = random_state
         auto_split = kwargs.get('auto_split', False)
         
         from mlops_utils import MLFlowTracker
@@ -554,20 +595,26 @@ class AutoMLTrainer:
             else:
                 model_name = trial.suggest_categorical('model_name', all_available)
 
-            # Identificador único para este trial de modelo (Corrigido)
+            # Identificador único para este trial de modelo
             model_trial_counts[model_name] = model_trial_counts.get(model_name, 0) + 1
             trial_num_for_model = model_trial_counts[model_name]
             full_trial_name = f"{model_name} - Trial {trial_num_for_model}"
-            logger.info(f"📍 Trial {trial.number} mapeado para {full_trial_name}")
+            
+            # Determinar a seed específica para este modelo
+            current_seed = self.random_state
+            if isinstance(self.random_state, dict):
+                current_seed = self.random_state.get(model_name, 42)
+            
+            logger.info(f"📍 Trial {trial.number} mapeado para {full_trial_name} (Seed: {current_seed})")
 
-            # Early Stopping Global (Mais rígido: exige melhora mínima de 0.0001)
+            # Early Stopping Global
             min_improvement = 0.0001
             if early_stopping_rounds and trials_without_improvement >= early_stopping_rounds:
                 trial.study.stop()
                 return 0
 
             # 2. Instanciar o modelo específico sugerido para este trial (Lazy Loading)
-            model = self._get_models(trial=trial, name=model_name)
+            model = self._get_models(trial=trial, name=model_name, random_state=current_seed)
             
             if model is None:
                 return -1.0
@@ -575,7 +622,7 @@ class AutoMLTrainer:
             if auto_split and self.task_type in ['classification', 'regression', 'time_series']:
                 split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 if not hasattr(self, '_split_cache'): self._split_cache = {}
-                cache_key = f"{split_ratio}_{self.task_type}"
+                cache_key = f"{split_ratio}_{self.task_type}_{current_seed}"
                 
                 if cache_key in self._split_cache:
                     X_tr, X_val, y_tr, y_val = self._split_cache[cache_key]
@@ -590,9 +637,9 @@ class AutoMLTrainer:
                             y_tr, y_val = y_train[:split_idx], y_train[split_idx:]
                     else:
                         if y_train is not None:
-                            X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, train_size=split_ratio, random_state=42)
+                            X_tr, X_val, y_tr, y_val = train_test_split(X_train, y_train, train_size=split_ratio, random_state=current_seed)
                         else:
-                            X_tr, X_val = train_test_split(X_train, train_size=split_ratio, random_state=42)
+                            X_tr, X_val = train_test_split(X_train, train_size=split_ratio, random_state=current_seed)
                             y_tr, y_val = None, None
                     if len(self._split_cache) > 5: self._split_cache.clear()
                     self._split_cache[cache_key] = (X_tr, X_val, y_tr, y_val)
@@ -695,9 +742,13 @@ class AutoMLTrainer:
 
         # All our metrics are better when larger
         direction = 'maximize'
+        
+        # Determinar seed inicial para o sampler
+        sampler_seed = self.random_state if isinstance(self.random_state, int) else 42
+        
         study = optuna.create_study(
             direction=direction,
-            sampler=optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10))
+            sampler=optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=sampler_seed)
         )
         
         # Identificar modelos estáticos (sem hiperparâmetros para otimizar)
@@ -710,6 +761,11 @@ class AutoMLTrainer:
         models_to_tune = selected_models if selected_models else self.get_available_models()
         
         for m_name in models_to_tune:
+            # Se a seed for por modelo, atualizamos o sampler para garantir reprodutibilidade por modelo
+            if isinstance(self.random_state, dict):
+                model_seed = self.random_state.get(m_name, 42)
+                study.sampler = optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=model_seed)
+                logger.info(f"🎲 Sampler seed atualizado para {model_seed} (Modelo: {m_name})")
             # Se houver parâmetros manuais para este modelo, enfileira uma tentativa com eles
             if manual_params and manual_params.get('model_name') == m_name:
                 p = {'model_name': m_name}
@@ -738,18 +794,38 @@ class AutoMLTrainer:
         if self.task_type == 'time_series':
             self.best_params.update(self.ts_metadata)
         
-        self.best_model = self._get_models(trial=optuna.trial.FixedTrial(self.best_params), name=best_model_name)
+        self.best_model = self._instantiate_model(best_model_name, self.best_params)
         
         # Reativar probabilidade para o modelo final se for SVM
         if best_model_name == 'svm' and hasattr(self.best_model, 'probability'):
             self.best_model.set_params(probability=True)
             logger.info("🔮 Ativando estimativa de probabilidade para o modelo SVM final.")
         
+        # Garantir a mesma seed no modelo final
+        final_model_seed = self.random_state
+        if isinstance(self.random_state, dict):
+            final_model_seed = self.random_state.get(best_model_name, 42)
+            
+        if hasattr(self.best_model, 'random_state'):
+            self.best_model.set_params(random_state=final_model_seed)
+        elif hasattr(self.best_model, 'random_seed'):
+            self.best_model.set_params(random_seed=final_model_seed)
+
         if y_train is not None:
             self.best_model.fit(X_train, y_train)
         else:
             self.best_model.fit(X_train)
             
+        # Adicionar Feature Importance se disponível
+        if hasattr(self.best_model, 'feature_importances_'):
+            self.feature_importance = self.best_model.feature_importances_.tolist()
+            logger.info("📈 Feature Importance calculada.")
+        elif hasattr(self.best_model, 'coef_'):
+            self.feature_importance = np.abs(self.best_model.coef_).flatten().tolist()
+            logger.info("📈 Feature Importance calculada (baseada em coeficientes).")
+        else:
+            self.feature_importance = None
+
         return self.best_model
 
     def _instantiate_model(self, name, params):
@@ -776,7 +852,10 @@ class AutoMLTrainer:
             if name == 'svm': return SVC(probability=True)
             if name == 'linear_svc': return LinearSVC(max_iter=1000, dual=False)
             if name == 'knn': 
-                return KNeighborsClassifier(n_neighbors=params.get('knn_neighbors', 5))
+                knn_params = {k.replace('knn_', ''): v for k, v in params.items() if k.startswith('knn_')}
+                if 'neighbors' in knn_params:
+                    knn_params['n_neighbors'] = knn_params.pop('neighbors')
+                return KNeighborsClassifier(**knn_params)
             if name == 'naive_bayes': return GaussianNB()
             if name == 'ridge_classifier': return RidgeClassifier()
             if name == 'sgd_classifier': return SGDClassifier(max_iter=1000)
@@ -810,7 +889,10 @@ class AutoMLTrainer:
                 return DecisionTreeRegressor(**dt_params)
             if name == 'svm': return SVR()
             if name == 'knn': 
-                return KNeighborsRegressor(n_neighbors=params.get('knn_neighbors', 5))
+                knn_params = {k.replace('knn_', ''): v for k, v in params.items() if k.startswith('knn_')}
+                if 'neighbors' in knn_params:
+                    knn_params['n_neighbors'] = knn_params.pop('neighbors')
+                return KNeighborsRegressor(**knn_params)
             if name == 'ridge': return Ridge(alpha=params.get('ridge_alpha', 1.0))
             if name == 'lasso': return Lasso(alpha=params.get('lasso_alpha', 1.0))
             if name == 'elastic_net': 
