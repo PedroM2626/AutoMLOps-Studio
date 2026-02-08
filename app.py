@@ -344,10 +344,15 @@ with tabs[1]:
                     
                     with chart_c:
                         # Gráfico mostrando o progresso de cada modelo individualmente
+                        # Determinar o nome da métrica principal para o eixo Y
+                        main_metric_name = "Métrica"
+                        if metrics:
+                            main_metric_name = next(iter(metrics)).upper()
+                        
                         fig = px.line(df_trials, x="Trial Modelo", y="Score", color="Modelo", 
                                     markers=True, hover_name="Identificador",
                                     title="Progresso da Otimização por Algoritmo")
-                        fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title="Score (Métrica)")
+                        fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title=f"Score ({main_metric_name})")
                         st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
 
                 with st.spinner("Processando..."):

@@ -306,26 +306,22 @@ class AutoMLTrainer:
                 'logistic_regression': lambda t: LogisticRegression(max_iter=1000),
                 'random_forest': lambda t: RandomForestClassifier(
                     n_estimators=t.suggest_int('rf_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('rf_max_depth', 3, 20),
-                    n_jobs=None # Evitar conflito de paralelização
+                    max_depth=t.suggest_int('rf_max_depth', 3, 20)
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
                     n_estimators=t.suggest_int('xgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3),
                     use_label_encoder=False,
-                    eval_metric='logloss',
-                    n_jobs=None
+                    eval_metric='logloss'
                 ),
                 'lightgbm': lambda t: lgb.LGBMClassifier(
                     n_estimators=t.suggest_int('lgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('lgb_lr', 0.01, 0.3),
-                    verbosity=-1,
-                    n_jobs=None
+                    verbosity=-1
                 ),
                 'extra_trees': lambda t: ExtraTreesClassifier(
                     n_estimators=t.suggest_int('et_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('et_max_depth', 3, 20),
-                    n_jobs=None
+                    max_depth=t.suggest_int('et_max_depth', 3, 20)
                 ),
                 'adaboost': lambda t: AdaBoostClassifier(
                     n_estimators=t.suggest_int('ada_n_estimators', 50, 200),
@@ -334,15 +330,20 @@ class AutoMLTrainer:
                 'decision_tree': lambda t: DecisionTreeClassifier(
                     max_depth=t.suggest_int('dt_max_depth', 3, 20)
                 ),
-                'svm': lambda t: SVC(probability=True),
-                'linear_svc': lambda t: LinearSVC(max_iter=1000, dual=False),
+                'svm': lambda t: SVC(
+                    C=t.suggest_float('svm_C', 0.1, 10.0, log=True),
+                    kernel=t.suggest_categorical('svm_kernel', ['linear', 'rbf']),
+                    probability=False, # Desativado durante busca para velocidade
+                    cache_size=1000,
+                    max_iter=5000
+                ),
+                'linear_svc': lambda t: LinearSVC(max_iter=2000, dual=False),
                 'knn': lambda t: KNeighborsClassifier(
-                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15),
-                    n_jobs=None
+                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
                 ),
                 'naive_bayes': lambda t: GaussianNB(),
                 'ridge_classifier': lambda t: RidgeClassifier(),
-                'sgd_classifier': lambda t: SGDClassifier(max_iter=1000, n_jobs=None),
+                'sgd_classifier': lambda t: SGDClassifier(max_iter=1000),
                 'mlp': lambda t: MLPClassifier(
                     hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
                     max_iter=t.suggest_int('mlp_max_iter', 200, 1000),
@@ -355,7 +356,7 @@ class AutoMLTrainer:
                     learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
                     depth=t.suggest_int('cb_depth', 3, 10),
                     verbose=0,
-                    thread_count=-1
+                    thread_count=1
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
@@ -366,27 +367,23 @@ class AutoMLTrainer:
             }
         elif self.task_type == 'regression':
             models_config = {
-                'linear_regression': lambda t: LinearRegression(n_jobs=None),
+                'linear_regression': lambda t: LinearRegression(),
                 'random_forest': lambda t: RandomForestRegressor(
                     n_estimators=t.suggest_int('rf_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('rf_max_depth', 3, 20),
-                    n_jobs=None
+                    max_depth=t.suggest_int('rf_max_depth', 3, 20)
                 ),
                 'xgboost': lambda t: xgb.XGBRegressor(
                     n_estimators=t.suggest_int('xgb_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3),
-                    n_jobs=None
+                    learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3)
                 ),
                 'lightgbm': lambda t: lgb.LGBMRegressor(
                     n_estimators=t.suggest_int('lgb_n_estimators', 50, 200),
                     learning_rate=t.suggest_float('lgb_lr', 0.01, 0.3),
-                    verbosity=-1,
-                    n_jobs=None
+                    verbosity=-1
                 ),
                 'extra_trees': lambda t: ExtraTreesRegressor(
                     n_estimators=t.suggest_int('et_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('et_max_depth', 3, 20),
-                    n_jobs=None
+                    max_depth=t.suggest_int('et_max_depth', 3, 20)
                 ),
                 'adaboost': lambda t: AdaBoostRegressor(
                     n_estimators=t.suggest_int('ada_n_estimators', 50, 200),
@@ -395,10 +392,14 @@ class AutoMLTrainer:
                 'decision_tree': lambda t: DecisionTreeRegressor(
                     max_depth=t.suggest_int('dt_max_depth', 3, 20)
                 ),
-                'svm': lambda t: SVR(),
+                'svm': lambda t: SVR(
+                    C=t.suggest_float('svr_C', 0.1, 10.0, log=True),
+                    kernel=t.suggest_categorical('svr_kernel', ['linear', 'rbf']),
+                    cache_size=1000,
+                    max_iter=5000
+                ),
                 'knn': lambda t: KNeighborsRegressor(
-                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15),
-                    n_jobs=None
+                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
                 ),
                 'ridge': lambda t: Ridge(
                     alpha=t.suggest_float('ridge_alpha', 0.1, 10.0)
@@ -423,7 +424,7 @@ class AutoMLTrainer:
                     learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
                     depth=t.suggest_int('cb_depth', 3, 10),
                     verbose=0,
-                    thread_count=-1
+                    thread_count=1
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
@@ -557,6 +558,7 @@ class AutoMLTrainer:
             model_trial_counts[model_name] = model_trial_counts.get(model_name, 0) + 1
             trial_num_for_model = model_trial_counts[model_name]
             full_trial_name = f"{model_name} - Trial {trial_num_for_model}"
+            logger.info(f"📍 Trial {trial.number} mapeado para {full_trial_name}")
 
             # Early Stopping Global (Mais rígido: exige melhora mínima de 0.0001)
             min_improvement = 0.0001
@@ -599,6 +601,7 @@ class AutoMLTrainer:
                 X_val, y_val = None, None
 
             start_time = time.time()
+            logger.info(f"⏳ Treinando {full_trial_name}...")
             trial_metrics = {}
             try:
                 if self.task_type in ['classification', 'regression', 'time_series']:
@@ -621,11 +624,28 @@ class AutoMLTrainer:
                         else:
                             cv = 3
                             scoring = 'r2'
-                        score = cross_val_score(model, X_tr, y_tr, n_jobs=None, cv=cv, scoring=scoring).mean()
+                        score = cross_val_score(model, X_tr, y_tr, cv=cv, scoring=scoring).mean()
                         trial_metrics[scoring] = score
                         # Para salvar o modelo e artefatos, precisamos dar fit no treino completo do trial
+                        # Nota: Fit final no trial_set sem CV para logging
+                        logger.info(f"✨ Finalizando treino do modelo {full_trial_name}...")
                         model.fit(X_tr, y_tr)
-
+                        logger.info(f"✅ Treino finalizado para {full_trial_name}")
+                        
+                        logger.info(f"📊 Registrando {full_trial_name} no MLflow...")
+                        # SALVAR TRIAL NO MLFLOW
+                        trial_params = trial.params.copy()
+                        trial_params['task_type'] = self.task_type
+                        
+                        run_id = tracker.log_experiment(
+                            params=trial_params,
+                            metrics=trial_metrics,
+                            model=model,
+                            model_name=full_trial_name,
+                            register=False
+                        )
+                        logger.info(f"✔ {full_trial_name} registrado com ID: {run_id}")
+                         
                 elif self.task_type == 'anomaly_detection':
                     model.fit(X_tr)
                     if hasattr(model, 'decision_function'):
@@ -648,18 +668,6 @@ class AutoMLTrainer:
 
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
-            
-            # SALVAR TRIAL NO MLFLOW
-            trial_params = trial.params.copy()
-            trial_params['task_type'] = self.task_type
-            
-            run_id = tracker.log_experiment(
-                params=trial_params,
-                metrics=trial_metrics,
-                model=model,
-                model_name=full_trial_name,
-                register=False
-            )
             
             trial.set_user_attr("run_id", run_id)
             trial.set_user_attr("full_name", full_trial_name)
@@ -694,9 +702,9 @@ class AutoMLTrainer:
         
         # Identificar modelos estáticos (sem hiperparâmetros para otimizar)
         static_models = {
-            'logistic_regression', 'svm', 'linear_svc', 'naive_bayes', 'ridge_classifier', 
-            'sgd_classifier', 'linear_regression', 'sgd_regressor', 'mean_shift',
-            'elliptic_envelope', 'one_class_svm'
+            'naive_bayes', 'ridge_classifier', 
+            'linear_regression', 'mean_shift',
+            'elliptic_envelope'
         }
         
         models_to_tune = selected_models if selected_models else self.get_available_models()
@@ -715,6 +723,10 @@ class AutoMLTrainer:
             trials_without_improvement = 0 
             logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials)")
             study.optimize(lambda t: objective(t, forced_model=m_name), n_trials=current_n_trials)
+            # Resetar o flag de parada para permitir que o próximo modelo seja otimizado
+            # O study.stop() define este flag como True
+            if hasattr(study, '_stop_flag'):
+                study._stop_flag = False
             logger.info(f"✅ Otimização para {m_name} finalizada.")
         
         self.best_params = study.best_params
@@ -727,6 +739,11 @@ class AutoMLTrainer:
             self.best_params.update(self.ts_metadata)
         
         self.best_model = self._get_models(trial=optuna.trial.FixedTrial(self.best_params), name=best_model_name)
+        
+        # Reativar probabilidade para o modelo final se for SVM
+        if best_model_name == 'svm' and hasattr(self.best_model, 'probability'):
+            self.best_model.set_params(probability=True)
+            logger.info("🔮 Ativando estimativa de probabilidade para o modelo SVM final.")
         
         if y_train is not None:
             self.best_model.fit(X_train, y_train)
