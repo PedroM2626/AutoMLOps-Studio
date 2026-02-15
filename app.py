@@ -12,6 +12,7 @@ from mlops_utils import (
 import joblib # type: ignore
 import pickle
 import os
+import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
@@ -1309,36 +1310,81 @@ with tabs[7]:
                     st.error(f"Erro ao carregar modelo: {e}")
                 
         elif model_source == "Configuração Manual":
-            model_algo = st.selectbox("Algoritmo", ["RandomForest", "XGBoost", "LogisticRegression", "DecisionTree", "SVR", "LinearRegression", "KMeans", "IsolationForest"], key="stab_algo")
+            # Dynamic Model List from AutoMLTrainer
+            trainer_stab = AutoMLTrainer(task_type=task_type)
+            available_models = trainer_stab.get_supported_models()
             
-            st.markdown("Hiperparâmetros:")
-            if model_algo == "RandomForest":
-                n_estimators = st.number_input("n_estimators", 10, 1000, 100, key="stab_rf_n")
-                max_depth = st.number_input("max_depth", 1, 100, 10, key="stab_rf_d")
-                model_params = {'n_estimators': n_estimators, 'max_depth': max_depth}
-            elif model_algo == "XGBoost":
-                learning_rate = st.number_input("learning_rate", 0.01, 1.0, 0.1, key="stab_xgb_lr")
-                n_estimators = st.number_input("n_estimators", 10, 1000, 100, key="stab_xgb_n")
-                model_params = {'learning_rate': learning_rate, 'n_estimators': n_estimators}
-            elif model_algo == "LogisticRegression":
-                C_param = st.number_input("C (Regularização)", 0.01, 10.0, 1.0, key="stab_lr_c")
-                model_params = {'C': C_param}
-            elif model_algo == "DecisionTree":
-                max_depth = st.number_input("max_depth", 1, 100, 10, key="stab_dt_d")
-                model_params = {'max_depth': max_depth}
-            elif model_algo == "SVR":
-                C_param = st.number_input("C", 0.01, 100.0, 1.0, key="stab_svr_c")
-                model_params = {'C': C_param}
-            elif model_algo == "LinearRegression":
-                fit_intercept = st.checkbox("Fit Intercept", value=True, key="stab_lin_fi")
-                model_params = {'fit_intercept': fit_intercept}
-            elif model_algo == "KMeans":
-                n_clusters = st.number_input("n_clusters", 2, 20, 3, key="stab_kmeans_k")
-                model_params = {'n_clusters': n_clusters}
-            elif model_algo == "IsolationForest":
-                contamination = st.number_input("contamination", 0.0, 0.5, 0.1, key="stab_iso_c")
-                model_params = {'contamination': contamination}
-        
+            if not available_models:
+                st.error(f"Nenhum modelo suportado encontrado para a tarefa: {task_type}")
+            else:
+                model_algo = st.selectbox("Algoritmo", available_models, key="stab_algo")
+                
+                st.markdown("##### Hiperparâmetros Dinâmicos")
+                model_params = {}
+                
+                # Dynamic UI based on model selection
+                if "random_forest" in model_algo or "extra_trees" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        n_estimators = st.number_input("Number of Trees (n_estimators)", 10, 1000, 100, step=10, key="stab_n_est")
+                        max_depth = st.number_input("Max Depth", 1, 100, 10, key="stab_max_depth")
+                    with c2:
+                        min_samples_split = st.number_input("Min Samples Split", 2, 20, 2, key="stab_min_samples")
+                        criterion = st.selectbox("Criterion", ["gini", "entropy", "log_loss"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "absolute_error"], key="stab_crit")
+                    model_params = {"n_estimators": n_estimators, "max_depth": max_depth, "min_samples_split": min_samples_split, "criterion": criterion}
+                
+                elif "xgboost" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        n_estimators = st.number_input("n_estimators", 10, 1000, 100, step=10, key="stab_xgb_n")
+                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_xgb_lr")
+                    with c2:
+                        max_depth = st.number_input("Max Depth", 1, 20, 6, key="stab_xgb_d")
+                        subsample = st.slider("Subsample", 0.1, 1.0, 0.8, key="stab_xgb_sub")
+                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate, "max_depth": max_depth, "subsample": subsample}
+
+                elif "lightgbm" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        n_estimators = st.number_input("n_estimators", 10, 1000, 100, step=10, key="stab_lgb_n")
+                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_lgb_lr")
+                    with c2:
+                        num_leaves = st.number_input("Num Leaves", 2, 256, 31, key="stab_lgb_leaves")
+                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate, "num_leaves": num_leaves}
+
+                elif "logistic" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        C = st.number_input("Regularization (C)", 0.01, 100.0, 1.0, format="%.2f", key="stab_lr_c")
+                    with c2:
+                        penalty = st.selectbox("Penalty", ["l2", "l1", "elasticnet", "none"], key="stab_lr_p")
+                    model_params = {"C": C, "penalty": penalty if penalty != "none" else None}
+                    if penalty == "elasticnet":
+                        l1_ratio = st.slider("L1 Ratio", 0.0, 1.0, 0.5, key="stab_lr_l1")
+                        model_params["l1_ratio"] = l1_ratio
+                        model_params["solver"] = "saga" # Required for elasticnet
+
+                elif "svm" in model_algo or "svr" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        C = st.number_input("C", 0.01, 100.0, 1.0, format="%.2f", key="stab_svm_c")
+                        kernel = st.selectbox("Kernel", ["rbf", "linear", "poly", "sigmoid"], key="stab_svm_k")
+                    model_params = {"C": C, "kernel": kernel}
+
+                elif "kmeans" in model_algo:
+                    n_clusters = st.number_input("Number of Clusters", 2, 50, 3, key="stab_km_k")
+                    init = st.selectbox("Init", ["k-means++", "random"], key="stab_km_init")
+                    model_params = {"n_clusters": n_clusters, "init": init}
+                
+                else:
+                    # Fallback to JSON for other models
+                    st.info(f"Configuração UI simplificada não disponível para {model_algo}. Use JSON abaixo.")
+                    params_json = st.text_area("Parâmetros (JSON)", value="{}", height=100, key="stab_params_json")
+                    try:
+                        model_params = json.loads(params_json)
+                    except json.JSONDecodeError:
+                        model_params = {}
+
         st.divider()
         
         # --- 4. VALIDAÇÃO E ESTABILIDADE ---
@@ -1361,7 +1407,8 @@ with tabs[7]:
             "O que você deseja testar?",
             ["Robustez a Variação de Dados (Split/CV)", 
              "Robustez à Inicialização (Seed)", 
-             "Sensibilidade a Hiperparâmetros"],
+             "Sensibilidade a Hiperparâmetros",
+             "Análise Geral de Estabilidade"],
             key="stab_type"
         )
         
@@ -1374,7 +1421,12 @@ with tabs[7]:
         hyperparam_name = None
         hyperparam_values = []
 
-        if stability_type == "Robustez a Variação de Dados (Split/CV)":
+        if stability_type == "Análise Geral de Estabilidade":
+            st.caption("Executa testes de Seed e Split para gerar um score unificado de estabilidade.")
+            n_iterations = st.slider("Iterações por Teste", 5, 50, 10, key="stab_iter_gen")
+            st.info("Este modo executa ambos os testes de Seed e Split (Monte Carlo) e combina os resultados.")
+
+        elif stability_type == "Robustez a Variação de Dados (Split/CV)":
             st.caption("Testa como o modelo se comporta com diferentes divisões de treino/teste.")
             test_mode = st.radio("Método de Split", ["Simples (Holdout Repetido)", "Avançado (Cross-Validation)"], key="stab_mode_split")
         
@@ -1441,63 +1493,104 @@ with tabs[7]:
                         # 3. Instanciar Modelo Manual (se necessário)
                         if model_source == "Configuração Manual":
                             trainer = AutoMLTrainer(task_type=task_type)
-                            algo_map = {
-                                "RandomForest": "random_forest",
-                                "XGBoost": "xgboost",
-                                "LogisticRegression": "logistic_regression",
-                                "DecisionTree": "decision_tree",
-                                "SVR": "svm",
-                                "LinearRegression": "linear_regression",
-                                "KMeans": "kmeans",
-                                "IsolationForest": "isolation_forest"
-                            }
-                            internal_name = algo_map.get(model_algo, "random_forest")
-                            model_instance = trainer.create_model_instance(internal_name, model_params)
+                            # model_algo holds the internal name from the dropdown
+                            model_instance = trainer.create_model_instance(model_algo, model_params)
                             
                         if model_instance:
                             # 4. Executar Análise
-                            analyzer = StabilityAnalyzer(model_instance, X_proc, y_proc, task_type=task_type)
-                            results = analyzer.run_stability_test(
-                                n_iterations=n_iterations, 
-                                test_size=test_size, 
-                                perturbation=perturbation,
-                                cv_strategy=cv_strategy
-                            )
+                            analyzer = StabilityAnalyzer(model_instance, X_proc, y_proc, task_type=task_type, random_state=manual_seed_stab)
                             
-                            st.success("Análise concluída com sucesso!")
-                            
-                            # Display Metrics
-                            st.markdown("### 📊 Resultados de Estabilidade")
-                            
-                            # Metrics Table
-                            summary_df = analyzer.calculate_stability_metrics(results)
-                            st.markdown("#### Resumo e Score de Estabilidade")
-                            st.dataframe(summary_df.style.highlight_max(axis=0, color='lightgreen'))
-                            
-                            st.markdown("---")
-                            st.markdown("#### Detalhes por Iteração")
-                            st.dataframe(results)
-                            
-                            # Visualizations
-                            st.markdown("#### Distribuição das Métricas")
-                            df_res = results
-                            metric_cols = [c for c in df_res.columns if c != 'iteration']
-                            
-                            if metric_cols:
+                            if stability_type == "Análise Geral de Estabilidade":
+                                report = analyzer.run_general_stability_check(n_iterations=n_iterations)
+                                st.success("Análise Geral Concluída!")
+                                
+                                st.markdown("### 📊 Relatório Geral de Estabilidade")
+                                
                                 c1, c2 = st.columns(2)
-                                for i, metric in enumerate(metric_cols):
-                                    with (c1 if i % 2 == 0 else c2):
-                                        fig = px.box(df_res, y=metric, title=f"Estabilidade: {metric}", points="all")
-                                        st.plotly_chart(fig, use_container_width=True)
-                                        
-                                st.markdown("#### Histograma das Métricas")
-                                c3, c4 = st.columns(2)
-                                for i, metric in enumerate(metric_cols):
-                                    with (c3 if i % 2 == 0 else c4):
-                                        fig = px.histogram(df_res, x=metric, nbins=15, title=f"Histograma: {metric}")
-                                        st.plotly_chart(fig, use_container_width=True)
+                                with c1:
+                                    st.markdown("#### 1. Estabilidade de Inicialização (Seed)")
+                                    st.caption("Variação de performance devido apenas à semente aleatória do modelo.")
+                                    st.dataframe(report['seed_stability'].style.highlight_max(axis=0, color='lightgreen'))
+                                with c2:
+                                    st.markdown("#### 2. Estabilidade de Dados (Split)")
+                                    st.caption("Variação de performance devido à divisão dos dados (Monte Carlo CV).")
+                                    st.dataframe(report['split_stability'].style.highlight_max(axis=0, color='lightgreen'))
+                                
+                                st.markdown("---")
+                                st.markdown("#### Comparativo Visual")
+                                
+                                # Visual Comparison for Accuracy/R2/F1
+                                seed_df = report['raw_seed']
+                                split_df = report['raw_split']
+                                seed_df['Type'] = 'Seed Stability'
+                                split_df['Type'] = 'Split Stability'
+                                
+                                combined_df = pd.concat([seed_df, split_df], ignore_index=True)
+                                metric_cols = [c for c in combined_df.columns if c not in ['iteration', 'seed', 'split_seed', 'param_value', 'Type']]
+                                
+                                for metric in metric_cols:
+                                    fig = px.box(combined_df, x='Type', y=metric, color='Type', title=f"Comparativo de Variância: {metric}", points="all")
+                                    st.plotly_chart(fig, use_container_width=True)
+
                             else:
-                                st.warning("Sem métricas numéricas para visualizar.")
+                                if stability_type == "Robustez à Inicialização (Seed)":
+                                    results = analyzer.run_seed_stability(n_iterations=n_iterations)
+                                elif stability_type == "Sensibilidade a Hiperparâmetros":
+                                    if not hyperparam_name or not hyperparam_values:
+                                        st.error("Configure os hiperparâmetros corretamente.")
+                                        st.stop()
+                                    results = analyzer.run_hyperparameter_stability(hyperparam_name, hyperparam_values)
+                                else:
+                                    # Padrão (Split/CV)
+                                    results = analyzer.run_stability_test(
+                                        n_iterations=n_iterations, 
+                                        test_size=test_size, 
+                                        perturbation=perturbation,
+                                        cv_strategy=cv_strategy
+                                    )
+                                
+                                st.success("Análise concluída com sucesso!")
+                                
+                                # Display Metrics
+                                st.markdown("### 📊 Resultados de Estabilidade")
+                                
+                                # Metrics Table
+                                summary_df = analyzer.calculate_stability_metrics(results)
+                                st.markdown("#### Resumo e Score de Estabilidade")
+                                st.dataframe(summary_df.style.highlight_max(axis=0, color='lightgreen'))
+                                
+                                st.markdown("---")
+                                st.markdown("#### Detalhes por Iteração")
+                                st.dataframe(results)
+                                
+                                # Visualizations
+                                st.markdown("#### Visualização")
+                                df_res = results
+                                
+                                if stability_type == "Sensibilidade a Hiperparâmetros":
+                                    metric_cols = [c for c in df_res.columns if c not in ['iteration', 'param_value', 'seed', 'split_seed']]
+                                    x_col = 'param_value'
+                                    for metric in metric_cols:
+                                        fig = px.line(df_res, x=x_col, y=metric, markers=True, title=f"{metric} vs {hyperparam_name}")
+                                        st.plotly_chart(fig, use_container_width=True)
+                                else:
+                                    # Distribuição (Boxplot/Histograma)
+                                    metric_cols = [c for c in df_res.columns if c not in ['iteration', 'seed', 'split_seed', 'param_value']]
+                                    if metric_cols:
+                                        c1, c2 = st.columns(2)
+                                        for i, metric in enumerate(metric_cols):
+                                            with (c1 if i % 2 == 0 else c2):
+                                                fig = px.box(df_res, y=metric, title=f"Estabilidade: {metric}", points="all")
+                                                st.plotly_chart(fig, use_container_width=True)
+                                                
+                                        st.markdown("#### Histograma das Métricas")
+                                        c3, c4 = st.columns(2)
+                                        for i, metric in enumerate(metric_cols):
+                                            with (c3 if i % 2 == 0 else c4):
+                                                fig = px.histogram(df_res, x=metric, nbins=15, title=f"Histograma: {metric}")
+                                                st.plotly_chart(fig, use_container_width=True)
+                                    else:
+                                        st.warning("Sem métricas numéricas para visualizar.")
 
                         else:
                             st.error("Modelo não configurado corretamente ou falha na criação.")

@@ -164,6 +164,28 @@ class StabilityAnalyzer:
             
         return pd.DataFrame(metrics_history)
 
+    def run_general_stability_check(self, n_iterations=10):
+        """
+        Runs a combined stability check (Seed + Split) to give a general assessment.
+        Returns a dictionary with summarized metrics.
+        """
+        # 1. Seed Stability
+        seed_results = self.run_seed_stability(n_iterations=n_iterations)
+        seed_metrics = self.calculate_stability_metrics(seed_results)
+        
+        # 2. Split Stability (Monte Carlo)
+        split_results = self.run_stability_test(n_iterations=n_iterations, cv_strategy='monte_carlo')
+        split_metrics = self.calculate_stability_metrics(split_results)
+        
+        combined_report = {
+            'seed_stability': seed_metrics,
+            'split_stability': split_metrics,
+            'raw_seed': seed_results,
+            'raw_split': split_results
+        }
+        
+        return combined_report
+
     def calculate_stability_metrics(self, df_results):
         """
         Calculates aggregate stability metrics (mean, std, stability score) from raw results.

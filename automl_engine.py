@@ -959,6 +959,33 @@ class AutoMLTrainer:
 
         return self.best_model
 
+    def get_supported_models(self):
+        """Returns a list of supported model names for the current task type."""
+        if self.task_type == 'classification':
+            return [
+                'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 
+                'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
+                'svm', 'knn', 'naive_bayes', 'sgd_classifier', 'mlp'
+            ]
+        elif self.task_type == 'regression':
+            return [
+                'linear_regression', 'random_forest', 'xgboost', 'lightgbm', 
+                'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
+                'svm', 'knn', 'ridge', 'lasso', 'elastic_net', 
+                'sgd_regressor', 'mlp'
+            ]
+        elif self.task_type == 'clustering':
+            return [
+                'kmeans', 'dbscan', 'agglomerative', 'gaussian_mixture', 
+                'spectral', 'mean_shift', 'birch'
+            ]
+        elif self.task_type == 'anomaly_detection':
+            return [
+                'isolation_forest', 'one_class_svm', 'local_outlier_factor', 
+                'elliptic_envelope'
+            ]
+        return []
+
     def create_model_instance(self, model_name, params=None):
         """Creates a model instance with given parameters (no prefixes expected)."""
         if params is None:
