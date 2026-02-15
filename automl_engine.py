@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
@@ -95,11 +95,13 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
         return np.zeros(len(X))
 
 class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1):
+    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard'):
         self.target_column = target_column
         self.task_type = task_type
         self.date_col = date_col
         self.forecast_horizon = forecast_horizon
+        self.nlp_config = nlp_config if nlp_config else {}
+        self.scaler_type = scaler_type
         self.preprocessor = None
         self.label_encoder = None
 
@@ -146,26 +148,64 @@ class AutoMLDataProcessor:
         return df
 
     def _apply_nlp_features(self, df, nlp_cols):
-        """Applies TF-IDF vectorization to text columns."""
-        from sklearn.feature_extraction.text import TfidfVectorizer
+        """Applies TF-IDF or CountVectorizer to text columns with custom config."""
+        from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
         df = df.copy()
+        
+        # Get NLP configs
+        vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
+        ngram_range = self.nlp_config.get('ngram_range', (1, 2))
+        max_features = self.nlp_config.get('max_features', 5000)
+        stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
+        
         for col in nlp_cols:
             if col in df.columns:
                 logger.info(f"🔤 Otimizando NLP para a coluna: {col}")
                 # Limpeza básica
                 df[col] = df[col].astype(str).str.lower().str.replace(r'[^\w\s]', '', regex=True)
                 
-                # TF-IDF Otimizado
-                tfidf = TfidfVectorizer(
-                    max_features=5000,
-                    ngram_range=(1, 2),
-                    stop_words='english',
-                    sublinear_tf=True
-                )
-                text_features = tfidf.fit_transform(df[col])
+                # Vectorizer selection
+                if vectorizer_type == 'count':
+                    vectorizer = CountVectorizer(
+                        max_features=max_features,
+                        ngram_range=ngram_range,
+                        stop_words=stop_words
+                    )
+                else: # Default to TF-IDF
+                    vectorizer = TfidfVectorizer(
+                        max_features=max_features,
+                        ngram_range=ngram_range,
+                        stop_words=stop_words,
+                        sublinear_tf=True
+                    )
+                
+                # Lemmatization (Basic support)
+                if self.nlp_config.get('lemmatization', False):
+                    try:
+                        import nltk
+                        from nltk.stem import WordNetLemmatizer
+                        try:
+                            nltk.data.find('corpora/wordnet')
+                        except LookupError:
+                            nltk.download('wordnet')
+                            nltk.download('omw-1.4')
+                        
+                        lemmatizer = WordNetLemmatizer()
+                        # Apply lemmatization to the column before vectorization
+                        # This is a simple apply, for better results we'd need POS tagging
+                        df[col] = df[col].apply(lambda x: ' '.join([lemmatizer.lemmatize(w) for w in str(x).split()]))
+                    except Exception as e:
+                        logger.warning(f"Lemmatization failed: {e}")
+
+                text_features = vectorizer.fit_transform(df[col])
+                
+                # Handle sparse matrix
+                if hasattr(text_features, 'toarray'):
+                    text_features = text_features.toarray()
+                    
                 tfidf_df = pd.DataFrame(
-                    text_features.toarray(), 
-                    columns=[f"tfidf_{col}_{i}" for i in range(text_features.shape[1])],
+                    text_features, 
+                    columns=[f"{vectorizer_type}_{col}_{i}" for i in range(text_features.shape[1])],
                     index=df.index
                 )
                 df = pd.concat([df, tfidf_df], axis=1)
@@ -174,7 +214,7 @@ class AutoMLDataProcessor:
 
     def fit_transform(self, df, nlp_cols=None):
         # NLP Feature Engineering
-        if nlp_cols:
+        if nlp_cols is not None and isinstance(nlp_cols, list) and len(nlp_cols) > 0:
             df = self._apply_nlp_features(df, nlp_cols)
 
         # Time Series Feature Engineering
@@ -216,9 +256,16 @@ class AutoMLDataProcessor:
                 high_card_features.append(col)
 
         # Preprocessing for numeric data
+        if self.scaler_type == 'minmax':
+            scaler = MinMaxScaler()
+        elif self.scaler_type == 'robust':
+            scaler = RobustScaler()
+        else:
+            scaler = StandardScaler()
+
         numeric_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='median')),
-            ('scaler', StandardScaler())
+            ('scaler', scaler)
         ])
 
         # Preprocessing for low cardinality categorical data
@@ -911,6 +958,68 @@ class AutoMLTrainer:
             self.feature_importance = None
 
         return self.best_model
+
+    def create_model_instance(self, model_name, params=None):
+        """Creates a model instance with given parameters (no prefixes expected)."""
+        if params is None:
+            params = {}
+            
+        # Clean params (remove None values or empty strings that might come from UI)
+        clean_params = {k: v for k, v in params.items() if v is not None and v != ""}
+        
+        try:
+            if self.task_type == 'classification':
+                if model_name == 'logistic_regression': return LogisticRegression(max_iter=2000, **clean_params)
+                if model_name == 'random_forest': return RandomForestClassifier(**clean_params)
+                if model_name == 'xgboost': return xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', **clean_params)
+                if model_name == 'lightgbm': return lgb.LGBMClassifier(verbosity=-1, **clean_params)
+                if model_name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostClassifier(verbose=0, **clean_params)
+                if model_name == 'extra_trees': return ExtraTreesClassifier(**clean_params)
+                if model_name == 'adaboost': return AdaBoostClassifier(**clean_params)
+                if model_name == 'decision_tree': return DecisionTreeClassifier(**clean_params)
+                if model_name == 'svm': return SVC(probability=True, **clean_params)
+                if model_name == 'knn': return KNeighborsClassifier(**clean_params)
+                if model_name == 'naive_bayes': return GaussianNB(**clean_params)
+                if model_name == 'sgd_classifier': return SGDClassifier(max_iter=1000, **clean_params)
+                if model_name == 'mlp': return MLPClassifier(max_iter=1000, **clean_params)
+
+            elif self.task_type == 'regression':
+                if model_name == 'linear_regression': return LinearRegression(**clean_params)
+                if model_name == 'random_forest': return RandomForestRegressor(**clean_params)
+                if model_name == 'xgboost': return xgb.XGBRegressor(objective='reg:squarederror', **clean_params)
+                if model_name == 'lightgbm': return lgb.LGBMRegressor(verbosity=-1, **clean_params)
+                if model_name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, **clean_params)
+                if model_name == 'extra_trees': return ExtraTreesRegressor(**clean_params)
+                if model_name == 'adaboost': return AdaBoostRegressor(**clean_params)
+                if model_name == 'decision_tree': return DecisionTreeRegressor(**clean_params)
+                if model_name == 'svm': return SVR(**clean_params)
+                if model_name == 'knn': return KNeighborsRegressor(**clean_params)
+                if model_name == 'ridge': return Ridge(**clean_params)
+                if model_name == 'lasso': return Lasso(**clean_params)
+                if model_name == 'elastic_net': return ElasticNet(**clean_params)
+                if model_name == 'sgd_regressor': return SGDRegressor(max_iter=1000, **clean_params)
+                if model_name == 'mlp': return MLPRegressor(max_iter=1000, **clean_params)
+
+            elif self.task_type == 'clustering':
+                if model_name == 'kmeans': return KMeans(n_init=10, **clean_params)
+                if model_name == 'dbscan': return DBSCAN(**clean_params)
+                if model_name == 'agglomerative': return AgglomerativeClustering(**clean_params)
+                if model_name == 'gaussian_mixture': return GaussianMixture(**clean_params)
+                if model_name == 'spectral': return SpectralClustering(**clean_params)
+                if model_name == 'mean_shift': return MeanShift(**clean_params)
+                if model_name == 'birch': return Birch(**clean_params)
+
+            elif self.task_type == 'anomaly_detection':
+                if model_name == 'isolation_forest': return IsolationForest(**clean_params)
+                if model_name == 'one_class_svm': return OneClassSVM(**clean_params)
+                if model_name == 'local_outlier_factor': return LocalOutlierFactor(novelty=True, **clean_params)
+                if model_name == 'elliptic_envelope': return EllipticEnvelope(**clean_params)
+                
+        except Exception as e:
+            logger.error(f"Error creating model instance for {model_name}: {e}")
+            return None
+            
+        return None
 
     def _instantiate_model(self, name, params):
         if self.task_type == 'classification':

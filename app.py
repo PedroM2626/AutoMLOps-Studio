@@ -1,4 +1,5 @@
 from automl_engine import AutoMLDataProcessor, AutoMLTrainer, save_pipeline, get_technical_explanation
+from stability_engine import StabilityAnalyzer
 from cv_engine import CVAutoMLTrainer, get_cv_explanation
 import streamlit as st
 import pandas as pd
@@ -126,7 +127,8 @@ tabs = st.tabs([
     "🖼️ Computer Vision", 
     "📈 Drift/Monitoring", 
     "🗂️ Model Registry",
-    "🧪 Teste de Modelos"
+    "🧪 Teste de Modelos",
+    "⚖️ Estabilidade"
 ])
 
 # --- TAB 0: DATA ---
@@ -214,9 +216,30 @@ with tabs[1]:
             
             # Seleção de colunas NLP
             st.markdown("##### 🔤 Configuração de NLP")
+            
+            # Configurações Avançadas de NLP (Sincronizado com Estabilidade)
+            nlp_config_automl = {}
             if 'train_df' in st.session_state:
                 potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
                 selected_nlp_cols = st.multiselect("Colunas de Texto (NLP)", potential_nlp_cols, help="Selecione as colunas que contêm texto para processamento NLP otimizado.")
+                
+                if selected_nlp_cols:
+                    col_nlp1, col_nlp2 = st.columns(2)
+                    with col_nlp1:
+                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count"], key="automl_vect")
+                        ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
+                    with col_nlp2:
+                        remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
+                        lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
+                        max_features_automl = st.number_input("Max Features", 100, 10000, 1000, key="automl_max_feat")
+
+                    nlp_config_automl = {
+                        "vectorizer": vectorizer_automl,
+                        "ngram_range": (ngram_min_automl, ngram_max_automl),
+                        "stop_words": remove_stopwords_automl,
+                        "max_features": max_features_automl,
+                        "lemmatization": lematization_automl
+                    }
             else:
                 selected_nlp_cols = []
                 st.info("Carregue os dados para selecionar colunas NLP.")
@@ -409,7 +432,7 @@ with tabs[1]:
                         st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
 
                 with st.spinner("Processando..."):
-                    processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon)
+                    processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon, nlp_config=nlp_config_automl)
                     X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
                     X_test_proc, y_test_proc = processor.transform(test_df) if test_df is not None else (None, None)
                     
@@ -1145,3 +1168,342 @@ with tabs[6]:
                             st.error(f"Erro: {e}")
                 else:
                     st.warning("Não foi possível identificar as colunas necessárias. Use o Upload CSV ou certifique-se de que o modelo foi treinado nesta sessão.")
+
+# --- TAB 7: ESTABILIDADE ---
+with tabs[7]:
+    st.header("⚖️ Análise de Estabilidade e Robustez Avançada")
+    st.markdown("Avaliação de consistência do modelo com configurações de MLOps, NLP e validação cruzada.")
+
+    col_config, col_main = st.columns([1, 2])
+
+    with col_config:
+        st.subheader("⚙️ Configuração do Experimento")
+        
+        # --- 1. DADOS ---
+        st.markdown("### 1. 📂 Dados e Tarefa")
+        dataset_names = datalake.list_datasets()
+        if not dataset_names:
+            st.warning("Nenhum dataset no Data Lake.")
+            selected_ds = None
+            df_stab = None
+        else:
+            selected_ds = st.selectbox("Dataset", dataset_names, key="stab_ds")
+            if selected_ds:
+                versions = datalake.list_versions(selected_ds)
+                selected_ver = st.selectbox("Versão", versions, key="stab_ver")
+                
+                try:
+                    df_stab = datalake.load_version(selected_ds, selected_ver)
+                    st.success(f"Carregado: {len(df_stab)} linhas")
+                    
+                    all_cols = df_stab.columns.tolist()
+                    default_target = all_cols[-1]
+                    if 'target' in all_cols: default_target = 'target'
+                    if 'class' in all_cols: default_target = 'class'
+                    
+                    target_col = st.selectbox("Coluna Alvo (Target)", all_cols, index=all_cols.index(default_target) if default_target in all_cols else 0, key="stab_target")
+                    task_type = st.selectbox("Tipo de Tarefa", ["classification", "regression", "time_series", "anomaly_detection", "clustering"], key="stab_task")
+                    
+                except Exception as e:
+                    st.error(f"Erro ao carregar dados: {e}")
+                    df_stab = None
+            else:
+                df_stab = None
+
+        st.divider()
+
+        # --- 2. PRÉ-PROCESSAMENTO & NLP ---
+        st.markdown("### 2. 🔧 Pré-processamento")
+        with st.expander("Configurações Avançadas de Dados", expanded=False):
+            # Scaler
+            scaler_type = st.selectbox("Scaler (Normalização)", ["standard", "minmax", "robust", "none"], format_func=lambda x: x.capitalize(), key="stab_scaler")
+            
+            # NLP Config
+            st.markdown("**Processamento de Texto (NLP)**")
+            use_nlp = st.checkbox("Habilitar NLP", key="stab_use_nlp")
+            nlp_config = {}
+            nlp_cols = []
+            if use_nlp and df_stab is not None:
+                text_cols = df_stab.select_dtypes(include=['object']).columns.tolist()
+                if not text_cols:
+                    st.warning("Nenhuma coluna de texto detectada.")
+                else:
+                    nlp_cols = st.multiselect("Colunas de Texto", text_cols, key="stab_nlp_cols")
+                    
+                    vectorizer = st.selectbox("Vetorização", ["tfidf", "count"], key="stab_vect")
+                    ngram_min, ngram_max = st.slider("N-Grams Range", 1, 3, (1, 2), key="stab_ngram")
+                    remove_stopwords = st.checkbox("Remover Stopwords (English)", value=True, key="stab_stop")
+                    max_features = st.number_input("Max Features", 100, 10000, 1000, key="stab_max_feat")
+                    
+                    nlp_config = {
+                        "vectorizer": vectorizer,
+                        "ngram_range": (ngram_min, ngram_max),
+                        "stop_words": remove_stopwords,
+                        "max_features": max_features,
+                        "lemmatization": st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="stab_lemma")
+                    }
+
+        st.divider()
+
+        # --- 3. MODELO ---
+        st.markdown("### 3. 🤖 Modelo")
+        model_source = st.radio("Fonte do Modelo", ["Sessão Atual (AutoML)", "Model Registry", "Configuração Manual", "Upload Arquivo (.pkl/.joblib)"], key="stab_model_source")
+        
+        model_instance = None
+        model_params = {}
+        
+        if model_source == "Sessão Atual (AutoML)":
+            # Check for best_model
+            has_best = 'best_model' in st.session_state and st.session_state['best_model'] is not None
+            # Check for results list
+            has_results = 'automl_results' in st.session_state and st.session_state['automl_results']
+            
+            model_options = []
+            if has_best:
+                model_options.append("Best Model")
+            if has_results:
+                for i, res in enumerate(st.session_state['automl_results']):
+                     # res should be a dict with model_name, params, metrics
+                     m_name = res.get('model_name', 'Unknown')
+                     acc = res.get('accuracy', res.get('r2', 0))
+                     model_options.append(f"Model {i+1}: {m_name} (Score: {acc:.4f})")
+            
+            if not model_options:
+                st.warning("Nenhum modelo treinado nesta sessão.")
+            else:
+                selected_model_str = st.selectbox("Selecione o Modelo", model_options, key="stab_sess_model")
+                
+                if selected_model_str == "Best Model":
+                     model_instance = st.session_state['best_model']
+                else:
+                     # Reconstruct model from params
+                     try:
+                         idx = int(selected_model_str.split(":")[0].replace("Model ", "")) - 1
+                         res = st.session_state['automl_results'][idx]
+                         m_name = res.get('model_name')
+                         params = res.get('params', {})
+                         
+                         trainer_temp = AutoMLTrainer(task_type=task_type)
+                         # Try to use _instantiate_model because params likely have prefixes from Optuna
+                         # Accessing protected method is fine here
+                         model_instance = trainer_temp._instantiate_model(m_name, params)
+                         st.success(f"Modelo {m_name} reconstruído com sucesso.")
+                     except Exception as e:
+                         st.error(f"Erro ao recuperar modelo: {e}")
+                
+        elif model_source == "Model Registry":
+            reg_models = get_registered_models()
+            if reg_models:
+                sel_reg_model_name = st.selectbox("Modelo Registrado", [m['name'] for m in reg_models], key="stab_reg_model")
+                st.info("Para usar modelos do Registry, carregue os parâmetros manualmente abaixo ou use a sessão atual.")
+            else:
+                st.warning("Nenhum modelo registrado.")
+
+        elif model_source == "Upload Arquivo (.pkl/.joblib)":
+            uploaded_model = st.file_uploader("Carregar modelo treinado", type=["pkl", "joblib"], key="stab_upload")
+            if uploaded_model:
+                try:
+                    model_instance = joblib.load(uploaded_model)
+                    st.success("Modelo carregado com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao carregar modelo: {e}")
+                
+        elif model_source == "Configuração Manual":
+            model_algo = st.selectbox("Algoritmo", ["RandomForest", "XGBoost", "LogisticRegression", "DecisionTree", "SVR", "LinearRegression", "KMeans", "IsolationForest"], key="stab_algo")
+            
+            st.markdown("Hiperparâmetros:")
+            if model_algo == "RandomForest":
+                n_estimators = st.number_input("n_estimators", 10, 1000, 100, key="stab_rf_n")
+                max_depth = st.number_input("max_depth", 1, 100, 10, key="stab_rf_d")
+                model_params = {'n_estimators': n_estimators, 'max_depth': max_depth}
+            elif model_algo == "XGBoost":
+                learning_rate = st.number_input("learning_rate", 0.01, 1.0, 0.1, key="stab_xgb_lr")
+                n_estimators = st.number_input("n_estimators", 10, 1000, 100, key="stab_xgb_n")
+                model_params = {'learning_rate': learning_rate, 'n_estimators': n_estimators}
+            elif model_algo == "LogisticRegression":
+                C_param = st.number_input("C (Regularização)", 0.01, 10.0, 1.0, key="stab_lr_c")
+                model_params = {'C': C_param}
+            elif model_algo == "DecisionTree":
+                max_depth = st.number_input("max_depth", 1, 100, 10, key="stab_dt_d")
+                model_params = {'max_depth': max_depth}
+            elif model_algo == "SVR":
+                C_param = st.number_input("C", 0.01, 100.0, 1.0, key="stab_svr_c")
+                model_params = {'C': C_param}
+            elif model_algo == "LinearRegression":
+                fit_intercept = st.checkbox("Fit Intercept", value=True, key="stab_lin_fi")
+                model_params = {'fit_intercept': fit_intercept}
+            elif model_algo == "KMeans":
+                n_clusters = st.number_input("n_clusters", 2, 20, 3, key="stab_kmeans_k")
+                model_params = {'n_clusters': n_clusters}
+            elif model_algo == "IsolationForest":
+                contamination = st.number_input("contamination", 0.0, 0.5, 0.1, key="stab_iso_c")
+                model_params = {'contamination': contamination}
+        
+        st.divider()
+        
+        # --- 4. VALIDAÇÃO E ESTABILIDADE ---
+        st.markdown("### 4. 🧪 Configuração de Teste")
+        
+        # 4.1 Seed Configuration
+        st.markdown("**Configuração de Seed (Reprodutibilidade)**")
+        seed_mode_stab = st.radio("Modo de Seed", ["Automático", "Manual"], key="stab_seed_mode", horizontal=True)
+        if seed_mode_stab == "Manual":
+            manual_seed_stab = st.number_input("Seed Manual", 0, 999999, 42, key="stab_manual_seed")
+        else:
+            manual_seed_stab = 42 # Será sobrescrito ou usado como base se necessário
+            st.info("Seed será gerada automaticamente.")
+
+        st.divider()
+
+        # 4.2 Test Strategy
+        st.markdown("**Estratégia de Estabilidade**")
+        stability_type = st.radio(
+            "O que você deseja testar?",
+            ["Robustez a Variação de Dados (Split/CV)", 
+             "Robustez à Inicialização (Seed)", 
+             "Sensibilidade a Hiperparâmetros"],
+            key="stab_type"
+        )
+        
+        # Defaults
+        cv_folds = 5
+        n_iterations = 10
+        perturbation = 0.0
+        cv_strategy = 'monte_carlo'
+        test_size = 0.2
+        hyperparam_name = None
+        hyperparam_values = []
+
+        if stability_type == "Robustez a Variação de Dados (Split/CV)":
+            st.caption("Testa como o modelo se comporta com diferentes divisões de treino/teste.")
+            test_mode = st.radio("Método de Split", ["Simples (Holdout Repetido)", "Avançado (Cross-Validation)"], key="stab_mode_split")
+        
+            if test_mode == "Avançado (Cross-Validation)":
+                cv_type_label = st.selectbox("Estratégia CV", ["Monte Carlo (ShuffleSplit)", "K-Fold", "Stratified K-Fold", "Time Series Split"], key="stab_cv_type")
+                if cv_type_label == "K-Fold": cv_strategy = 'kfold'
+                elif cv_type_label == "Stratified K-Fold": cv_strategy = 'stratified_kfold'
+                elif cv_type_label == "Time Series Split": cv_strategy = 'time_series_split'
+                else: cv_strategy = 'monte_carlo'
+                
+                n_iterations = st.slider("Número de Folds / Iterações", 2, 50, 5, key="stab_folds")
+                perturbation = st.slider("Perturbação (Ruído Gaussiano)", 0.0, 0.5, 0.0, key="stab_pert")
+                test_size = 0.2 # Ignored for KFold/Stratified but used for Monte Carlo
+                if cv_strategy == 'monte_carlo':
+                     test_size = st.slider("Tamanho Teste (Monte Carlo)", 0.1, 0.5, 0.2, key="stab_test_size_mc")
+            else:
+                # Simples
+                cv_strategy = 'monte_carlo'
+                n_iterations = st.slider("Repetições (Seeds)", 5, 50, 10, key="stab_iter_simple")
+                test_size = st.slider("Tamanho do Teste", 0.1, 0.5, 0.2, key="stab_test_size")
+                perturbation = st.slider("Adicionar Ruído (Perturbação)", 0.0, 0.5, 0.0, key="stab_pert_simple")
+
+        elif stability_type == "Robustez à Inicialização (Seed)":
+            st.caption("Testa se a inicialização aleatória do modelo afeta o resultado (mantendo os dados fixos).")
+            n_iterations = st.slider("Número de Repetições (Seeds de Modelo)", 5, 50, 10, key="stab_iter_seed")
+            test_size = st.slider("Tamanho do Split de Validação Fixa", 0.1, 0.5, 0.2, key="stab_test_size_seed")
+            
+        elif stability_type == "Sensibilidade a Hiperparâmetros":
+            st.caption("Testa como a variação de um hiperparâmetro afeta o modelo (mantendo dados e seed fixos).")
+            hyperparam_name = st.text_input("Nome do Hiperparâmetro (ex: n_estimators, C, max_depth)", value="n_estimators")
+            hyperparam_values_str = st.text_input("Valores (separados por vírgula)", value="10, 50, 100, 200")
+            try:
+                # Tentar converter para int ou float
+                vals = [v.strip() for v in hyperparam_values_str.split(',')]
+                hyperparam_values = []
+                for v in vals:
+                    try:
+                        if '.' in v: hyperparam_values.append(float(v))
+                        else: hyperparam_values.append(int(v))
+                    except:
+                        hyperparam_values.append(v) # Keep as string if not number
+            except:
+                st.error("Formato de valores inválido.")
+            
+    with col_main:
+        if st.button("🚀 Executar Análise de Estabilidade", type="primary"):
+            if df_stab is not None and target_col:
+                with st.spinner("Executando pipeline completo (NLP + Preprocessamento + Estabilidade)..."):
+                    try:
+                        # 1. Configurar Processor
+                        processor = AutoMLDataProcessor(
+                            task_type=task_type, 
+                            target_column=target_col,
+                            nlp_config=nlp_config,
+                            scaler_type=scaler_type
+                        )
+                        
+                        # 2. Executar Transformação (Passar DF completo!)
+                        # nlp_cols deve ser lista de nomes ou None
+                        nlp_cols_arg = nlp_cols if (use_nlp and nlp_cols) else None
+                        
+                        X_proc, y_proc = processor.fit_transform(df_stab, nlp_cols=nlp_cols_arg)
+                        
+                        # 3. Instanciar Modelo Manual (se necessário)
+                        if model_source == "Configuração Manual":
+                            trainer = AutoMLTrainer(task_type=task_type)
+                            algo_map = {
+                                "RandomForest": "random_forest",
+                                "XGBoost": "xgboost",
+                                "LogisticRegression": "logistic_regression",
+                                "DecisionTree": "decision_tree",
+                                "SVR": "svm",
+                                "LinearRegression": "linear_regression",
+                                "KMeans": "kmeans",
+                                "IsolationForest": "isolation_forest"
+                            }
+                            internal_name = algo_map.get(model_algo, "random_forest")
+                            model_instance = trainer.create_model_instance(internal_name, model_params)
+                            
+                        if model_instance:
+                            # 4. Executar Análise
+                            analyzer = StabilityAnalyzer(model_instance, X_proc, y_proc, task_type=task_type)
+                            results = analyzer.run_stability_test(
+                                n_iterations=n_iterations, 
+                                test_size=test_size, 
+                                perturbation=perturbation,
+                                cv_strategy=cv_strategy
+                            )
+                            
+                            st.success("Análise concluída com sucesso!")
+                            
+                            # Display Metrics
+                            st.markdown("### 📊 Resultados de Estabilidade")
+                            
+                            # Metrics Table
+                            summary_df = analyzer.calculate_stability_metrics(results)
+                            st.markdown("#### Resumo e Score de Estabilidade")
+                            st.dataframe(summary_df.style.highlight_max(axis=0, color='lightgreen'))
+                            
+                            st.markdown("---")
+                            st.markdown("#### Detalhes por Iteração")
+                            st.dataframe(results)
+                            
+                            # Visualizations
+                            st.markdown("#### Distribuição das Métricas")
+                            df_res = results
+                            metric_cols = [c for c in df_res.columns if c != 'iteration']
+                            
+                            if metric_cols:
+                                c1, c2 = st.columns(2)
+                                for i, metric in enumerate(metric_cols):
+                                    with (c1 if i % 2 == 0 else c2):
+                                        fig = px.box(df_res, y=metric, title=f"Estabilidade: {metric}", points="all")
+                                        st.plotly_chart(fig, use_container_width=True)
+                                        
+                                st.markdown("#### Histograma das Métricas")
+                                c3, c4 = st.columns(2)
+                                for i, metric in enumerate(metric_cols):
+                                    with (c3 if i % 2 == 0 else c4):
+                                        fig = px.histogram(df_res, x=metric, nbins=15, title=f"Histograma: {metric}")
+                                        st.plotly_chart(fig, use_container_width=True)
+                            else:
+                                st.warning("Sem métricas numéricas para visualizar.")
+
+                        else:
+                            st.error("Modelo não configurado corretamente ou falha na criação.")
+                            
+                    except Exception as e:
+                        st.error(f"Erro durante a análise: {e}")
+                        st.exception(e)
+            else:
+                st.warning("👈 Por favor, selecione um dataset e configure o modelo na barra lateral esquerda.")
