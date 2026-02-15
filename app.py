@@ -188,20 +188,39 @@ with tabs[1]:
         st.subheader("🎯 Configuração da Otimização")
         col_opt1, col_opt2 = st.columns(2)
         with col_opt1:
-            mode_selection = st.radio("Seleção de Modelos", ["Automático (Todos)", "Manual (Selecionar)"], horizontal=True)
+            training_preset = st.select_slider(
+                "Modo de Treinamento (Preset)",
+                options=["fast", "medium", "best_quality"],
+                value="medium",
+                help="fast: Rápido, menos modelos e tentativas. best_quality: Lento, todos os modelos e muitas tentativas."
+            )
+            
+            mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)"], horizontal=True)
             if mode_selection == "Manual (Selecionar)":
                 selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2])
             
-            tuning_mode = st.radio("Modo de Tuning", ["Automático", "Customizado"], horizontal=True)
+            tuning_mode = st.radio("Modo de Tuning", ["Automático (Preset)", "Customizado"], horizontal=True)
             if tuning_mode == "Customizado":
-                n_trials = st.number_input("Número de Tentativas", 1, 500, 20)
+                n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 500, 20)
+                timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 3600, 600)
                 early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7)
             else:
-                n_trials = 30
+                n_trials = None
+                timeout_per_model = None
                 early_stopping = 10
         
         with col_opt2:
             auto_split = st.checkbox("Auto-Split (Otimizar % de Treino/Validação)", value=False)
+            
+            # Seleção de colunas NLP
+            st.markdown("##### 🔤 Configuração de NLP")
+            if 'train_df' in st.session_state:
+                potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
+                selected_nlp_cols = st.multiselect("Colunas de Texto (NLP)", potential_nlp_cols, help="Selecione as colunas que contêm texto para processamento NLP otimizado.")
+            else:
+                selected_nlp_cols = []
+                st.info("Carregue os dados para selecionar colunas NLP.")
+
             if task == "time_series":
                 st.info("💡 Split temporal obrigatório para séries temporais.")
 
@@ -332,8 +351,13 @@ with tabs[1]:
                 chart_c = st.empty()
                 
                 # Calcular total real de trials para a barra de progresso
-                effective_models = selected_models if selected_models else trainer_temp.get_available_models()
-                total_expected_trials = n_trials * len(effective_models) if training_strategy == "Automático" else 1
+                # Instancia o trainer com o preset para pegar as configs
+                trainer_for_info = AutoMLTrainer(task_type=task, preset=training_preset)
+                preset_config = trainer_for_info.preset_configs.get(training_preset)
+                
+                effective_models_list = selected_models if selected_models else preset_config['models']
+                n_trials_val = n_trials if n_trials is not None else preset_config['n_trials']
+                total_expected_trials = n_trials_val * len(effective_models_list)
                 
                 def callback(trial, score, full_name, dur, metrics=None):
                     # Extrair nome do algoritmo e o número do trial do modelo
@@ -386,18 +410,19 @@ with tabs[1]:
 
                 with st.spinner("Processando..."):
                     processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon)
-                    X_train_proc, y_train_proc = processor.fit_transform(train_df)
+                    X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
                     X_test_proc, y_test_proc = processor.transform(test_df) if test_df is not None else (None, None)
                     
-                    trainer = AutoMLTrainer(task_type=task)
+                    trainer = AutoMLTrainer(task_type=task, preset=training_preset)
                     
                     best_model = trainer.train(
                         X_train_proc, 
                         y_train_proc, 
-                        n_trials=n_trials if training_strategy == "Automático" else 1, 
+                        n_trials=n_trials,
+                        timeout=timeout_per_model,
                         callback=callback, 
                         selected_models=selected_models, 
-                        early_stopping_rounds=early_stopping if training_strategy == "Automático" else 0,
+                        early_stopping_rounds=early_stopping,
                         manual_params=manual_params,
                         experiment_name=experiment_name,
                         random_state=random_seed_config

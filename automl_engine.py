@@ -119,11 +119,10 @@ class AutoMLDataProcessor:
                 df['dayofyear'] = df[self.date_col].dt.dayofyear
                 df['dayofmonth'] = df[self.date_col].dt.day
                 df['weekofyear'] = df[self.date_col].dt.isocalendar().week.astype(int)
-                # We keep the date_col for now, it will be dropped by ColumnTransformer if not numeric
             except Exception as e:
                 logger.warning(f"Could not extract temporal features: {e}")
 
-        # 2. Lag Features & Rolling Stats (Only if target y is provided or in df)
+        # 2. Lag Features & Rolling Stats
         target_vals = None
         if y is not None:
             target_vals = y
@@ -131,35 +130,53 @@ class AutoMLDataProcessor:
             target_vals = df[self.target_column]
             
         if target_vals is not None:
-            # 2.1 Force target to numeric to avoid "No numeric types to aggregate"
-            # This is critical for rolling operations and time-series lags
             target_vals_numeric = pd.to_numeric(target_vals, errors='coerce')
-            
-            if target_vals_numeric.isna().all() and len(target_vals) > 0:
-                logger.error(f"A coluna alvo '{self.target_column}' não contém valores numéricos válidos.")
-                raise ValueError(f"Erro: A coluna '{self.target_column}' precisa ser numérica para esta tarefa. Verifique se selecionou a coluna correta.")
-
-            target_vals = target_vals_numeric
-            
-            # Update the target column in df if it exists to ensure it's numeric everywhere
-            if self.target_column and self.target_column in df.columns:
-                df[self.target_column] = target_vals
-            
-            # For time series forecasting, we can only use lags >= forecast_horizon
-            # to avoid data leakage (using future values to predict the future).
-            # Example: If horizon is 7, the most recent value we can use is lag_7.
-            for i in range(self.forecast_horizon, self.forecast_horizon + 5):
-                df[f'lag_{i}'] = target_vals.shift(i)
-            
-            df[f'rolling_mean_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).mean()
-            df[f'rolling_std_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).std()
-            
-            # Use dropna instead of bfill to avoid data leakage
-            df = df.dropna()
+            if not target_vals_numeric.isna().all():
+                target_vals = target_vals_numeric
+                if self.target_column and self.target_column in df.columns:
+                    df[self.target_column] = target_vals
+                
+                for i in range(self.forecast_horizon, self.forecast_horizon + 5):
+                    df[f'lag_{i}'] = target_vals.shift(i)
+                
+                df[f'rolling_mean_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).mean()
+                df[f'rolling_std_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).std()
+                df = df.dropna()
             
         return df
 
-    def fit_transform(self, df):
+    def _apply_nlp_features(self, df, nlp_cols):
+        """Applies TF-IDF vectorization to text columns."""
+        from sklearn.feature_extraction.text import TfidfVectorizer
+        df = df.copy()
+        for col in nlp_cols:
+            if col in df.columns:
+                logger.info(f"🔤 Otimizando NLP para a coluna: {col}")
+                # Limpeza básica
+                df[col] = df[col].astype(str).str.lower().str.replace(r'[^\w\s]', '', regex=True)
+                
+                # TF-IDF Otimizado
+                tfidf = TfidfVectorizer(
+                    max_features=5000,
+                    ngram_range=(1, 2),
+                    stop_words='english',
+                    sublinear_tf=True
+                )
+                text_features = tfidf.fit_transform(df[col])
+                tfidf_df = pd.DataFrame(
+                    text_features.toarray(), 
+                    columns=[f"tfidf_{col}_{i}" for i in range(text_features.shape[1])],
+                    index=df.index
+                )
+                df = pd.concat([df, tfidf_df], axis=1)
+                df = df.drop(columns=[col])
+        return df
+
+    def fit_transform(self, df, nlp_cols=None):
+        # NLP Feature Engineering
+        if nlp_cols:
+            df = self._apply_nlp_features(df, nlp_cols)
+
         # Time Series Feature Engineering
         if self.task_type == 'time_series':
             df = self._apply_ts_features(df)
@@ -310,79 +327,136 @@ class AutoMLDataProcessor:
         return feature_names
 
 class AutoMLTrainer:
-    def __init__(self, task_type='classification'):
+    def __init__(self, task_type='classification', preset='medium'):
         self.task_type = task_type
+        self.preset = preset
         self.best_model = None
         self.best_params = None
         self.results = []
+        
+        # Configurações baseadas no preset
+        self.preset_configs = {
+            'fast': {
+                'n_trials': 15,
+                'timeout': 600,  # 10 min
+                'cv': 3,
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'decision_tree', 'ridge_classifier']
+            },
+            'medium': {
+                'n_trials': 40,
+                'timeout': 1800, # 30 min
+                'cv': 5,
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp']
+            },
+            'best_quality': {
+                'n_trials': 150,
+                'timeout': 7200, # 2 hours
+                'cv': 10,
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier']
+            }
+        }
 
     def _get_models(self, trial=None, name=None, random_state=None):
         """
         Retorna a lista de nomes dos modelos ou uma instância específica com parâmetros sugeridos.
-        Se name for None, retorna apenas os nomes dos modelos disponíveis.
         """
         if self.task_type == 'classification':
             models_config = {
-                'logistic_regression': lambda t: LogisticRegression(max_iter=1000, random_state=random_state),
+                'logistic_regression': lambda t: LogisticRegression(
+                    C=t.suggest_float('lr_C', 0.001, 100.0, log=True),
+                    solver=t.suggest_categorical('lr_solver', ['lbfgs', 'liblinear', 'saga']),
+                    max_iter=2000,
+                    random_state=random_state
+                ),
                 'random_forest': lambda t: RandomForestClassifier(
-                    n_estimators=t.suggest_int('rf_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('rf_max_depth', 3, 20),
+                    n_estimators=t.suggest_int('rf_n_estimators', 100, 1000),
+                    max_depth=t.suggest_int('rf_max_depth', 5, 100),
+                    min_samples_split=t.suggest_int('rf_min_split', 2, 20),
                     random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
-                    n_estimators=t.suggest_int('xgb_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('xgb_lr', 0.01, 0.3),
+                    n_estimators=t.suggest_int('xgb_n_estimators', 100, 2000),
+                    learning_rate=t.suggest_float('xgb_lr', 0.0001, 0.5, log=True),
+                    max_depth=t.suggest_int('xgb_max_depth', 3, 18),
+                    subsample=t.suggest_float('xgb_subsample', 0.4, 1.0),
+                    colsample_bytree=t.suggest_float('xgb_colsample', 0.4, 1.0),
                     use_label_encoder=False,
                     eval_metric='logloss',
                     random_state=random_state
                 ),
                 'lightgbm': lambda t: lgb.LGBMClassifier(
-                    n_estimators=t.suggest_int('lgb_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('lgb_lr', 0.01, 0.3),
+                    n_estimators=t.suggest_int('lgb_n_estimators', 100, 2000),
+                    learning_rate=t.suggest_float('lgb_lr', 0.0001, 0.5, log=True),
+                    num_leaves=t.suggest_int('lgb_leaves', 15, 255),
+                    feature_fraction=t.suggest_float('lgb_feature_frac', 0.4, 1.0),
+                    bagging_fraction=t.suggest_float('lgb_bagging_frac', 0.4, 1.0),
+                    bagging_freq=t.suggest_int('lgb_bagging_freq', 1, 7),
                     verbosity=-1,
                     random_state=random_state
                 ),
                 'extra_trees': lambda t: ExtraTreesClassifier(
-                    n_estimators=t.suggest_int('et_n_estimators', 50, 200),
-                    max_depth=t.suggest_int('et_max_depth', 3, 20),
+                    n_estimators=t.suggest_int('et_n_estimators', 100, 1000),
+                    max_depth=t.suggest_int('et_max_depth', 5, 100),
                     random_state=random_state
                 ),
                 'adaboost': lambda t: AdaBoostClassifier(
-                    n_estimators=t.suggest_int('ada_n_estimators', 50, 200),
-                    learning_rate=t.suggest_float('ada_lr', 0.01, 1.0),
+                    n_estimators=t.suggest_int('ada_n_estimators', 50, 500),
+                    learning_rate=t.suggest_float('ada_lr', 0.001, 2.0, log=True),
                     random_state=random_state
                 ),
                 'decision_tree': lambda t: DecisionTreeClassifier(
-                    max_depth=t.suggest_int('dt_max_depth', 3, 20),
+                    max_depth=t.suggest_int('dt_max_depth', 3, 50),
+                    min_samples_split=t.suggest_int('dt_min_split', 2, 20),
                     random_state=random_state
                 ),
                 'svm': lambda t: SVC(
-                    C=t.suggest_float('svm_C', 0.1, 10.0, log=True),
-                    kernel=t.suggest_categorical('svm_kernel', ['linear', 'rbf']),
-                    probability=False, # Desativado durante busca para velocidade
-                    cache_size=1000,
-                    max_iter=5000,
+                    C=t.suggest_float('svm_C', 0.001, 1000.0, log=True),
+                    kernel=t.suggest_categorical('svm_kernel', ['linear', 'rbf', 'poly', 'sigmoid']),
+                    gamma=t.suggest_categorical('svm_gamma', ['scale', 'auto']),
+                    probability=False, 
+                    cache_size=2000,
+                    max_iter=10000,
                     random_state=random_state
                 ),
-                'linear_svc': lambda t: LinearSVC(max_iter=2000, dual=False, random_state=random_state),
-                'knn': lambda t: KNeighborsClassifier(
-                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
+                'linear_svc': lambda t: LinearSVC(
+                    C=t.suggest_float('lsvc_C', 0.01, 100.0, log=True),
+                    max_iter=5000, 
+                    dual=False, 
+                    random_state=random_state
                 ),
-                'naive_bayes': lambda t: GaussianNB(),
-                'ridge_classifier': lambda t: RidgeClassifier(random_state=random_state),
-                'sgd_classifier': lambda t: SGDClassifier(max_iter=1000, random_state=random_state),
+                'knn': lambda t: KNeighborsClassifier(
+                    n_neighbors=t.suggest_int('knn_neighbors', 1, 31),
+                    weights=t.suggest_categorical('knn_weights', ['uniform', 'distance']),
+                    metric=t.suggest_categorical('knn_metric', ['euclidean', 'manhattan', 'minkowski'])
+                ),
+                'naive_bayes': lambda t: GaussianNB(
+                    var_smoothing=t.suggest_float('nb_smoothing', 1e-10, 1e-8, log=True)
+                ),
+                'ridge_classifier': lambda t: RidgeClassifier(
+                    alpha=t.suggest_float('ridge_alpha', 0.01, 10.0, log=True),
+                    random_state=random_state
+                ),
+                'sgd_classifier': lambda t: SGDClassifier(
+                    loss=t.suggest_categorical('sgd_loss', ['hinge', 'log_loss', 'modified_huber']),
+                    penalty=t.suggest_categorical('sgd_penalty', ['l2', 'l1', 'elasticnet']),
+                    alpha=t.suggest_float('sgd_alpha', 1e-6, 1e-2, log=True),
+                    max_iter=2000, 
+                    random_state=random_state
+                ),
                 'mlp': lambda t: MLPClassifier(
-                    hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
-                    max_iter=t.suggest_int('mlp_max_iter', 200, 1000),
+                    hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(100, 50)", "(100, 100)", "(50, 50, 50)", "(256, 128, 64)"])),
+                    activation=t.suggest_categorical('mlp_activation', ['relu', 'tanh', 'logistic']),
+                    alpha=t.suggest_float('mlp_alpha', 1e-6, 1e-1, log=True),
+                    learning_rate_init=t.suggest_float('mlp_lr', 1e-5, 1e-1, log=True),
+                    max_iter=1000,
                     early_stopping=True,
-                    validation_fraction=0.1,
-                    n_iter_no_change=10,
                     random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostClassifier(
-                    iterations=t.suggest_int('cb_iterations', 50, 200),
-                    learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
-                    depth=t.suggest_int('cb_depth', 3, 10),
+                    iterations=t.suggest_int('cb_iterations', 100, 1000),
+                    learning_rate=t.suggest_float('cb_lr', 0.001, 0.3, log=True),
+                    depth=t.suggest_int('cb_depth', 4, 10),
+                    l2_leaf_reg=t.suggest_float('cb_l2', 1, 10),
                     verbose=0,
                     thread_count=1,
                     random_seed=random_state
@@ -567,7 +641,16 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=10, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, **kwargs):
+        # Usar configurações do preset se n_trials/timeout não forem fornecidos
+        preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
+        n_trials = n_trials if n_trials is not None else preset_config['n_trials']
+        timeout = timeout if timeout is not None else preset_config.get('timeout')
+        
+        # Se selected_models não for fornecido, usa a lista do preset
+        if selected_models is None:
+            selected_models = preset_config['models']
+            
         self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
         self.random_state = random_state
         auto_split = kwargs.get('auto_split', False)
@@ -662,14 +745,15 @@ class AutoMLTrainer:
                             score = r2_score(y_val, y_pred_val)
                             trial_metrics['r2'] = score
                     else:
+                        cv_val = preset_config.get('cv', 3)
                         if self.task_type == 'time_series':
-                            cv = TimeSeriesSplit(n_splits=3)
+                            cv = TimeSeriesSplit(n_splits=cv_val)
                             scoring = 'r2'
                         elif self.task_type == 'classification':
-                            cv = 3
+                            cv = cv_val
                             scoring = 'accuracy'
                         else:
-                            cv = 3
+                            cv = cv_val
                             scoring = 'r2'
                         score = cross_val_score(model, X_tr, y_tr, cv=cv, scoring=scoring).mean()
                         trial_metrics[scoring] = score
@@ -748,7 +832,7 @@ class AutoMLTrainer:
         
         study = optuna.create_study(
             direction=direction,
-            sampler=optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=sampler_seed)
+            sampler=optuna.samplers.TPESampler(n_startup_trials=max(n_trials // 3, 5), seed=sampler_seed)
         )
         
         # Identificar modelos estáticos (sem hiperparâmetros para otimizar)
@@ -777,8 +861,8 @@ class AutoMLTrainer:
             current_n_trials = 1 if m_name in static_models else n_trials
             
             trials_without_improvement = 0 
-            logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials)")
-            study.optimize(lambda t: objective(t, forced_model=m_name), n_trials=current_n_trials)
+            logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials, Timeout: {timeout}s)")
+            study.optimize(lambda t: objective(t, forced_model=m_name), n_trials=current_n_trials, timeout=timeout)
             # Resetar o flag de parada para permitir que o próximo modelo seja otimizado
             # O study.stop() define este flag como True
             if hasattr(study, '_stop_flag'):
@@ -830,7 +914,9 @@ class AutoMLTrainer:
 
     def _instantiate_model(self, name, params):
         if self.task_type == 'classification':
-            if name == 'logistic_regression': return LogisticRegression(max_iter=1000)
+            if name == 'logistic_regression': 
+                lr_params = {k.replace('lr_', ''): v for k, v in params.items() if k.startswith('lr_')}
+                return LogisticRegression(max_iter=2000, **lr_params)
             if name == 'random_forest': 
                 rf_params = {k.replace('rf_', ''): v for k, v in params.items() if k.startswith('rf_')}
                 return RandomForestClassifier(**rf_params)
@@ -1010,6 +1096,10 @@ class AutoMLTrainer:
     def get_model_params_schema(self, model_name):
         """Returns the parameter schema for manual fine-tuning, matching _get_models keys."""
         schemas = {
+            'logistic_regression': {
+                'lr_C': ('float', 0.001, 100.0, 1.0),
+                'lr_solver': ('list', ['lbfgs', 'liblinear', 'saga'], 'lbfgs')
+            },
             'random_forest': {
                 'rf_n_estimators': ('int', 10, 500, 100),
                 'rf_max_depth': ('int', 1, 50, 10)
