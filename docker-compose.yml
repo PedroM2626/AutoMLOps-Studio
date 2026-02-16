@@ -35,7 +35,7 @@ services:
 
   # MLflow UI (Opcional, mas útil para ver experimentos fora do app)
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.10.2
+    image: ghcr.io/mlflow/mlflow:v3.9.0
     container_name: automl-mlflow
     ports:
       - "5000:5000"

@@ -866,18 +866,6 @@ class AutoMLTrainer:
                         model.fit(X_tr, y_tr)
                         logger.info(f"✅ Treino finalizado para {full_trial_name}")
                         
-                        logger.info(f"📊 Registrando {full_trial_name} no MLflow...")
-                        # SALVAR TRIAL NO MLFLOW
-                        
-                        run_id = tracker.log_experiment(
-                            params=trial_params,
-                            metrics=trial_metrics,
-                            model=model,
-                            model_name=full_trial_name,
-                            register=False
-                        )
-                        logger.info(f"✔ {full_trial_name} registrado com ID: {run_id}")
-                         
                 elif self.task_type == 'anomaly_detection':
                     model.fit(X_tr)
                     if hasattr(model, 'decision_function'):
@@ -893,6 +881,18 @@ class AutoMLTrainer:
                     else:
                         score = -1
                     trial_metrics['silhouette'] = score
+
+                # Unified Logging for all tasks/strategies
+                logger.info(f"📊 Registrando {full_trial_name} no MLflow...")
+                run_id = tracker.log_experiment(
+                    params=trial_params,
+                    metrics=trial_metrics,
+                    model=model,
+                    model_name=full_trial_name,
+                    register=False
+                )
+                logger.info(f"✔ {full_trial_name} registrado com ID: {run_id}")
+
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
                 score = -1.0
@@ -1166,7 +1166,10 @@ class AutoMLTrainer:
             if name == 'naive_bayes': 
                 nb_params = {k.replace('nb_', ''): v for k, v in params.items() if k.startswith('nb_')}
                 return GaussianNB(**nb_params)
-            if name == 'ridge_classifier': return RidgeClassifier(alpha=params.get('ridge_alpha', 1.0))
+            if name == 'ridge_classifier': 
+                rc_params = {k.replace('rc_', ''): v for k, v in params.items() if k.startswith('rc_')}
+                if 'alpha' not in rc_params and 'ridge_alpha' in params: rc_params['alpha'] = params['ridge_alpha']
+                return RidgeClassifier(**rc_params)
             if name == 'sgd_classifier': 
                 sgd_params = {k.replace('sgd_', ''): v for k, v in params.items() if k.startswith('sgd_')}
                 return SGDClassifier(max_iter=2000, **sgd_params)
