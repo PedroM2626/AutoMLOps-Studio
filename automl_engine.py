@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit
+from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit, KFold, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
@@ -418,7 +418,7 @@ class AutoMLTrainer:
                 'random_forest': lambda t: RandomForestClassifier(
                     n_estimators=t.suggest_int('rf_n_estimators', 100, 1000),
                     max_depth=t.suggest_int('rf_max_depth', 5, 100),
-                    min_samples_split=t.suggest_int('rf_min_split', 2, 20),
+                    min_samples_split=t.suggest_int('rf_min_samples_split', 2, 20),
                     random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
@@ -453,7 +453,7 @@ class AutoMLTrainer:
                 ),
                 'decision_tree': lambda t: DecisionTreeClassifier(
                     max_depth=t.suggest_int('dt_max_depth', 3, 50),
-                    min_samples_split=t.suggest_int('dt_min_split', 2, 20),
+                    min_samples_split=t.suggest_int('dt_min_samples_split', 2, 20),
                     random_state=random_state
                 ),
                 'svm': lambda t: SVC(
@@ -596,8 +596,7 @@ class AutoMLTrainer:
             models_config = {
                 'kmeans': lambda t: KMeans(
                     n_clusters=t.suggest_int('km_n_clusters', 2, 12),
-                    n_init=10,
-                    n_jobs=None
+                    n_init=10
                 ),
                 'agglomerative': lambda t: AgglomerativeClustering(
                     n_clusters=t.suggest_int('agg_n_clusters', 2, 12)
@@ -688,7 +687,7 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -700,7 +699,13 @@ class AutoMLTrainer:
             
         self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
         self.random_state = random_state
-        auto_split = kwargs.get('auto_split', False)
+        
+        # Compatibilidade com parâmetro antigo auto_split
+        if kwargs.get('auto_split', False):
+            validation_strategy = 'auto_split'
+            
+        if validation_params is None:
+            validation_params = {}
         
         from mlops_utils import MLFlowTracker
         tracker = MLFlowTracker(experiment_name)
@@ -737,6 +742,8 @@ class AutoMLTrainer:
             
             logger.info(f"📍 Trial {trial.number} mapeado para {full_trial_name} (Seed: {current_seed})")
 
+            run_id = None
+
             # Early Stopping Global
             min_improvement = 0.0001
             if early_stopping_rounds and trials_without_improvement >= early_stopping_rounds:
@@ -749,10 +756,21 @@ class AutoMLTrainer:
             if model is None:
                 return -1.0
             
-            if auto_split and self.task_type in ['classification', 'regression', 'time_series']:
-                split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
+            # Lógica de Validação e Split de Dados
+            X_tr, X_val, y_tr, y_val = None, None, None, None
+            
+            # Apenas para métodos que usam holdout explícito (auto_split ou holdout manual)
+            use_explicit_validation = validation_strategy in ['auto_split', 'holdout']
+            
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series']:
+                if validation_strategy == 'auto_split':
+                    split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
+                else: # holdout
+                    test_size = validation_params.get('test_size', 0.2)
+                    split_ratio = 1.0 - test_size
+                
                 if not hasattr(self, '_split_cache'): self._split_cache = {}
-                cache_key = f"{split_ratio}_{self.task_type}_{current_seed}"
+                cache_key = f"{split_ratio}_{self.task_type}_{current_seed}_{validation_strategy}"
                 
                 if cache_key in self._split_cache:
                     X_tr, X_val, y_tr, y_val = self._split_cache[cache_key]
@@ -774,15 +792,19 @@ class AutoMLTrainer:
                     if len(self._split_cache) > 5: self._split_cache.clear()
                     self._split_cache[cache_key] = (X_tr, X_val, y_tr, y_val)
             else:
+                # Para CV, usamos os dados completos no cross_val_score
                 X_tr, y_tr = X_train, y_train
                 X_val, y_val = None, None
 
             start_time = time.time()
             logger.info(f"⏳ Treinando {full_trial_name}...")
             trial_metrics = {}
+            trial_params = trial.params.copy()
+            trial_params['task_type'] = self.task_type
+            
             try:
                 if self.task_type in ['classification', 'regression', 'time_series']:
-                    if auto_split:
+                    if use_explicit_validation:
                         model.fit(X_tr, y_tr)
                         y_pred_val = model.predict(X_val)
                         if self.task_type == 'classification':
@@ -792,18 +814,27 @@ class AutoMLTrainer:
                             score = r2_score(y_val, y_pred_val)
                             trial_metrics['r2'] = score
                     else:
-                        cv_val = preset_config.get('cv', 3)
-                        if self.task_type == 'time_series':
-                            cv = TimeSeriesSplit(n_splits=cv_val)
+                        # Cross Validation Logic
+                        n_splits = validation_params.get('folds', 3) if validation_params else 3
+                        # Fallback se folds não estiver definido
+                        if not isinstance(n_splits, int): n_splits = 3
+                        
+                        if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
+                            cv = TimeSeriesSplit(n_splits=n_splits)
                             scoring = 'r2'
                         elif self.task_type == 'classification':
-                            cv = cv_val
                             scoring = 'accuracy'
-                        else:
-                            cv = cv_val
+                            if validation_strategy == 'stratified_cv':
+                                cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                            else:
+                                cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                        else: # Regression
                             scoring = 'r2'
+                            cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                            
                         score = cross_val_score(model, X_tr, y_tr, cv=cv, scoring=scoring).mean()
                         trial_metrics[scoring] = score
+                        
                         # Para salvar o modelo e artefatos, precisamos dar fit no treino completo do trial
                         # Nota: Fit final no trial_set sem CV para logging
                         logger.info(f"✨ Finalizando treino do modelo {full_trial_name}...")
@@ -812,8 +843,6 @@ class AutoMLTrainer:
                         
                         logger.info(f"📊 Registrando {full_trial_name} no MLflow...")
                         # SALVAR TRIAL NO MLFLOW
-                        trial_params = trial.params.copy()
-                        trial_params['task_type'] = self.task_type
                         
                         run_id = tracker.log_experiment(
                             params=trial_params,

@@ -213,7 +213,37 @@ with tabs[1]:
                 early_stopping = 10
         
         with col_opt2:
-            auto_split = st.checkbox("Auto-Split (Otimizar % de Treino/Validação)", value=False)
+            st.markdown("##### 🛡️ Estratégia de Validação")
+            validation_options = ["K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Treino/Teste)", "Auto-Split (Otimizado)", "Time Series Split"]
+            
+            # Filtrar opções baseadas na tarefa
+            if task == "time_series":
+                val_strategy_ui = "Time Series Split"
+                st.info("Séries temporais usam divisão temporal obrigatoriamente.")
+                validation_strategy = 'time_series_cv'
+            elif task == "classification":
+                val_strategy_ui = st.selectbox("Método de Validação", validation_options, index=0)
+            else: # regression, clustering, anomaly
+                # Stratified só faz sentido para classificação
+                opts = [o for o in validation_options if o != "Stratified K-Fold"]
+                val_strategy_ui = st.selectbox("Método de Validação", opts, index=0)
+            
+            validation_params = {}
+            if val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
+                n_folds = st.number_input("Número de Folds", 2, 20, 5, key="val_folds")
+                validation_params['folds'] = n_folds
+                validation_strategy = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
+            elif val_strategy_ui == "Holdout (Treino/Teste)":
+                test_size = st.slider("Tamanho do Teste (%)", 10, 50, 20, key="val_holdout") / 100.0
+                validation_params['test_size'] = test_size
+                validation_strategy = 'holdout'
+            elif val_strategy_ui == "Auto-Split (Otimizado)":
+                st.info("O sistema decidirá o melhor split durante a otimização.")
+                validation_strategy = 'auto_split'
+            elif val_strategy_ui == "Time Series Split":
+                n_splits = st.number_input("Número de Splits Temporais", 2, 20, 5, key="val_ts_splits")
+                validation_params['folds'] = n_splits
+                validation_strategy = 'time_series_cv'
             
             # Seleção de colunas NLP
             st.markdown("##### 🔤 Configuração de NLP")
@@ -449,7 +479,9 @@ with tabs[1]:
                         early_stopping_rounds=early_stopping,
                         manual_params=manual_params,
                         experiment_name=experiment_name,
-                        random_state=random_seed_config
+                        random_state=random_seed_config,
+                        validation_strategy=validation_strategy,
+                        validation_params=validation_params
                     )
                     best_params = trainer.best_params
                     
