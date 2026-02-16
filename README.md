@@ -18,11 +18,19 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
 
 ## ✨ Funcionalidades
 
-- **AutoML Tabular**: Suporte para Classificação, Regressão, Agrupamento (Clustering), Séries Temporais e Detecção de Anomalias com **Hiperparâmetros Automáticos ou Manuais**.
+- **AutoML Tabular**: Suporte para Classificação, Regressão, Agrupamento (Clustering), Séries Temporais e Detecção de Anomalias com **Controle Total de Hiperparâmetros**.
 - **Modelos Existentes (Fine-Tune)**: Aba integrada ao AutoML para carregar modelos do **Model Registry** ou arquivos locais para predição (Inference) ou retreinamento (Retraining) contra Data Drift.
 - **Visualização Avançada**: Gráficos dinâmicos de performance, Matrizes de Confusão interativas, Curvas Real vs Predito e **Projeções PCA** para visualização de clusters e anomalias.
+- **MLOps Completo**: Integração profunda com **MLflow 3.9.0** para rastreamento automático de **todos** os experimentos. Salva automaticamente:
+    - Tipo do modelo e configurações.
+    - Todos os hiperparâmetros utilizados.
+    - Métricas de avaliação detalhadas.
+    - Artefatos (modelos serializados, gráficos, logs).
 - **Computer Vision**: Fine-tuning de modelos para Classificação e **Segmentação Semântica** (DeepLabV3).
-- **Modelos Expandidos**: Inclui RandomForest, XGBoost, LightGBM, SVM, LinearSVC, KNN, Naive Bayes, MLP, Ridge, Lasso, ElasticNet, e muito mais.
+- **Amplo Suporte a Modelos**: 
+    - **Classificação/Regressão**: RandomForest, XGBoost, LightGBM, SVM (SVC/SVR/LinearSVC/LinearSVR), KNN, Naive Bayes, MLP (Neural Networks), Ridge, Lasso, ElasticNet, Logistic Regression, Decision Tree, Gradient Boosting, AdaBoost, CatBoost.
+    - **Clustering**: K-Means, DBSCAN, Agglomerative Clustering, Spectral Clustering, Gaussian Mixture.
+    - **Anomaly Detection**: Isolation Forest, Local Outlier Factor, One-Class SVM.
 - **Estratégias de Split Inteligentes**: Split aleatório e **Split Temporal** automático para séries temporais.
 - **Explicabilidade (SHAP)**: Integração com SHAP para entender a importância das features em modelos de classificação.
 - **🐳 Docker Ready**: Orquestração multi-serviço (API, Dashboard, MLflow) pronta para deploy.
@@ -31,14 +39,12 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
 ## 📂 Estrutura do Projeto
 
 - `app.py`: Dashboard interativo em Streamlit.
-- `flet_app.py`: Versão cross-platform (Desktop/Mobile/Web) baseada em Flet.
-- `simple_flet_app.py`: Interface simples de teste com Flet para verificação rápida do ambiente.
 - `automl_engine.py`: Core de pré-processamento, treinamento e otimização.
 - `cv_engine.py`: Motor para tarefas de Visão Computacional.
 - `mlops_utils.py`: Utilitários de MLOps (MLflow, Data Lake, Drift, SHAP).
 - `api.py`: API de serving de modelos.
 - `docker-compose.yml` & `Dockerfile`: Configurações de containerização.
-- `tests.py`: Suíte de testes unitários, integração e aceitação.
+- `tests/`: Suíte de testes automatizados.
 
 ## 🚀 Como Começar
 
@@ -66,25 +72,10 @@ pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-3. **Execute o Dashboard Modular (Flet)**:
-```bash
-python flet_app/src/main.py
-```
-
-4. **Execute a API**:
+3. **Execute a API**:
 ```bash
 python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ```
-
-## 🏗️ Arquitetura do Flet App (Modular)
-
-O novo Dashboard em Flet segue uma arquitetura modularizada inspirada no `gallery-main`, facilitando a manutenção e escalabilidade:
-
-- **`flet_app/src/main.py`**: Ponto de entrada que inicializa os contextos e a estrutura principal.
-- **`flet_app/src/contexts/`**: Provedores de estado global (Tema, Roteamento).
-- **`flet_app/src/components/`**: Componentes reutilizáveis (AppBar, Navigation).
-- **`flet_app/src/views/`**: Telas individuais da aplicação (Data, Train, CV, Experiments, Registry).
-- **`flet_app/src/models/`**: Gerenciamento de estado centralizado (`app_state.py`).
 
 ## 🛠️ Guia de Uso do Dashboard
 
@@ -99,18 +90,45 @@ O novo Dashboard em Flet segue uma arquitetura modularizada inspirada no `galler
 
 ## 🧪 Testes
 
-A plataforma inclui uma suíte completa de testes:
-```bash
-# Testes do Core
-pytest tests.py
+A plataforma inclui uma suíte completa de testes automatizados para garantir a qualidade e a integração dos componentes.
 
-# Testes da Interface Flet
-pytest tests_flet_app.py
-pytest tests_acceptance_flet.py
+### Executando os Testes
+
+Para rodar todos os testes do projeto:
+
+```bash
+pytest tests/
 ```
-- **Unitários**: Processamento de dados, instanciação de modelos e lógica de interface.
-- **Integração**: Salvamento de pipelines, utilitários de MLOps e carregamento de componentes UI.
-- **Aceitação**: Fluxos completos de treino simulados e interação via browser (Playwright) para a interface Flet.
+
+### Principais Testes Incluídos:
+
+- **Integração MLflow (`tests/test_mlflow_integration.py`)**: Verifica se os experimentos, parâmetros e métricas são corretamente registrados no MLflow.
+- **Fluxo AutoML (`tests/test_automl_tab.py`)**: Simula o pipeline completo de treinamento para classificação e regressão via interface.
+- **Simulação de Interface (`tests/test_interface_simulation_unified.py`)**: Valida a interação dos componentes da UI com o motor de AutoML.
+- **Transformers (`tests/test_automl_transformers.py`)**: Testa a integração (mockada) com modelos de NLP da Hugging Face.
+- **Reprodutibilidade (`tests/test_reproducibility.py`)**: Garante que os resultados sejam consistentes entre execuções.
+
+## 📦 Dependências e Ambiente
+
+O projeto utiliza um arquivo `requirements.txt` com versões pinadas para garantir a estabilidade. As principais dependências incluem:
+
+- **MLflow 3.9.0**: Para rastreamento de experimentos e registro de modelos.
+- **Streamlit**: Para a interface do dashboard.
+- **FastAPI**: Para a API de serving.
+- **Scikit-learn, XGBoost, LightGBM**: Motores de machine learning.
+
+### Docker (Recomendado)
+
+O ambiente é totalmente containerizado. O `Dockerfile` utiliza `python:3.11-slim` para uma imagem leve e eficiente.
+
+```bash
+docker-compose up --build
+```
+
+Isso iniciará:
+- **Dashboard**: http://localhost:8501
+- **API**: http://localhost:8000
+- **MLflow UI**: http://localhost:5000 (Versão 3.9.0)
 
 ## 🛠️ Configuração
 

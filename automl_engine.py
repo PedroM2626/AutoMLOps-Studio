@@ -1332,14 +1332,25 @@ class AutoMLTrainer:
                 'lr_penalty': ('list', ['l2', 'l1', 'elasticnet', None], 'l2'),
                 'lr_l1_ratio': ('float', 0.0, 1.0, 0.5),
                 'lr_class_weight': ('list', [None, 'balanced'], None),
-                'lr_fit_intercept': ('list', [True, False], True)
+                'lr_fit_intercept': ('list', [True, False], True),
+                'lr_max_iter': ('int', 100, 5000, 2000),
+                'lr_tol': ('float', 1e-5, 1e-3, 1e-4)
             },
             'linear_svc': {
                 'C': ('float', 0.001, 100.0, 1.0),
                 'loss': ('list', ['hinge', 'squared_hinge'], 'squared_hinge'),
                 'penalty': ('list', ['l1', 'l2'], 'l2'),
                 'class_weight': ('list', [None, 'balanced'], None),
-                'fit_intercept': ('list', [True, False], True)
+                'fit_intercept': ('list', [True, False], True),
+                'dual': ('list', [True, False, 'auto'], 'auto'),
+                'max_iter': ('int', 1000, 10000, 2000),
+                'tol': ('float', 1e-5, 1e-3, 1e-4)
+            },
+            'ridge_classifier': {
+                'rc_alpha': ('float', 0.01, 100.0, 1.0),
+                'rc_solver': ('list', ['auto', 'svd', 'cholesky', 'lsqr', 'sparse_cg', 'sag', 'saga'], 'auto'),
+                'rc_class_weight': ('list', [None, 'balanced'], None),
+                'rc_fit_intercept': ('list', [True, False], True)
             },
             'sgd_classifier': {
                 'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
@@ -1347,14 +1358,18 @@ class AutoMLTrainer:
                 'sgd_loss': ('list', ['hinge', 'log_loss', 'modified_huber', 'squared_hinge', 'perceptron'], 'hinge'),
                 'sgd_learning_rate': ('list', ['optimal', 'constant', 'invscaling', 'adaptive'], 'optimal'),
                 'sgd_eta0': ('float', 0.0, 1.0, 0.0),
-                'sgd_class_weight': ('list', [None, 'balanced'], None)
+                'sgd_class_weight': ('list', [None, 'balanced'], None),
+                'sgd_max_iter': ('int', 100, 5000, 1000),
+                'sgd_tol': ('float', 1e-5, 1e-3, 1e-3)
             },
             'sgd_regressor': {
                 'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
                 'sgd_penalty': ('list', ['l2', 'l1', 'elasticnet'], 'l2'),
                 'sgd_loss': ('list', ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'], 'squared_error'),
                 'sgd_learning_rate': ('list', ['invscaling', 'constant', 'optimal', 'adaptive'], 'invscaling'),
-                'sgd_eta0': ('float', 0.0, 1.0, 0.01)
+                'sgd_eta0': ('float', 0.0, 1.0, 0.01),
+                'sgd_max_iter': ('int', 100, 5000, 1000),
+                'sgd_tol': ('float', 1e-5, 1e-3, 1e-3)
             },
             'random_forest': {
                 'rf_n_estimators': ('int', 10, 500, 100),
@@ -1376,7 +1391,9 @@ class AutoMLTrainer:
                 'xgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0),
                 'xgb_reg_alpha': ('float', 0.0, 10.0, 0.0),
                 'xgb_reg_lambda': ('float', 0.0, 10.0, 1.0),
-                'xgb_tree_method': ('list', ['auto', 'exact', 'approx', 'hist'], 'auto')
+                'xgb_tree_method': ('list', ['auto', 'exact', 'approx', 'hist'], 'auto'),
+                'xgb_max_leaves': ('int', 0, 100, 0),
+                'xgb_grow_policy': ('list', ['depthwise', 'lossguide'], 'depthwise')
             },
             'lightgbm': {
                 'lgb_n_estimators': ('int', 50, 1000, 100),
@@ -1388,7 +1405,9 @@ class AutoMLTrainer:
                 'lgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0),
                 'lgb_reg_alpha': ('float', 0.0, 10.0, 0.0),
                 'lgb_reg_lambda': ('float', 0.0, 10.0, 0.0),
-                'lgb_boosting_type': ('list', ['gbdt', 'dart', 'goss'], 'gbdt')
+                'lgb_boosting_type': ('list', ['gbdt', 'dart', 'goss'], 'gbdt'),
+                'lgb_min_split_gain': ('float', 0.0, 1.0, 0.0),
+                'lgb_class_weight': ('list', [None, 'balanced'], None)
             },
             'extra_trees': {
                 'et_n_estimators': ('int', 10, 500, 100),
