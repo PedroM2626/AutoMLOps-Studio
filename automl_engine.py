@@ -404,6 +404,12 @@ class AutoMLTrainer:
                 'timeout': 7200, # 2 hours
                 'cv': 10,
                 'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier']
+            },
+            'custom': {
+                'n_trials': 20, # Default if not provided manually
+                'timeout': 600,
+                'cv': 5,
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees'] # Default selection
             }
         }
 

@@ -248,27 +248,31 @@ with tabs[1]:
     st.subheader("🎯 Configuração da Otimização")
     col_opt1, col_opt2 = st.columns(2)
     with col_opt1:
+        # Seletor unificado de preset (incluindo 'custom')
         if model_source == "AutoML Standard (Scikit-Learn/XGBoost)":
             training_preset = st.select_slider(
                 "Modo de Treinamento (Preset)",
-                options=["fast", "medium", "best_quality"],
+                options=["fast", "medium", "best_quality", "custom"],
                 value="medium",
-                help="fast: Rápido, menos modelos e tentativas. best_quality: Lento, todos os modelos e muitas tentativas."
+                help="fast: Rápido. medium: Equilibrado. best_quality: Exaustivo. custom: Defina suas regras."
             )
         else:
-            training_preset = "medium" # Default para outros modos
-            st.info(f"Modo de Otimização adaptado para {model_source}")
+            # Para outros modos, permitimos customizar mas iniciamos com medium
+            st.info(f"Modo base adaptado para {model_source}")
+            # Aqui podemos permitir customizar n_trials também
+            use_custom_tuning = st.checkbox("Customizar Otimização (Trials/Timeout)", value=False)
+            training_preset = "custom" if use_custom_tuning else "medium"
 
-            
-            tuning_mode = st.radio("Modo de Tuning", ["Automático (Preset)", "Customizado"], horizontal=True)
-            if tuning_mode == "Customizado":
-                n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 500, 20)
-                timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 3600, 600)
-                early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7)
-            else:
-                n_trials = None
-                timeout_per_model = None
-                early_stopping = 10
+        # Inputs condicionais para modo custom
+        if training_preset == "custom":
+            st.markdown("##### 🛠️ Configuração Customizada")
+            n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 1000, 20, key="cust_trials")
+            timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 7200, 600, key="cust_timeout")
+            early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7, key="cust_es")
+        else:
+            n_trials = None
+            timeout_per_model = None
+            early_stopping = 10
         
         with col_opt2:
             st.markdown("##### 🛡️ Estratégia de Validação")
