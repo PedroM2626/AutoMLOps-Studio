@@ -288,32 +288,11 @@ with tabs[1]:
             # Seleção de colunas NLP
             st.markdown("##### 🔤 Configuração de NLP")
             
-            # Configurações Avançadas de NLP (Sincronizado com Estabilidade)
-            nlp_config_automl = {}
-            if 'train_df' in st.session_state:
-                potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
-                selected_nlp_cols = st.multiselect("Colunas de Texto (NLP)", potential_nlp_cols, help="Selecione as colunas que contêm texto para processamento NLP otimizado.")
-                
-                if selected_nlp_cols:
-                    col_nlp1, col_nlp2 = st.columns(2)
-                    with col_nlp1:
-                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count"], key="automl_vect")
-                        ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
-                    with col_nlp2:
-                        remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
-                        lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
-                        max_features_automl = st.number_input("Max Features", 100, 10000, 1000, key="automl_max_feat")
-
-                    nlp_config_automl = {
-                        "vectorizer": vectorizer_automl,
-                        "ngram_range": (ngram_min_automl, ngram_max_automl),
-                        "stop_words": remove_stopwords_automl,
-                        "max_features": max_features_automl,
-                        "lemmatization": lematization_automl
-                    }
-            else:
-                selected_nlp_cols = []
-                st.info("Carregue os dados para selecionar colunas NLP.")
+            # Configurações Avançadas de NLP
+            # Usamos um container para renderizar as opções de NLP mais tarde,
+            # assim que tivermos acesso ao sample_df (preview dos dados).
+            nlp_container = st.container()
+            nlp_config_automl = {} 
 
             if task == "time_series":
                 st.info("💡 Split temporal obrigatório para séries temporais.")
@@ -382,6 +361,7 @@ with tabs[1]:
         
         target_pre = None
         date_col_pre = None
+        sample_df = None
         
         if selected_ds_list:
             try:
@@ -427,6 +407,41 @@ with tabs[1]:
                         st.info(f"Dataset usado integralmente para {validation_strategy}")
                     
                     selected_configs.append({'name': ds_name, 'version': ver, 'split': split})
+
+        # Preencher o container de NLP agora que temos acesso aos dados (sample ou train)
+        selected_nlp_cols = []
+        with nlp_container:
+            potential_nlp_cols = []
+            if sample_df is not None:
+                potential_nlp_cols = sample_df.select_dtypes(include=['object']).columns.tolist()
+            elif 'train_df' in st.session_state:
+                potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
+            
+            if potential_nlp_cols:
+                selected_nlp_cols = st.multiselect("Colunas de Texto (NLP)", potential_nlp_cols, help="Selecione as colunas que contêm texto para processamento NLP otimizado.")
+                
+                if selected_nlp_cols:
+                    col_nlp1, col_nlp2 = st.columns(2)
+                    with col_nlp1:
+                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count"], key="automl_vect")
+                        ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
+                    with col_nlp2:
+                        remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
+                        lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
+                        max_features_automl = st.number_input("Max Features", 100, 10000, 1000, key="automl_max_feat")
+
+                    nlp_config_automl = {
+                        "vectorizer": vectorizer_automl,
+                        "ngram_range": (ngram_min_automl, ngram_max_automl),
+                        "stop_words": remove_stopwords_automl,
+                        "max_features": max_features_automl,
+                        "lemmatization": lematization_automl
+                    }
+            else:
+                if selected_ds_list:
+                    st.info("Nenhuma coluna de texto identificada na amostra.")
+                else:
+                    st.info("Selecione um dataset abaixo para configurar NLP.")
 
         if selected_configs:
             if st.button("📥 Carregar e Preparar Dados", key="btn_load_train"):

@@ -431,13 +431,15 @@ class AutoMLTrainer:
                 'logistic_regression': lambda t: LogisticRegression(
                     C=t.suggest_float('lr_C', 0.001, 100.0, log=True),
                     solver=t.suggest_categorical('lr_solver', ['lbfgs', 'liblinear', 'saga']),
-                    max_iter=2000,
+                    max_iter=1000,
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'random_forest': lambda t: RandomForestClassifier(
                     n_estimators=t.suggest_int('rf_n_estimators', 100, 1000),
                     max_depth=t.suggest_int('rf_max_depth', 5, 100),
                     min_samples_split=t.suggest_int('rf_min_samples_split', 2, 20),
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
@@ -448,6 +450,7 @@ class AutoMLTrainer:
                     colsample_bytree=t.suggest_float('xgb_colsample', 0.4, 1.0),
                     use_label_encoder=False,
                     eval_metric='logloss',
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'lightgbm': lambda t: lgb.LGBMClassifier(
@@ -458,11 +461,13 @@ class AutoMLTrainer:
                     bagging_fraction=t.suggest_float('lgb_bagging_frac', 0.4, 1.0),
                     bagging_freq=t.suggest_int('lgb_bagging_freq', 1, 7),
                     verbosity=-1,
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'extra_trees': lambda t: ExtraTreesClassifier(
                     n_estimators=t.suggest_int('et_n_estimators', 100, 1000),
                     max_depth=t.suggest_int('et_max_depth', 5, 100),
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'adaboost': lambda t: AdaBoostClassifier(
@@ -481,19 +486,20 @@ class AutoMLTrainer:
                     gamma=t.suggest_categorical('svm_gamma', ['scale', 'auto']),
                     probability=False, 
                     cache_size=2000,
-                    max_iter=10000,
+                    max_iter=1000,
                     random_state=random_state
                 ),
                 'linear_svc': lambda t: LinearSVC(
                     C=t.suggest_float('lsvc_C', 0.01, 100.0, log=True),
-                    max_iter=5000, 
+                    max_iter=1000, 
                     dual=False, 
                     random_state=random_state
                 ),
                 'knn': lambda t: KNeighborsClassifier(
                     n_neighbors=t.suggest_int('knn_neighbors', 1, 31),
                     weights=t.suggest_categorical('knn_weights', ['uniform', 'distance']),
-                    metric=t.suggest_categorical('knn_metric', ['euclidean', 'manhattan', 'minkowski'])
+                    metric=t.suggest_categorical('knn_metric', ['euclidean', 'manhattan', 'minkowski']),
+                    n_jobs=-1
                 ),
                 'naive_bayes': lambda t: GaussianNB(
                     var_smoothing=t.suggest_float('nb_smoothing', 1e-10, 1e-8, log=True)
@@ -571,10 +577,11 @@ class AutoMLTrainer:
                     C=t.suggest_float('svr_C', 0.1, 10.0, log=True),
                     kernel=t.suggest_categorical('svr_kernel', ['linear', 'rbf']),
                     cache_size=1000,
-                    max_iter=5000
+                    max_iter=1000
                 ),
                 'knn': lambda t: KNeighborsRegressor(
-                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15)
+                    n_neighbors=t.suggest_int('knn_neighbors', 3, 15),
+                    n_jobs=-1
                 ),
                 'ridge': lambda t: Ridge(
                     alpha=t.suggest_float('ridge_alpha', 0.1, 10.0),
@@ -592,7 +599,7 @@ class AutoMLTrainer:
                 'sgd_regressor': lambda t: SGDRegressor(max_iter=1000, random_state=random_state),
                 'mlp': lambda t: MLPRegressor(
                     hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
-                    max_iter=t.suggest_int('mlp_max_iter', 200, 1000),
+                    max_iter=t.suggest_int('mlp_max_iter', 200, 500),
                     early_stopping=True,
                     validation_fraction=0.1,
                     n_iter_no_change=10,
