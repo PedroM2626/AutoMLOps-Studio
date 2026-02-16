@@ -1015,19 +1015,32 @@ class AutoMLTrainer:
 
     def get_supported_models(self):
         """Returns a list of supported model names for the current task type."""
+        models = []
         if self.task_type == 'classification':
-            return [
+            models = [
                 'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 
                 'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
-                'svm', 'knn', 'naive_bayes', 'sgd_classifier', 'mlp'
+                'svm', 'knn', 'naive_bayes', 'sgd_classifier', 'mlp', 'linear_svc', 'ridge_classifier'
             ]
+            if TRANSFORMERS_AVAILABLE:
+                models.extend([
+                    'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 
+                    'albert-base-v2', 'xlnet-base-cased', 'microsoft/deberta-v3-base'
+                ])
+            return models
         elif self.task_type == 'regression':
-            return [
+            models = [
                 'linear_regression', 'random_forest', 'xgboost', 'lightgbm', 
                 'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
                 'svm', 'knn', 'ridge', 'lasso', 'elastic_net', 
                 'sgd_regressor', 'mlp'
             ]
+            if TRANSFORMERS_AVAILABLE:
+                models.extend([
+                    'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 
+                    'microsoft/deberta-v3-small'
+                ])
+            return models
         elif self.task_type == 'clustering':
             return [
                 'kmeans', 'dbscan', 'agglomerative', 'gaussian_mixture', 
@@ -1136,16 +1149,25 @@ class AutoMLTrainer:
             if name == 'decision_tree':
                 dt_params = {k.replace('dt_', ''): v for k, v in params.items() if k.startswith('dt_')}
                 return DecisionTreeClassifier(**dt_params)
-            if name == 'svm': return SVC(probability=True)
-            if name == 'linear_svc': return LinearSVC(max_iter=1000, dual=False)
+            if name == 'svm': return SVC(probability=True, **{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma']})
+            if name == 'linear_svc': 
+                lsvc_params = {k: v for k, v in params.items() if k in ['C', 'loss', 'penalty', 'dual']}
+                # Default dual=False if not specified to avoid convergence issues with primal
+                if 'dual' not in lsvc_params and lsvc_params.get('penalty') == 'l2' and lsvc_params.get('loss') == 'hinge':
+                     lsvc_params['dual'] = True # hinge requires dual=True
+                elif 'dual' not in lsvc_params:
+                     lsvc_params['dual'] = False
+                return LinearSVC(max_iter=2000, **lsvc_params)
             if name == 'knn': 
                 knn_params = {k.replace('knn_', ''): v for k, v in params.items() if k.startswith('knn_')}
                 if 'neighbors' in knn_params:
                     knn_params['n_neighbors'] = knn_params.pop('neighbors')
                 return KNeighborsClassifier(**knn_params)
             if name == 'naive_bayes': return GaussianNB()
-            if name == 'ridge_classifier': return RidgeClassifier()
-            if name == 'sgd_classifier': return SGDClassifier(max_iter=1000)
+            if name == 'ridge_classifier': return RidgeClassifier(alpha=params.get('ridge_alpha', 1.0))
+            if name == 'sgd_classifier': 
+                sgd_params = {k.replace('sgd_', ''): v for k, v in params.items() if k.startswith('sgd_')}
+                return SGDClassifier(max_iter=2000, **sgd_params)
             if name == 'mlp': 
                 mlp_params = {k.replace('mlp_', ''): v for k, v in params.items() if k.startswith('mlp_')}
                 if 'layers' in mlp_params:
@@ -1174,7 +1196,7 @@ class AutoMLTrainer:
             if name == 'decision_tree':
                 dt_params = {k.replace('dt_', ''): v for k, v in params.items() if k.startswith('dt_')}
                 return DecisionTreeRegressor(**dt_params)
-            if name == 'svm': return SVR()
+            if name == 'svm': return SVR(**{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'epsilon']})
             if name == 'knn': 
                 knn_params = {k.replace('knn_', ''): v for k, v in params.items() if k.startswith('knn_')}
                 if 'neighbors' in knn_params:
@@ -1184,7 +1206,9 @@ class AutoMLTrainer:
             if name == 'lasso': return Lasso(alpha=params.get('lasso_alpha', 1.0))
             if name == 'elastic_net': 
                 return ElasticNet(alpha=params.get('en_alpha', 1.0), l1_ratio=params.get('en_l1_ratio', 0.5))
-            if name == 'sgd_regressor': return SGDRegressor(max_iter=1000)
+            if name == 'sgd_regressor': 
+                sgd_params = {k.replace('sgd_', ''): v for k, v in params.items() if k.startswith('sgd_')}
+                return SGDRegressor(max_iter=1000, **sgd_params)
             if name == 'mlp': 
                 mlp_params = {k.replace('mlp_', ''): v for k, v in params.items() if k.startswith('mlp_')}
                 if 'layers' in mlp_params:
@@ -1301,6 +1325,21 @@ class AutoMLTrainer:
                 'lr_C': ('float', 0.001, 100.0, 1.0),
                 'lr_solver': ('list', ['lbfgs', 'liblinear', 'saga'], 'lbfgs')
             },
+            'linear_svc': {
+                'C': ('float', 0.001, 100.0, 1.0),
+                'loss': ('list', ['hinge', 'squared_hinge'], 'squared_hinge'),
+                'penalty': ('list', ['l1', 'l2'], 'l2')
+            },
+            'sgd_classifier': {
+                'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
+                'sgd_penalty': ('list', ['l2', 'l1', 'elasticnet'], 'l2'),
+                'sgd_loss': ('list', ['hinge', 'log_loss', 'modified_huber', 'squared_hinge', 'perceptron'], 'hinge')
+            },
+            'sgd_regressor': {
+                'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
+                'sgd_penalty': ('list', ['l2', 'l1', 'elasticnet'], 'l2'),
+                'sgd_loss': ('list', ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'], 'squared_error')
+            },
             'random_forest': {
                 'rf_n_estimators': ('int', 10, 500, 100),
                 'rf_max_depth': ('int', 1, 50, 10)
@@ -1393,6 +1432,20 @@ class AutoMLTrainer:
                 'spectral_n_clusters': ('int', 2, 20, 3)
             }
         }
+
+        if TRANSFORMERS_AVAILABLE:
+             # Add schema for all transformer models (same parameters for all)
+             transformer_models = [
+                 'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base', 
+                 'albert-base-v2', 'xlnet-base-cased', 'microsoft/deberta-v3-base',
+                 'microsoft/deberta-v3-small'
+             ]
+             for tm in transformer_models:
+                 schemas[tm] = {
+                     'learning_rate': ('float', 1e-6, 1e-3, 2e-5),
+                     'num_train_epochs': ('int', 1, 20, 3)
+                 }
+
         return schemas.get(model_name, {})
 
     def train_manual(self, X_train, y_train, model_name, params, **kwargs):

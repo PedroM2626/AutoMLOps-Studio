@@ -183,8 +183,7 @@ with tabs[1]:
     
     # Seletor de Fonte do Modelo (Migrado de Fine-Tune)
     model_source = st.radio("Fonte do Modelo", 
-                           ["AutoML Standard (Scikit-Learn/XGBoost)", 
-                            "Transformers (HuggingFace)", 
+                           ["AutoML Standard (Scikit-Learn/XGBoost/Transformers)", 
                             "Model Registry (Registrados)", 
                             "Upload Local (.pkl)"],
                            horizontal=True)
@@ -196,39 +195,10 @@ with tabs[1]:
     manual_params = None
     
     # Lógica de Seleção Baseada na Fonte
-    if model_source == "AutoML Standard (Scikit-Learn/XGBoost)":
+    if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
         mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)"], horizontal=True)
         if mode_selection == "Manual (Selecionar)":
             selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2] if available_models else None)
-    
-    elif model_source == "Transformers (HuggingFace)":
-        if task == "classification":
-            tf_options = [
-                "bert-base-uncased", "distilbert-base-uncased", "roberta-base", 
-                "albert-base-v2", "xlnet-base-cased", "microsoft/deberta-v3-base"
-            ]
-        elif task == "regression":
-            tf_options = [
-                "bert-base-uncased-reg", "distilbert-base-uncased-reg", 
-                "roberta-base-reg", "microsoft/deberta-v3-small"
-            ]
-        else:
-            st.warning("Transformers disponíveis apenas para Classificação e Regressão.")
-            tf_options = []
-        
-        if tf_options:
-            selected_tf = st.selectbox("Selecione o Transformer", tf_options)
-            selected_models = [selected_tf]
-            
-            # Parâmetros específicos para Transformers
-            if training_strategy == "Manual":
-                st.markdown("##### ⚙️ Parâmetros do Transformer")
-                col_tr1, col_tr2 = st.columns(2)
-                with col_tr1:
-                    lr = st.number_input("Learning Rate", 1e-6, 1e-3, 2e-5, format="%.6f", key="tr_lr")
-                with col_tr2:
-                    epochs = st.number_input("Epochs", 1, 20, 3, key="tr_epochs")
-                manual_params = {'model_name': selected_tf, 'learning_rate': lr, 'num_train_epochs': epochs}
     
     elif model_source == "Model Registry (Registrados)":
         reg_models = get_registered_models()
@@ -249,7 +219,7 @@ with tabs[1]:
     col_opt1, col_opt2 = st.columns(2)
     with col_opt1:
         # Seletor unificado de preset (incluindo 'custom')
-        if model_source == "AutoML Standard (Scikit-Learn/XGBoost)":
+        if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
             training_preset = st.select_slider(
                 "Modo de Treinamento (Preset)",
                 options=["fast", "medium", "best_quality", "custom"],
