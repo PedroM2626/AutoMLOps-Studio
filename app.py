@@ -247,10 +247,26 @@ with tabs[1]:
             n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 1000, 20, key="cust_trials")
             timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 7200, 600, key="cust_timeout")
             early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7, key="cust_es")
+            
+            st.markdown("##### ⚡ Parâmetros Avançados")
+            custom_max_iter = st.number_input("Máximo de Iterações (max_iter)", 100, 100000, 1000, help="Limite de iterações para solvers (LogisticRegression, SVM, MLP). Valores muito altos podem causar lentidão.")
+            
+            # NLP Configuration (if applicable)
+            st.markdown("##### 📝 NLP Avançado")
+            nlp_max_features = st.number_input("Max Features (Vetorização)", min_value=100, max_value=None, value=20000, step=1000, help="Número máximo de features para TF-IDF/CountVectorizer. Deixe alto para capturar mais vocabulário (ex: 20000+). Otimizado automaticamente se for muito alto.")
+            nlp_ngram_range_max = st.slider("N-Gram Range Max", 1, 3, 2, help="Tamanho máximo dos n-grams (1=unigramas, 2=bigramas, 3=trigramas).")
+            
+            manual_params = {
+                'max_iter': custom_max_iter,
+                'nlp_max_features': nlp_max_features,
+                'nlp_ngram_range': (1, nlp_ngram_range_max)
+            }
         else:
             n_trials = None
             timeout_per_model = None
             early_stopping = 10
+            manual_params = {}
+
         
         with col_opt2:
             st.markdown("##### 🛡️ Estratégia de Validação")
@@ -334,9 +350,13 @@ with tabs[1]:
             
             # Se múltiplos modelos estiverem selecionados, o usuário pode configurar um por um ou um modelo de referência
             ref_model = st.selectbox("Modelo para Configurar", selected_models or available_models)
-
-            manual_params = {'model_name': ref_model} 
+            
+            # Merge existing manual_params with new manual config
+            current_manual_params = manual_params.copy()
+            current_manual_params['model_name'] = ref_model
+            
             schema = trainer_temp.get_model_params_schema(ref_model)
+
             if schema:
                 st.markdown(f"**Parâmetros para {ref_model}**")
                 cols_p = st.columns(3)
@@ -428,7 +448,7 @@ with tabs[1]:
                     with col_nlp2:
                         remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
                         lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
-                        max_features_automl = st.number_input("Max Features", 100, 10000, 1000, key="automl_max_feat")
+                        max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=20000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 20000) para capturar mais vocabulário. Otimizado automaticamente.")
 
                     nlp_config_automl = {
                         "vectorizer": vectorizer_automl,

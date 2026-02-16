@@ -35,6 +35,7 @@ from sklearn.mixture import GaussianMixture
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 import xgboost as xgb
 import lightgbm as lgb
+import re
 try:
     import catboost as cb
     CATBOOST_AVAILABLE = True
@@ -107,7 +108,37 @@ class AutoMLDataProcessor:
         self.nlp_config = nlp_config if nlp_config else {}
         self.scaler_type = scaler_type
         self.preprocessor = None
-        self.label_encoder = None
+        self.nlp_cols = []
+
+    def _clean_text_feature(self, df, col):
+        """Applies text cleaning to a specific column in DataFrame."""
+        if col in df.columns:
+            cleaning_mode = self.nlp_config.get('cleaning_mode', 'standard')
+            logger.info(f"🧹 Limpando texto da coluna: {col} (Mode: {cleaning_mode})")
+            
+            def clean_text_optimized(text):
+                text = str(text).lower()
+                # Remover URLs
+                text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+                # Remover menções e hashtags
+                text = re.sub(r'\@\w+|\#','', text)
+                
+                if cleaning_mode == 'god_mode':
+                    # Remove repetitive characters (e.g., goooood -> good)
+                    text = re.sub(r'(.)\1+', r'\1\1', text)
+                    # Keep punctuation that matters for sentiment (! and ?)
+                    text = re.sub(r'[^a-z\s\!\?]', '', text)
+                else:
+                    # Standard cleaning: only letters and spaces
+                    text = re.sub(r'[^a-z\s]', '', text)
+                
+                # Remover espaços extras
+                text = " ".join(text.split())
+                return text
+            
+            # Apply cleaning in-place (efficiently)
+            df[col] = df[col].apply(clean_text_optimized)
+        return df
 
     def _apply_ts_features(self, df, y=None):
         """Applies time-series specific feature engineering to a DataFrame."""
@@ -152,74 +183,19 @@ class AutoMLDataProcessor:
         return df
 
     def _apply_nlp_features(self, df, nlp_cols):
-        """Applies TF-IDF or CountVectorizer to text columns with custom config."""
-        from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-        df = df.copy()
-        
-        # Get NLP configs
-        vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
-        ngram_range = self.nlp_config.get('ngram_range', (1, 2))
-        max_features = self.nlp_config.get('max_features', 5000)
-        stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
-        
-        for col in nlp_cols:
-            if col in df.columns:
-                logger.info(f"🔤 Otimizando NLP para a coluna: {col}")
-                # Limpeza básica
-                df[col] = df[col].astype(str).str.lower().str.replace(r'[^\w\s]', '', regex=True)
-                
-                # Vectorizer selection
-                if vectorizer_type == 'count':
-                    vectorizer = CountVectorizer(
-                        max_features=max_features,
-                        ngram_range=ngram_range,
-                        stop_words=stop_words
-                    )
-                else: # Default to TF-IDF
-                    vectorizer = TfidfVectorizer(
-                        max_features=max_features,
-                        ngram_range=ngram_range,
-                        stop_words=stop_words,
-                        sublinear_tf=True
-                    )
-                
-                # Lemmatization (Basic support)
-                if self.nlp_config.get('lemmatization', False):
-                    try:
-                        import nltk
-                        from nltk.stem import WordNetLemmatizer
-                        try:
-                            nltk.data.find('corpora/wordnet')
-                        except LookupError:
-                            nltk.download('wordnet')
-                            nltk.download('omw-1.4')
-                        
-                        lemmatizer = WordNetLemmatizer()
-                        # Apply lemmatization to the column before vectorization
-                        # This is a simple apply, for better results we'd need POS tagging
-                        df[col] = df[col].apply(lambda x: ' '.join([lemmatizer.lemmatize(w) for w in str(x).split()]))
-                    except Exception as e:
-                        logger.warning(f"Lemmatization failed: {e}")
-
-                text_features = vectorizer.fit_transform(df[col])
-                
-                # Handle sparse matrix
-                if hasattr(text_features, 'toarray'):
-                    text_features = text_features.toarray()
-                    
-                tfidf_df = pd.DataFrame(
-                    text_features, 
-                    columns=[f"{vectorizer_type}_{col}_{i}" for i in range(text_features.shape[1])],
-                    index=df.index
-                )
-                df = pd.concat([df, tfidf_df], axis=1)
-                df = df.drop(columns=[col])
+        """Deprecated: NLP features are now handled in the main pipeline."""
         return df
 
     def fit_transform(self, df, nlp_cols=None):
-        # NLP Feature Engineering
-        if nlp_cols is not None and isinstance(nlp_cols, list) and len(nlp_cols) > 0:
-            df = self._apply_nlp_features(df, nlp_cols)
+        self.nlp_cols = nlp_cols if nlp_cols else []
+        
+        # NLP Cleaning first
+        if self.nlp_cols:
+            for col in self.nlp_cols:
+                df = self._clean_text_feature(df, col)
+                # Fill NaNs for vectorizer
+                if col in df.columns:
+                     df[col] = df[col].fillna("")
 
         # Time Series Feature Engineering
         if self.task_type == 'time_series':
@@ -232,24 +208,25 @@ class AutoMLDataProcessor:
             X = df
             y = None
         
-        # Exclude date_col from processing if it's still there
-        # (Exclude date_col from processing if it's still there)
+        # Exclude date_col from processing
         process_cols = [c for c in X.columns if c != self.date_col]
-        X_to_process = X[process_cols]
-
-        # Identificar tipos de colunas ANTES de qualquer transformação
+        
+        nlp_features = [c for c in self.nlp_cols if c in process_cols]
+        non_nlp_cols = [c for c in process_cols if c not in nlp_features]
+        
+        X_to_process = X[non_nlp_cols]
+        
+        # Identificar tipos de colunas
         numeric_features = X_to_process.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns.tolist()
         all_categorical = X_to_process.select_dtypes(include=['object', 'category']).columns.tolist()
 
         # Drop constant columns
         constant_cols = [col for col in X_to_process.columns if X_to_process[col].nunique() <= 1]
         if constant_cols:
-            X_to_process = X_to_process.drop(columns=constant_cols)
-            # Atualizar listas após drop
             numeric_features = [c for c in numeric_features if c not in constant_cols]
             all_categorical = [c for c in all_categorical if c not in constant_cols]
         
-        # Split categorical into low and high cardinality to avoid memory explosion
+        # Split categorical
         low_card_features = []
         high_card_features = []
         
@@ -259,7 +236,7 @@ class AutoMLDataProcessor:
             else:
                 high_card_features.append(col)
 
-        # Preprocessing for numeric data
+        # Preprocessing Pipelines
         if self.scaler_type == 'minmax':
             scaler = MinMaxScaler()
         elif self.scaler_type == 'robust':
@@ -272,39 +249,68 @@ class AutoMLDataProcessor:
             ('scaler', scaler)
         ])
 
-        # Preprocessing for low cardinality categorical data
         low_card_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='most_frequent')),
             ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
         ])
         
-        # Preprocessing for high cardinality categorical data
         high_card_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='most_frequent')),
             ('ordinal', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
         ])
 
         # Bundle preprocessing
-        transformers = [('num', numeric_transformer, numeric_features)]
-        
+        transformers = []
+        if numeric_features:
+            transformers.append(('num', numeric_transformer, numeric_features))
         if low_card_features:
             transformers.append(('cat_low', low_card_transformer, low_card_features))
         if high_card_features:
             transformers.append(('cat_high', high_card_transformer, high_card_features))
 
-        self.preprocessor = ColumnTransformer(transformers=transformers, sparse_threshold=0)
+        # NLP Transformers
+        if nlp_features:
+            from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+            
+            vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
+            ngram_range = self.nlp_config.get('ngram_range', (1, 3))
+            max_features = self.nlp_config.get('max_features', 20000)
+            stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
+            
+            for col in nlp_features:
+                if vectorizer_type == 'count':
+                    vectorizer = CountVectorizer(
+                        max_features=max_features,
+                        ngram_range=ngram_range,
+                        stop_words=stop_words
+                    )
+                else:
+                    vectorizer = TfidfVectorizer(
+                        max_features=max_features,
+                        ngram_range=ngram_range,
+                        stop_words=stop_words,
+                        sublinear_tf=True
+                    )
+                transformers.append((f'nlp_{col}', vectorizer, col))
 
-        X_processed = self.preprocessor.fit_transform(X)
+        # Sparse Threshold - IMPORTANT: Keep sparse for NLP
+        sparse_thresh = 1.0 if nlp_features else 0
+        self.preprocessor = ColumnTransformer(transformers=transformers, sparse_threshold=sparse_thresh)
+
+        try:
+            X_processed = self.preprocessor.fit_transform(X)
+        except Exception as e:
+            logger.error(f"Erro no fit_transform: {e}")
+            raise e
         
         if X_processed.shape[0] == 0:
-            raise ValueError("O processamento resultou em 0 linhas. Verifique se o horizonte de previsão e lags são maiores que o dataset.")
+            raise ValueError("O processamento resultou em 0 linhas.")
             
-        # Ensure output is dense and float64
-        if hasattr(X_processed, "toarray"):
+        # Ensure output is dense only if NO NLP features (to save memory)
+        if not nlp_features and hasattr(X_processed, "toarray"):
             X_processed = X_processed.toarray()
-        X_processed = X_processed.astype(np.float64)
-        
-        # Handle target encoding if categorical
+            
+        # Handle target encoding
         y_processed = None
         if y is not None:
             if y.dtype == 'object' or y.dtype.name == 'category':
@@ -316,6 +322,13 @@ class AutoMLDataProcessor:
         return X_processed, y_processed
 
     def transform(self, df):
+        # NLP Cleaning
+        if self.nlp_cols:
+            for col in self.nlp_cols:
+                df = self._clean_text_feature(df, col)
+                if col in df.columns:
+                     df[col] = df[col].fillna("")
+
         # Time Series Feature Engineering
         if self.task_type == 'time_series':
             df = self._apply_ts_features(df)
@@ -327,35 +340,29 @@ class AutoMLDataProcessor:
             X = df.drop(columns=[self.target_column])
             y = df[self.target_column]
             # Handle categorical target
-            if self.label_encoder:
-                y = self.label_encoder.transform(y)
+            if hasattr(self, 'label_encoder') and self.label_encoder:
+                try:
+                    y = self.label_encoder.transform(y)
+                except:
+                    pass 
         else:
             X = df
             y = None
         
-        # Ensure X is a DataFrame (required for ColumnTransformer with named columns)
         if not isinstance(X, pd.DataFrame):
             X = pd.DataFrame(X)
-
-        # Exclude date_col if present
-        # Note: We don't drop it here because preprocessor was fitted with it present (and it drops it internally)
-        # unless it was excluded in fit_transform. Let's keep consistency.
-        # In fit_transform, X still has date_col when calling preprocessor.fit_transform(X).
 
         try:
             X_processed = self.preprocessor.transform(X)
         except Exception as e:
             logger.error(f"Erro no ColumnTransformer.transform: {e}")
-            # Se falhar, tenta garantir que as colunas batem com o esperado pelo transformer
-            # O sklearn 1.2+ é rigoroso com nomes de colunas
             raise e
 
-        if hasattr(X_processed, "toarray"):
+        # Ensure dense only if NO NLP features
+        if not self.nlp_cols and hasattr(X_processed, "toarray"):
             X_processed = X_processed.toarray()
             
-        X_final = X_processed.astype(np.float64)
-        
-        return X_final, y
+        return X_processed, y
 
     def get_feature_names(self):
         """Returns the names of the features after preprocessing."""
@@ -403,7 +410,7 @@ class AutoMLTrainer:
                 'n_trials': 150,
                 'timeout': 7200, # 2 hours
                 'cv': 10,
-                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier']
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive']
             },
             'custom': {
                 'n_trials': 20, # Default if not provided manually
@@ -514,6 +521,13 @@ class AutoMLTrainer:
                     alpha=t.suggest_float('sgd_alpha', 1e-6, 1e-2, log=True),
                     max_iter=2000, 
                     random_state=random_state
+                ),
+                'passive_aggressive': lambda t: PassiveAggressiveClassifier(
+                    C=t.suggest_float('pa_C', 0.001, 10.0, log=True),
+                    fit_intercept=t.suggest_categorical('pa_fit_intercept', [True, False]),
+                    max_iter=1000,
+                    random_state=random_state,
+                    n_jobs=-1
                 ),
                 'mlp': lambda t: MLPClassifier(
                     hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(100, 50)", "(100, 100)", "(50, 50, 50)", "(256, 128, 64)"])),
