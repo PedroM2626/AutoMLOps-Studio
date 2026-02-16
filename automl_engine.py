@@ -64,10 +64,11 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
-    def __init__(self, model_name='bert-base-uncased', task='classification', epochs=3):
+    def __init__(self, model_name='bert-base-uncased', task='classification', epochs=3, learning_rate=2e-5):
         self.model_name = model_name
         self.task = task
         self.epochs = epochs
+        self.learning_rate = learning_rate
         self.model = None
         self.tokenizer = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu" if TRANSFORMERS_AVAILABLE else "cpu"
@@ -88,6 +89,9 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
         
         # Lógica de treino simplificada para o wrapper
         # Em um cenário real, converteríamos X e y para Dataset do HF
+        # Aqui, vamos apenas simular o treino ou fazer um fit dummy se necessário
+        # Para integracao real, precisariamos de TrainingArguments com self.learning_rate e self.epochs
+        
         return self
 
     def predict(self, X):
@@ -407,6 +411,15 @@ class AutoMLTrainer:
         """
         Retorna a lista de nomes dos modelos ou uma instância específica com parâmetros sugeridos.
         """
+        # Prioritize custom models if available
+        if name and hasattr(self, 'custom_models') and name in self.custom_models:
+            from sklearn.base import clone
+            try:
+                return clone(self.custom_models[name])
+            except:
+                import copy
+                return copy.deepcopy(self.custom_models[name])
+
         if self.task_type == 'classification':
             models_config = {
                 'logistic_regression': lambda t: LogisticRegression(
@@ -508,12 +521,12 @@ class AutoMLTrainer:
                     thread_count=1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
-                'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
-                'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification') if TRANSFORMERS_AVAILABLE else None,
-                'roberta-base': lambda t: TransformersWrapper(model_name='roberta-base', task='classification') if TRANSFORMERS_AVAILABLE else None,
-                'albert-base-v2': lambda t: TransformersWrapper(model_name='albert-base-v2', task='classification') if TRANSFORMERS_AVAILABLE else None,
-                'xlnet-base-cased': lambda t: TransformersWrapper(model_name='xlnet-base-cased', task='classification') if TRANSFORMERS_AVAILABLE else None,
-                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification') if TRANSFORMERS_AVAILABLE else None
+                'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'roberta-base': lambda t: TransformersWrapper(model_name='roberta-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'albert-base-v2': lambda t: TransformersWrapper(model_name='albert-base-v2', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'xlnet-base-cased': lambda t: TransformersWrapper(model_name='xlnet-base-cased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None
             }
         elif self.task_type == 'regression':
             models_config = {
@@ -587,10 +600,10 @@ class AutoMLTrainer:
                     thread_count=1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
-                'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
-                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression') if TRANSFORMERS_AVAILABLE else None,
-                'roberta-base-reg': lambda t: TransformersWrapper(model_name='roberta-base', task='regression') if TRANSFORMERS_AVAILABLE else None,
-                'microsoft/deberta-v3-small': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-small', task='regression') if TRANSFORMERS_AVAILABLE else None
+                'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'roberta-base-reg': lambda t: TransformersWrapper(model_name='roberta-base', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
+                'microsoft/deberta-v3-small': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-small', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None
             }
         elif self.task_type == 'clustering':
             models_config = {
@@ -675,6 +688,9 @@ class AutoMLTrainer:
                     # Se a lambda falhar com None (ex: t.suggest_int), assumimos que o modelo está disponível
                     # pois o erro vem da lógica do trial, não da ausência da biblioteca
                     available.append(k)
+            
+            if hasattr(self, 'custom_models') and self.custom_models:
+                available.extend(list(self.custom_models.keys()))
             return available
         
         if name in models_config:
@@ -687,11 +703,14 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
         timeout = timeout if timeout is not None else preset_config.get('timeout')
+        
+        # Armazenar modelos customizados (uploaded ou registrados)
+        self.custom_models = custom_models if custom_models else {}
         
         # Se selected_models não for fornecido, usa a lista do preset
         if selected_models is None:
@@ -1078,6 +1097,17 @@ class AutoMLTrainer:
         return None
 
     def _instantiate_model(self, name, params):
+        # 1. Custom Models (Uploaded/Registered)
+        if hasattr(self, 'custom_models') and self.custom_models and name in self.custom_models:
+            logger.info(f"Using custom model: {name}")
+            return self.custom_models[name]
+
+        # 2. Transformers
+        if TRANSFORMERS_AVAILABLE and (name.startswith('bert') or name.startswith('roberta') or name.startswith('distilbert') or name.startswith('albert') or name.startswith('xlnet') or '/' in name):
+             epochs = params.get('num_train_epochs', 3)
+             lr = params.get('learning_rate', 2e-5)
+             return TransformersWrapper(model_name=name, task=self.task_type, epochs=epochs, learning_rate=lr)
+
         if self.task_type == 'classification':
             if name == 'logistic_regression': 
                 lr_params = {k.replace('lr_', ''): v for k, v in params.items() if k.startswith('lr_')}

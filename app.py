@@ -164,43 +164,101 @@ with tabs[0]:
 with tabs[1]:
     st.header("🤖 AutoML & Model Hub")
     
-    sub_tabs = st.tabs(["🆕 Novo Treino", "🔧 Modelos Existentes (Fine-Tune)"])
+    # --- SUB-TAB: NOVO TREINO (UNIFICADO) ---
+    st.subheader("📋 Configuração do Treino")
     
-    # --- SUB-TAB: NOVO TREINO ---
-    with sub_tabs[0]:
-        st.subheader("📋 Configuração do Novo Treino")
-        
-        # 1. Definição da Tarefa
-        col_t1, col_t2 = st.columns(2)
-        with col_t1:
-            task = st.radio("Tipo de Tarefa", ["classification", "regression", "clustering", "time_series", "anomaly_detection"], key="task_selector_train")
-        
-        with col_t2:
-            training_strategy = st.radio("Configuração de Hiperparâmetros", ["Automático", "Manual"], 
-                                         help="Automático: O sistema busca os melhores parâmetros. Manual: Você define tudo.")
+    # 1. Definição da Tarefa
+    col_t1, col_t2 = st.columns(2)
+    with col_t1:
+        task = st.radio("Tipo de Tarefa", ["classification", "regression", "clustering", "time_series", "anomaly_detection"], key="task_selector_train")
+    
+    with col_t2:
+        training_strategy = st.radio("Configuração de Hiperparâmetros", ["Automático", "Manual"], 
+                                     help="Automático: O sistema busca os melhores parâmetros. Manual: Você define tudo.")
 
-        st.divider()
+    st.divider()
 
-        # 2. Configuração de Modelos e Parâmetros
-        trainer_temp = AutoMLTrainer(task_type=task)
-        available_models = trainer_temp.get_available_models()
+    # 2. Configuração de Modelos e Parâmetros
+    st.subheader("🎯 Seleção do Modelo")
+    
+    # Seletor de Fonte do Modelo (Migrado de Fine-Tune)
+    model_source = st.radio("Fonte do Modelo", 
+                           ["AutoML Standard (Scikit-Learn/XGBoost)", 
+                            "Transformers (HuggingFace)", 
+                            "Model Registry (Registrados)", 
+                            "Upload Local (.pkl)"],
+                           horizontal=True)
+
+    trainer_temp = AutoMLTrainer(task_type=task)
+    available_models = trainer_temp.get_available_models()
+    
+    selected_models = None
+    manual_params = None
+    
+    # Lógica de Seleção Baseada na Fonte
+    if model_source == "AutoML Standard (Scikit-Learn/XGBoost)":
+        mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)"], horizontal=True)
+        if mode_selection == "Manual (Selecionar)":
+            selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2] if available_models else None)
+    
+    elif model_source == "Transformers (HuggingFace)":
+        if task == "classification":
+            tf_options = [
+                "bert-base-uncased", "distilbert-base-uncased", "roberta-base", 
+                "albert-base-v2", "xlnet-base-cased", "microsoft/deberta-v3-base"
+            ]
+        elif task == "regression":
+            tf_options = [
+                "bert-base-uncased-reg", "distilbert-base-uncased-reg", 
+                "roberta-base-reg", "microsoft/deberta-v3-small"
+            ]
+        else:
+            st.warning("Transformers disponíveis apenas para Classificação e Regressão.")
+            tf_options = []
         
-        selected_models = None
-        manual_params = None
-        
-        st.subheader("🎯 Configuração da Otimização")
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
+        if tf_options:
+            selected_tf = st.selectbox("Selecione o Transformer", tf_options)
+            selected_models = [selected_tf]
+            
+            # Parâmetros específicos para Transformers
+            if training_strategy == "Manual":
+                st.markdown("##### ⚙️ Parâmetros do Transformer")
+                col_tr1, col_tr2 = st.columns(2)
+                with col_tr1:
+                    lr = st.number_input("Learning Rate", 1e-6, 1e-3, 2e-5, format="%.6f", key="tr_lr")
+                with col_tr2:
+                    epochs = st.number_input("Epochs", 1, 20, 3, key="tr_epochs")
+                manual_params = {'model_name': selected_tf, 'learning_rate': lr, 'num_train_epochs': epochs}
+    
+    elif model_source == "Model Registry (Registrados)":
+        reg_models = get_registered_models()
+        if reg_models:
+            base_model_name = st.selectbox("Selecione o Modelo Registrado", [m.name for m in reg_models], key="reg_sel_train")
+            selected_models = [base_model_name]
+            st.info(f"O modelo '{base_model_name}' será usado como base para retreino/fine-tune.")
+        else:
+            st.warning("Nenhum modelo registrado encontrado.")
+
+    elif model_source == "Upload Local (.pkl)":
+        uploaded_pkl = st.file_uploader("Upload do arquivo .pkl base", type="pkl", key="pkl_upload_train")
+        if uploaded_pkl:
+            selected_models = ["Uploaded_Model"] # Placeholder, precisaria de lógica customizada no backend
+            st.info("Modelo carregado para retreino.")
+
+    st.subheader("🎯 Configuração da Otimização")
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        if model_source == "AutoML Standard (Scikit-Learn/XGBoost)":
             training_preset = st.select_slider(
                 "Modo de Treinamento (Preset)",
                 options=["fast", "medium", "best_quality"],
                 value="medium",
                 help="fast: Rápido, menos modelos e tentativas. best_quality: Lento, todos os modelos e muitas tentativas."
             )
-            
-            mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)"], horizontal=True)
-            if mode_selection == "Manual (Selecionar)":
-                selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2])
+        else:
+            training_preset = "medium" # Default para outros modos
+            st.info(f"Modo de Otimização adaptado para {model_source}")
+
             
             tuning_mode = st.radio("Modo de Tuning", ["Automático (Preset)", "Customizado"], horizontal=True)
             if tuning_mode == "Customizado":
@@ -467,6 +525,24 @@ with tabs[1]:
                     X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
                     X_test_proc, y_test_proc = processor.transform(test_df) if test_df is not None else (None, None)
                     
+                    # Preparar modelos customizados (Upload/Registry)
+                    custom_models = {}
+                    if model_source == "Upload Local (.pkl)" and 'uploaded_pkl' in locals() and uploaded_pkl:
+                         try:
+                             loaded_model = joblib.load(uploaded_pkl)
+                             custom_models["Uploaded_Model"] = loaded_model
+                         except Exception as e:
+                             st.error(f"Erro ao carregar .pkl: {e}")
+                             st.stop()
+                    elif model_source == "Model Registry (Registrados)" and selected_models:
+                         model_name = selected_models[0]
+                         try:
+                             loaded_model = load_registered_model(model_name)
+                             custom_models[model_name] = loaded_model
+                         except Exception as e:
+                             st.error(f"Erro ao carregar do registry: {e}")
+                             st.stop()
+
                     trainer = AutoMLTrainer(task_type=task, preset=training_preset)
                     
                     best_model = trainer.train(
@@ -481,7 +557,8 @@ with tabs[1]:
                         experiment_name=experiment_name,
                         random_state=random_seed_config,
                         validation_strategy=validation_strategy,
-                        validation_params=validation_params
+                        validation_params=validation_params,
+                        custom_models=custom_models
                     )
                     best_params = trainer.best_params
                     
@@ -603,274 +680,7 @@ with tabs[1]:
                                                 title="Detecção de Anomalias (PCA)")
                             st.plotly_chart(fig_anom)
 
-    # --- SUB-TAB: MODELOS EXISTENTES (FINE-TUNE) ---
-    with sub_tabs[1]:
-        st.subheader("📋 Configuração de Fine-Tuning")
-        
-        # 1. Definição da Tarefa (Espelhado do Novo Treino)
-        col_ft1, col_ft2 = st.columns(2)
-        with col_ft1:
-            ft_task = st.radio("Tipo de Tarefa", ["classification", "regression", "clustering", "time_series", "anomaly_detection"], key="task_selector_ft")
-        
-        with col_ft2:
-            ft_strategy = st.radio("Estratégia de Fine-Tune", ["Automático", "Manual"], key="strategy_ft",
-                                         help="Automático: O sistema busca os melhores hiperparâmetros. Manual: Você define tudo.")
 
-        st.divider()
-
-        # 2. Seleção da Base do Modelo (Diferença principal)
-        st.subheader("🎯 Seleção do Modelo Base")
-        ft_model_source = st.selectbox("Fonte do Modelo Base", 
-            ["Model Registry (Registrados)", "Transformers (HuggingFace)", "Upload Local (.pkl)"])
-        
-        base_model_name = ""
-        ft_available_models = []
-        
-        if ft_model_source == "Model Registry (Registrados)":
-            reg_models = get_registered_models()
-            if reg_models:
-                base_model_name = st.selectbox("Selecione o Modelo Registrado", [m.name for m in reg_models], key="ft_reg_sel")
-                ft_available_models = [base_model_name]
-            else:
-                st.warning("Nenhum modelo registrado encontrado.")
-        
-        elif ft_model_source == "Transformers (HuggingFace)":
-            if ft_task == "classification":
-                ft_available_models = [
-                    "bert-base-uncased", 
-                    "distilbert-base-uncased", 
-                    "roberta-base", 
-                    "albert-base-v2", 
-                    "xlnet-base-cased", 
-                    "microsoft/deberta-v3-base"
-                ]
-            elif ft_task == "regression":
-                ft_available_models = [
-                    "bert-base-uncased-reg", 
-                    "distilbert-base-uncased-reg", 
-                    "roberta-base-reg", 
-                    "microsoft/deberta-v3-small"
-                ]
-            else:
-                st.info("Transformers disponíveis principalmente para Classificação e Regressão de Texto.")
-                ft_available_models = []
-            
-            base_model_name = st.selectbox("Selecione o Transformer", ft_available_models, key="ft_trans_sel")
-        
-        else: # Upload Local
-            uploaded_ft_file = st.file_uploader("Upload do arquivo .pkl base", type="pkl", key="ft_upload")
-            if uploaded_ft_file:
-                base_model_name = "Uploaded_Model"
-                ft_available_models = [base_model_name]
-
-        # --- NOVA SEÇÃO: Parâmetros Manuais para Fine-Tune ---
-        ft_manual_params = None
-        if ft_strategy == "Manual" and base_model_name:
-            st.divider()
-            st.subheader("⚙️ Configuração Manual de Hiperparâmetros")
-            st.info(f"Defina os parâmetros para o modelo base: {base_model_name}")
-            
-            ft_manual_params = {'model_name': base_model_name}
-            # Tentar obter schema se não for Transformer ou Uploaded
-            if ft_model_source == "Model Registry (Registrados)":
-                # Para modelos registrados, tentamos inferir o tipo original para o schema
-                # Por simplicidade, vamos usar o nome do modelo se ele bater com os conhecidos
-                trainer_temp_ft = AutoMLTrainer(task_type=ft_task)
-                schema_ft = trainer_temp_ft.get_model_params_schema(base_model_name)
-                if schema_ft:
-                    cols_p_ft = st.columns(3)
-                    for i, (p_name, p_config) in enumerate(schema_ft.items()):
-                        with cols_p_ft[i % 3]:
-                            if p_config[0] == 'int':
-                                ft_manual_params[p_name] = st.number_input(p_name, p_config[1], p_config[2], p_config[3], key=f"ft_m_{p_name}")
-                            elif p_config[0] == 'float':
-                                ft_manual_params[p_name] = st.number_input(p_name, p_config[1], p_config[2], p_config[3], format="%.4f", key=f"ft_m_{p_name}")
-                            elif p_config[0] == 'list':
-                                options, p_def = p_config[1], p_config[2]
-                                ft_manual_params[p_name] = st.selectbox(p_name, options, index=options.index(p_def) if p_def in options else 0, key=f"ft_m_{p_name}")
-                else:
-                    st.info("Este modelo não possui parâmetros configuráveis via interface ou é um modelo customizado.")
-            
-            elif ft_model_source == "Transformers (HuggingFace)":
-                st.markdown("**Parâmetros de Fine-Tuning para Transformer**")
-                col_tr1, col_tr2 = st.columns(2)
-                with col_tr1:
-                    ft_manual_params['learning_rate'] = st.number_input("Learning Rate", 1e-6, 1e-3, 2e-5, format="%.6f", key="ft_tr_lr")
-                with col_tr2:
-                    ft_manual_params['num_train_epochs'] = st.number_input("Epochs", 1, 10, 3, key="ft_tr_epochs")
-        # ---------------------------------------------------
-
-        st.divider()
-
-        # 3. Configuração da Otimização (Igual ao Novo Treino)
-        st.subheader("⚙️ Configuração da Otimização")
-        col_ft_opt1, col_ft_opt2 = st.columns(2)
-        with col_ft_opt1:
-            ft_tuning_mode = st.radio("Modo de Tuning", ["Automático", "Customizado"], horizontal=True, key="ft_tuning_mode")
-            if ft_tuning_mode == "Customizado":
-                ft_n_trials = st.number_input("Número de Tentativas", 1, 500, 10, key="ft_trials")
-                ft_early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 5, key="ft_es")
-            else:
-                ft_n_trials = 15
-                ft_early_stopping = 5
-        
-        with col_ft_opt2:
-            ft_auto_split = st.checkbox("Auto-Split", value=True, key="ft_auto_split")
-
-        st.divider()
-
-        # 4. Seleção de Dados (Igual ao Novo Treino)
-        st.subheader("📂 Seleção de Dados para Retreino")
-        ft_selected_ds_list = st.multiselect("Escolha os Datasets", datalake.list_datasets(), key="ds_ft_multi")
-        
-        ft_selected_configs = []
-        if ft_selected_ds_list:
-            cols_ft_ds = st.columns(len(ft_selected_ds_list))
-            for i, ds_name in enumerate(ft_selected_ds_list):
-                with cols_ft_ds[i]:
-                    st.markdown(f"**{ds_name}**")
-                    ft_versions = datalake.list_versions(ds_name)
-                    ft_ver = st.selectbox(f"Versão", ft_versions, key=f"ft_ver_{ds_name}")
-                    ft_split = st.slider("Treino %", 0, 100, 80, key=f"ft_split_{ds_name}")
-                    ft_selected_configs.append({'name': ds_name, 'version': ft_ver, 'split': ft_split})
-
-        if ft_selected_configs:
-            if st.button("📥 Carregar Dados para Fine-Tuning", key="btn_load_ft"):
-                ft_train_df, ft_test_df = prepare_multi_dataset(ft_selected_configs, global_split=1.0 if ft_auto_split else None, task_type=ft_task)
-                st.session_state['ft_train_df'] = ft_train_df
-                st.session_state['ft_test_df'] = ft_test_df
-                st.session_state['ft_task_active'] = ft_task
-                st.session_state['ft_n_trials_active'] = ft_n_trials
-                st.session_state['ft_early_stopping_active'] = ft_early_stopping
-                st.session_state['ft_base_model_name'] = base_model_name
-                st.session_state['ft_manual_params_active'] = ft_manual_params
-                st.session_state['ft_strategy_active'] = ft_strategy
-                st.success("Dados carregados para Fine-Tuning!")
-
-        if 'ft_train_df' in st.session_state and st.session_state.get('ft_task_active') == ft_task:
-            ft_train_df = st.session_state['ft_train_df']
-            ft_test_df = st.session_state['ft_test_df']
-            ft_base_model = st.session_state['ft_base_model_name']
-            
-            st.divider()
-            st.subheader("⚙️ Configuração Final de Fine-Tuning")
-            ft_target = st.selectbox("🎯 Target (Fine-Tuning)", ft_train_df.columns, key="ft_target_sel") if ft_task not in ["clustering", "anomaly_detection"] else None
-            
-            if st.button("🚀 Iniciar Processo de Fine-Tuning", key="btn_exec_ft"):
-                st.session_state['trials_data_ft'] = []
-                ft_status_c = st.empty()
-                ft_progress_bar = st.progress(0)
-                ft_chart_c = st.empty()
-                
-                ft_strat_active = st.session_state.get('ft_strategy_active', 'Automático')
-                ft_manual_p = st.session_state.get('ft_manual_params_active')
-                
-                # Se for manual, rodamos apenas 1 trial. Se automático, o número configurado.
-                total_expected_ft = st.session_state['ft_n_trials_active'] if ft_strat_active == "Automático" else 1
-
-                def ft_callback(trial, score, full_name, dur, metrics=None):
-                    trial_info = {
-                        "Tentativa Geral": trial.number + 1,
-                        "Modelo": full_name.split(" - ")[0],
-                        "Identificador": full_name,
-                        "Score": score,
-                        "Duração (s)": dur
-                    }
-                    if metrics:
-                        for m_name, m_val in metrics.items():
-                            if isinstance(m_val, (int, float, np.number)):
-                                trial_info[m_name.upper()] = m_val
-                    
-                    st.session_state['trials_data_ft'].append(trial_info)
-                    df_ft = pd.DataFrame(st.session_state['trials_data_ft'])
-                    
-                    with ft_status_c:
-                        st.info(f"✨ Fine-Tune: {full_name} | Score: {score:.4f} | {trial.number+1}/{total_expected_ft}")
-                    
-                    ft_progress_bar.progress(min((trial.number + 1) / total_expected_ft, 1.0))
-                    
-                    with ft_chart_c:
-                        fig = px.line(df_ft, x="Tentativa Geral", y="Score", title="Evolução do Fine-Tuning")
-                        st.plotly_chart(fig, use_container_width=True)
-
-                with st.spinner("Realizando Fine-Tuning..."):
-                    try:
-                        from automl_engine import AutoMLTrainer, AutoMLDataProcessor
-                        ft_trainer = AutoMLTrainer(task_type=ft_task)
-                        ft_processor = AutoMLDataProcessor(target_column=ft_target, task_type=ft_task)
-                        
-                        X_ft_train, y_ft_train = ft_processor.fit_transform(ft_train_df)
-                        X_ft_test, y_ft_test = ft_processor.transform(ft_test_df) if ft_test_df is not None else (None, None)
-                        
-                        # Nome do experimento
-                        ft_exp_name = f"FineTune_{ft_base_model}_{time.strftime('%Y%m%d_%H%M%S')}"
-                        
-                        # Executa o treino focado apenas no modelo base selecionado
-                        ft_trainer.train(
-                            X_ft_train, y_ft_train,
-                            X_test=X_ft_test, y_test=y_ft_test,
-                            n_trials=total_expected_ft,
-                            selected_models=[ft_base_model],
-                            callback=ft_callback,
-                            early_stopping_rounds=st.session_state['ft_early_stopping_active'],
-                            experiment_name=ft_exp_name,
-                            manual_params=ft_manual_p
-                        )
-                        
-                        st.success(f"Fine-Tuning de {ft_base_model} concluído!")
-                        st.balloons()
-                        
-                        # Mostrar métricas finais
-                        best_ft_score = ft_trainer.results[0]['score'] if ft_trainer.results else 0
-                        st.metric("Melhor Score após Fine-Tune", f"{best_ft_score:.4f}")
-                        
-                    except Exception as e:
-                        st.error(f"Erro no Fine-Tuning: {e}")
-                
-                # Use same data loading logic as AutoML for consistency
-                available_ds_retrain = datalake.list_datasets()
-                sel_ds_retrain = st.selectbox("Dataset para Retreino", available_ds_retrain)
-                if sel_ds_retrain:
-                    vers_retrain = datalake.list_versions(sel_ds_retrain)
-                    sel_ver_retrain = st.selectbox("Versão do Dataset", vers_retrain)
-                    df_new = datalake.load_version(sel_ds_retrain, sel_ver_retrain)
-                    
-                    target_retrain = st.selectbox("Selecione o Target", df_new.columns)
-                    
-                    if st.button("🚀 Iniciar Retreinamento"):
-                        with st.spinner("Retreinando modelo..."):
-                            try:
-                                # Re-fit processor and model
-                                X_new, y_new = loaded_processor.fit_transform(df_new)
-                                loaded_model.fit(X_new, y_new)
-                                
-                                st.success("Modelo retreinado com sucesso!")
-                                
-                                # Evaluate
-                                metrics_new = {}
-                                y_p = loaded_model.predict(X_new)
-                                if pd.api.types.is_numeric_dtype(y_new):
-                                    from sklearn.metrics import r2_score, mean_absolute_error
-                                    metrics_new['R2'] = r2_score(y_new, y_p)
-                                    metrics_new['MAE'] = mean_absolute_error(y_new, y_p)
-                                else:
-                                    from sklearn.metrics import accuracy_score
-                                    metrics_new['Accuracy'] = accuracy_score(y_new, y_p)
-                                
-                                st.write("Novas Métricas (no próprio treino):", metrics_new)
-                                
-                                # Save new version
-                                tracker = MLFlowTracker(experiment_name="fine_tuning_retrain")
-                                run_id = tracker.log_experiment(
-                                    params={"retrained": True, "source": model_name_display},
-                                    metrics=metrics_new,
-                                    model=loaded_model,
-                                    model_name=f"retrained_{model_name_display}",
-                                    register=True
-                                )
-                                st.info(f"Nova versão registrada no MLflow! Run ID: {run_id}")
-                            except Exception as e:
-                                st.error(f"Erro no retreino: {e}")
 
 # --- TAB 2: EXPERIMENTS ---
 with tabs[2]:
