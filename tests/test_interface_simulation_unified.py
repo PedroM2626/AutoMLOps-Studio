@@ -140,6 +140,25 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
         svm_schema = self.trainer_cls.get_model_params_schema('svm')
         self.assertIn('degree', svm_schema)
         self.assertIn('coef0', svm_schema)
+        
+        # Logistic Regression
+        lr_schema = self.trainer_cls.get_model_params_schema('logistic_regression')
+        self.assertIn('lr_penalty', lr_schema)
+        self.assertIn('lr_l1_ratio', lr_schema)
+        
+        # SGD
+        sgd_schema = self.trainer_cls.get_model_params_schema('sgd_classifier')
+        self.assertIn('sgd_learning_rate', sgd_schema)
+        self.assertIn('sgd_eta0', sgd_schema)
+        
+        # Naive Bayes
+        nb_schema = self.trainer_cls.get_model_params_schema('naive_bayes')
+        self.assertIn('nb_var_smoothing', nb_schema)
+        
+        # Scale Pos Weight (XGB/LGBM)
+        self.assertIn('xgb_scale_pos_weight', xgb_schema)
+        lgb_schema = self.trainer_cls.get_model_params_schema('lightgbm')
+        self.assertIn('lgb_scale_pos_weight', lgb_schema)
 
 if __name__ == '__main__':
     unittest.main()
