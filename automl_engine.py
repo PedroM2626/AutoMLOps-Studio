@@ -1149,7 +1149,7 @@ class AutoMLTrainer:
             if name == 'decision_tree':
                 dt_params = {k.replace('dt_', ''): v for k, v in params.items() if k.startswith('dt_')}
                 return DecisionTreeClassifier(**dt_params)
-            if name == 'svm': return SVC(probability=True, **{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma']})
+            if name == 'svm': return SVC(probability=True, **{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'degree', 'coef0']})
             if name == 'linear_svc': 
                 lsvc_params = {k: v for k, v in params.items() if k in ['C', 'loss', 'penalty', 'dual']}
                 # Default dual=False if not specified to avoid convergence issues with primal
@@ -1196,7 +1196,7 @@ class AutoMLTrainer:
             if name == 'decision_tree':
                 dt_params = {k.replace('dt_', ''): v for k, v in params.items() if k.startswith('dt_')}
                 return DecisionTreeRegressor(**dt_params)
-            if name == 'svm': return SVR(**{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'epsilon']})
+            if name == 'svm': return SVR(**{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'epsilon', 'degree', 'coef0']})
             if name == 'knn': 
                 knn_params = {k.replace('knn_', ''): v for k, v in params.items() if k.startswith('knn_')}
                 if 'neighbors' in knn_params:
@@ -1342,33 +1342,65 @@ class AutoMLTrainer:
             },
             'random_forest': {
                 'rf_n_estimators': ('int', 10, 500, 100),
-                'rf_max_depth': ('int', 1, 50, 10)
+                'rf_max_depth': ('int', 1, 50, 10),
+                'rf_min_samples_split': ('int', 2, 20, 2),
+                'rf_min_samples_leaf': ('int', 1, 20, 1),
+                'rf_max_features': ('list', ['sqrt', 'log2', None], 'sqrt'),
+                'rf_bootstrap': ('list', [True, False], True)
             },
             'xgboost': {
                 'xgb_n_estimators': ('int', 50, 1000, 100),
-                'xgb_lr': ('float', 0.01, 0.3, 0.1)
+                'xgb_lr': ('float', 0.01, 0.3, 0.1),
+                'xgb_subsample': ('float', 0.5, 1.0, 1.0),
+                'xgb_colsample_bytree': ('float', 0.5, 1.0, 1.0),
+                'xgb_gamma': ('float', 0.0, 5.0, 0.0),
+                'xgb_min_child_weight': ('float', 1.0, 10.0, 1.0)
             },
             'lightgbm': {
                 'lgb_n_estimators': ('int', 50, 1000, 100),
-                'lgb_lr': ('float', 0.01, 0.3, 0.1)
+                'lgb_lr': ('float', 0.01, 0.3, 0.1),
+                'lgb_num_leaves': ('int', 20, 150, 31),
+                'lgb_min_child_samples': ('int', 10, 100, 20),
+                'lgb_subsample': ('float', 0.5, 1.0, 1.0),
+                'lgb_colsample_bytree': ('float', 0.5, 1.0, 1.0)
             },
             'extra_trees': {
                 'et_n_estimators': ('int', 10, 500, 100),
-                'et_max_depth': ('int', 1, 50, 10)
+                'et_max_depth': ('int', 1, 50, 10),
+                'et_min_samples_split': ('int', 2, 20, 2),
+                'et_min_samples_leaf': ('int', 1, 20, 1),
+                'et_max_features': ('list', ['sqrt', 'log2', None], 'sqrt'),
+                'et_bootstrap': ('list', [True, False], False)
             },
             'adaboost': {
                 'ada_n_estimators': ('int', 10, 500, 50),
                 'ada_lr': ('float', 0.01, 1.0, 1.0)
             },
             'decision_tree': {
-                'dt_max_depth': ('int', 1, 50, 10)
+                'dt_max_depth': ('int', 1, 50, 10),
+                'dt_min_samples_split': ('int', 2, 20, 2),
+                'dt_min_samples_leaf': ('int', 1, 20, 1),
+                'dt_criterion': ('list', ['gini', 'entropy', 'log_loss'], 'gini') if self.task_type == 'classification' else ('list', ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'], 'squared_error')
             },
             'mlp': {
                 'mlp_layers': ('list', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"], "(100,)"),
-                'mlp_max_iter': ('int', 100, 2000, 500)
+                'mlp_max_iter': ('int', 100, 2000, 500),
+                'mlp_activation': ('list', ['identity', 'logistic', 'tanh', 'relu'], 'relu'),
+                'mlp_solver': ('list', ['lbfgs', 'sgd', 'adam'], 'adam'),
+                'mlp_alpha': ('float', 0.0001, 0.1, 0.0001),
+                'mlp_learning_rate': ('list', ['constant', 'invscaling', 'adaptive'], 'constant')
             },
             'knn': {
-                'knn_neighbors': ('int', 1, 30, 5)
+                'knn_neighbors': ('int', 1, 30, 5),
+                'knn_weights': ('list', ['uniform', 'distance'], 'uniform'),
+                'knn_metric': ('list', ['minkowski', 'euclidean', 'manhattan'], 'minkowski')
+            },
+            'svm': {
+                'C': ('float', 0.1, 100.0, 1.0),
+                'kernel': ('list', ['linear', 'poly', 'rbf', 'sigmoid'], 'rbf'),
+                'gamma': ('list', ['scale', 'auto'], 'scale'),
+                'degree': ('int', 2, 5, 3),
+                'coef0': ('float', 0.0, 10.0, 0.0)
             },
             'ridge': {
                 'ridge_alpha': ('float', 0.1, 10.0, 1.0)
@@ -1383,7 +1415,9 @@ class AutoMLTrainer:
             'catboost': {
                 'cb_iterations': ('int', 10, 1000, 100),
                 'cb_lr': ('float', 0.001, 0.3, 0.1),
-                'cb_depth': ('int', 1, 12, 6)
+                'cb_depth': ('int', 1, 12, 6),
+                'cb_l2_leaf_reg': ('float', 1.0, 10.0, 3.0),
+                'cb_border_count': ('int', 32, 255, 254)
             },
             'catboost_ts': {
                 'cb_ts_iterations': ('int', 10, 1000, 100)

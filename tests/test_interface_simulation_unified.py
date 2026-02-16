@@ -120,5 +120,26 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
                     learning_rate=5e-5
                 )
 
+    def test_missing_hyperparameters_interface(self):
+        """Test if recently added hyperparameters are present in schema."""
+        # Random Forest
+        rf_schema = self.trainer_cls.get_model_params_schema('random_forest')
+        self.assertIn('rf_min_samples_split', rf_schema)
+        self.assertIn('rf_min_samples_leaf', rf_schema)
+        self.assertIn('rf_max_features', rf_schema)
+        self.assertIn('rf_bootstrap', rf_schema)
+        
+        # XGBoost
+        xgb_schema = self.trainer_cls.get_model_params_schema('xgboost')
+        self.assertIn('xgb_subsample', xgb_schema)
+        self.assertIn('xgb_colsample_bytree', xgb_schema)
+        self.assertIn('xgb_gamma', xgb_schema)
+        self.assertIn('xgb_min_child_weight', xgb_schema)
+        
+        # SVM
+        svm_schema = self.trainer_cls.get_model_params_schema('svm')
+        self.assertIn('degree', svm_schema)
+        self.assertIn('coef0', svm_schema)
+
 if __name__ == '__main__':
     unittest.main()
