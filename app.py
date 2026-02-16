@@ -78,13 +78,14 @@ st.markdown("Enterprise-grade Automated Machine Learning & MLOps Platform.")
 if 'trials_data' not in st.session_state: st.session_state['trials_data'] = []
 if 'best_model' not in st.session_state: st.session_state['best_model'] = None
 
-def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None):
+def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None):
     """
     Loads and splits multiple datasets based on user configurations.
     selected_configs: List of dicts with {'name': str, 'version': str, 'split': float}
     global_split: If provided (0.0 to 1.0), overrides individual split configs.
     task_type: Type of task to determine split strategy (e.g., temporal for time_series).
     date_col: Required for temporal split in time_series.
+    target_col: Optional, for stratified split in classification.
     """
     train_dfs = []
     test_dfs = []
@@ -109,8 +110,15 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
                 tr = df_ds.iloc[:split_idx]
                 te = df_ds.iloc[split_idx:]
             else:
-                # Random split for other tasks
-                tr, te = train_test_split(df_ds, train_size=split_ratio, random_state=42)
+                # Stratified split if target is present and task is classification
+                stratify_col = None
+                if task_type == 'classification' and target_col and target_col in df_ds.columns:
+                    # Check if stratification is possible (enough samples per class)
+                    if df_ds[target_col].value_counts().min() > 1:
+                        stratify_col = df_ds[target_col]
+                
+                # Random split (stratified if applicable)
+                tr, te = train_test_split(df_ds, train_size=split_ratio, random_state=42, stratify=stratify_col)
             
             train_dfs.append(tr)
             test_dfs.append(te)
@@ -372,18 +380,26 @@ with tabs[1]:
         available_datasets = datalake.list_datasets()
         selected_ds_list = st.multiselect("Escolha os Datasets", available_datasets, key="ds_train_multi")
         
+        target_pre = None
         date_col_pre = None
-        if task == "time_series":
-            if selected_ds_list:
-                try:
-                    first_ds = selected_ds_list[0]
-                    versions = datalake.list_versions(first_ds)
-                    if versions:
-                        first_ver = versions[0]
-                        sample_df = datalake.load_version(first_ds, first_ver, nrows=5)
-                        date_col_pre = st.selectbox("📅 Coluna de Data (OBRIGATÓRIO)", sample_df.columns, key="ts_date_selector")
-                except Exception as e: st.error(f"Erro: {e}")
-            else: st.warning("Selecione um dataset.")
+        
+        if selected_ds_list:
+            try:
+                first_ds = selected_ds_list[0]
+                versions = datalake.list_versions(first_ds)
+                if versions:
+                    first_ver = versions[0]
+                    sample_df = datalake.load_version(first_ds, first_ver, nrows=5)
+                    
+                    col_sel1, col_sel2 = st.columns(2)
+                    with col_sel1:
+                        if task not in ["clustering", "anomaly_detection"]:
+                            target_pre = st.selectbox("🎯 Target (Variável Alvo)", sample_df.columns, key="target_selector_pre")
+                    
+                    with col_sel2:
+                        if task == "time_series":
+                            date_col_pre = st.selectbox("📅 Coluna de Data (OBRIGATÓRIO)", sample_df.columns, key="ts_date_selector")
+            except Exception as e: st.error(f"Erro ao carregar amostra: {e}")
 
         selected_configs = []
         if selected_ds_list:
@@ -393,16 +409,35 @@ with tabs[1]:
                     st.markdown(f"**{ds_name}**")
                     versions = datalake.list_versions(ds_name)
                     ver = st.selectbox(f"Versão", versions, key=f"ver_{ds_name}")
-                    split = st.slider("Treino %", 0, 100, 80, key=f"split_{ds_name}")
+                    
+                    # Configuração de Papel do Dataset (Granularidade Solicitada)
+                    if validation_strategy == 'holdout':
+                        st.caption("Defina como usar este dataset:")
+                        role = st.radio("Papel", ["Treino + Teste (Split)", "Apenas Treino (100%)", "Apenas Teste (100%)"], key=f"role_{ds_name}")
+                        
+                        split = 100
+                        if role == "Treino + Teste (Split)":
+                            split = st.slider(f"% Treino", 10, 95, 80, key=f"split_{ds_name}")
+                        elif role == "Apenas Teste (100%)":
+                            split = 0
+                    else:
+                        # Para estratégias como K-Fold ou Auto-Split, usamos o dataset integralmente no processo (split=100)
+                        # O sistema de validação cuidará da divisão interna.
+                        split = 100
+                        st.info(f"Dataset usado integralmente para {validation_strategy}")
+                    
                     selected_configs.append({'name': ds_name, 'version': ver, 'split': split})
 
         if selected_configs:
             if st.button("📥 Carregar e Preparar Dados", key="btn_load_train"):
-                train_df, test_df = prepare_multi_dataset(selected_configs, global_split=1.0 if auto_split else None, task_type=task, date_col=date_col_pre)
+                # Usar configurações individuais de split (global_split=None)
+                train_df, test_df = prepare_multi_dataset(selected_configs, global_split=None, task_type=task, date_col=date_col_pre, target_col=target_pre)
+                
                 st.session_state['train_df'] = train_df
                 st.session_state['test_df'] = test_df
                 st.session_state['current_task'] = task
                 st.session_state['date_col_active'] = date_col_pre
+                st.session_state['target_active'] = target_pre # Salvar target selecionado
                 st.session_state['n_trials_active'] = n_trials
                 st.session_state['early_stopping_active'] = early_stopping
                 st.success("Dados carregados!")
@@ -415,7 +450,15 @@ with tabs[1]:
             st.subheader("⚙️ Configuração Final")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                target = st.selectbox("🎯 Target", train_df.columns) if task not in ["clustering", "anomaly_detection"] else None
+                if task not in ["clustering", "anomaly_detection"]:
+                    # Se já foi selecionado no pré-carregamento, apenas exibir e travar
+                    if st.session_state.get('target_active') and st.session_state['target_active'] in train_df.columns:
+                        target = st.session_state['target_active']
+                        st.info(f"🎯 Target Definido: **{target}** (Para alterar, recarregue os dados)")
+                    else:
+                        target = st.selectbox("🎯 Selecione o Target", train_df.columns)
+                else:
+                    target = None
             
             with col_f2:
                 if task == "time_series":
