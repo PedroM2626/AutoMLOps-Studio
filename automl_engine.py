@@ -1149,9 +1149,9 @@ class AutoMLTrainer:
             if name == 'decision_tree':
                 dt_params = {k.replace('dt_', ''): v for k, v in params.items() if k.startswith('dt_')}
                 return DecisionTreeClassifier(**dt_params)
-            if name == 'svm': return SVC(probability=True, **{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'degree', 'coef0']})
+            if name == 'svm': return SVC(probability=True, **{k.replace('svm_', ''): v for k, v in params.items() if k.startswith('svm_') or k in ['C', 'kernel', 'gamma', 'degree', 'coef0', 'class_weight', 'shrinking', 'tol']})
             if name == 'linear_svc': 
-                lsvc_params = {k: v for k, v in params.items() if k in ['C', 'loss', 'penalty', 'dual']}
+                lsvc_params = {k: v for k, v in params.items() if k in ['C', 'loss', 'penalty', 'dual', 'class_weight', 'fit_intercept']}
                 # Default dual=False if not specified to avoid convergence issues with primal
                 if 'dual' not in lsvc_params and lsvc_params.get('penalty') == 'l2' and lsvc_params.get('loss') == 'hinge':
                      lsvc_params['dual'] = True # hinge requires dual=True
@@ -1327,24 +1327,31 @@ class AutoMLTrainer:
                 'lr_C': ('float', 0.001, 100.0, 1.0),
                 'lr_solver': ('list', ['lbfgs', 'liblinear', 'saga', 'newton-cg'], 'lbfgs'),
                 'lr_penalty': ('list', ['l2', 'l1', 'elasticnet', None], 'l2'),
-                'lr_l1_ratio': ('float', 0.0, 1.0, 0.5)
+                'lr_l1_ratio': ('float', 0.0, 1.0, 0.5),
+                'lr_class_weight': ('list', [None, 'balanced'], None),
+                'lr_fit_intercept': ('list', [True, False], True)
             },
             'linear_svc': {
                 'C': ('float', 0.001, 100.0, 1.0),
                 'loss': ('list', ['hinge', 'squared_hinge'], 'squared_hinge'),
-                'penalty': ('list', ['l1', 'l2'], 'l2')
+                'penalty': ('list', ['l1', 'l2'], 'l2'),
+                'class_weight': ('list', [None, 'balanced'], None),
+                'fit_intercept': ('list', [True, False], True)
             },
             'sgd_classifier': {
                 'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
                 'sgd_penalty': ('list', ['l2', 'l1', 'elasticnet'], 'l2'),
                 'sgd_loss': ('list', ['hinge', 'log_loss', 'modified_huber', 'squared_hinge', 'perceptron'], 'hinge'),
                 'sgd_learning_rate': ('list', ['optimal', 'constant', 'invscaling', 'adaptive'], 'optimal'),
-                'sgd_eta0': ('float', 0.0, 1.0, 0.0)
+                'sgd_eta0': ('float', 0.0, 1.0, 0.0),
+                'sgd_class_weight': ('list', [None, 'balanced'], None)
             },
             'sgd_regressor': {
                 'sgd_alpha': ('float', 1e-6, 1e-1, 0.0001),
                 'sgd_penalty': ('list', ['l2', 'l1', 'elasticnet'], 'l2'),
-                'sgd_loss': ('list', ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'], 'squared_error')
+                'sgd_loss': ('list', ['squared_error', 'huber', 'epsilon_insensitive', 'squared_epsilon_insensitive'], 'squared_error'),
+                'sgd_learning_rate': ('list', ['invscaling', 'constant', 'optimal', 'adaptive'], 'invscaling'),
+                'sgd_eta0': ('float', 0.0, 1.0, 0.01)
             },
             'random_forest': {
                 'rf_n_estimators': ('int', 10, 500, 100),
@@ -1352,7 +1359,9 @@ class AutoMLTrainer:
                 'rf_min_samples_split': ('int', 2, 20, 2),
                 'rf_min_samples_leaf': ('int', 1, 20, 1),
                 'rf_max_features': ('list', ['sqrt', 'log2', None], 'sqrt'),
-                'rf_bootstrap': ('list', [True, False], True)
+                'rf_bootstrap': ('list', [True, False], True),
+                'rf_class_weight': ('list', [None, 'balanced', 'balanced_subsample'], None),
+                'rf_criterion': ('list', ['gini', 'entropy', 'log_loss'], 'gini')
             },
             'xgboost': {
                 'xgb_n_estimators': ('int', 50, 1000, 100),
@@ -1361,7 +1370,10 @@ class AutoMLTrainer:
                 'xgb_colsample_bytree': ('float', 0.5, 1.0, 1.0),
                 'xgb_gamma': ('float', 0.0, 5.0, 0.0),
                 'xgb_min_child_weight': ('float', 1.0, 10.0, 1.0),
-                'xgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0)
+                'xgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0),
+                'xgb_reg_alpha': ('float', 0.0, 10.0, 0.0),
+                'xgb_reg_lambda': ('float', 0.0, 10.0, 1.0),
+                'xgb_tree_method': ('list', ['auto', 'exact', 'approx', 'hist'], 'auto')
             },
             'lightgbm': {
                 'lgb_n_estimators': ('int', 50, 1000, 100),
@@ -1370,7 +1382,10 @@ class AutoMLTrainer:
                 'lgb_min_child_samples': ('int', 10, 100, 20),
                 'lgb_subsample': ('float', 0.5, 1.0, 1.0),
                 'lgb_colsample_bytree': ('float', 0.5, 1.0, 1.0),
-                'lgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0)
+                'lgb_scale_pos_weight': ('float', 1.0, 10.0, 1.0),
+                'lgb_reg_alpha': ('float', 0.0, 10.0, 0.0),
+                'lgb_reg_lambda': ('float', 0.0, 10.0, 0.0),
+                'lgb_boosting_type': ('list', ['gbdt', 'dart', 'goss'], 'gbdt')
             },
             'extra_trees': {
                 'et_n_estimators': ('int', 10, 500, 100),
@@ -1378,7 +1393,9 @@ class AutoMLTrainer:
                 'et_min_samples_split': ('int', 2, 20, 2),
                 'et_min_samples_leaf': ('int', 1, 20, 1),
                 'et_max_features': ('list', ['sqrt', 'log2', None], 'sqrt'),
-                'et_bootstrap': ('list', [True, False], False)
+                'et_bootstrap': ('list', [True, False], False),
+                'et_class_weight': ('list', [None, 'balanced', 'balanced_subsample'], None),
+                'et_criterion': ('list', ['gini', 'entropy', 'log_loss'], 'gini')
             },
             'adaboost': {
                 'ada_n_estimators': ('int', 10, 500, 50),
@@ -1388,7 +1405,9 @@ class AutoMLTrainer:
                 'dt_max_depth': ('int', 1, 50, 10),
                 'dt_min_samples_split': ('int', 2, 20, 2),
                 'dt_min_samples_leaf': ('int', 1, 20, 1),
-                'dt_criterion': ('list', ['gini', 'entropy', 'log_loss'], 'gini') if self.task_type == 'classification' else ('list', ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'], 'squared_error')
+                'dt_criterion': ('list', ['gini', 'entropy', 'log_loss'], 'gini') if self.task_type == 'classification' else ('list', ['squared_error', 'friedman_mse', 'absolute_error', 'poisson'], 'squared_error'),
+                'dt_splitter': ('list', ['best', 'random'], 'best'),
+                'dt_class_weight': ('list', [None, 'balanced'], None)
             },
             'mlp': {
                 'mlp_layers': ('list', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"], "(100,)"),
@@ -1396,12 +1415,16 @@ class AutoMLTrainer:
                 'mlp_activation': ('list', ['identity', 'logistic', 'tanh', 'relu'], 'relu'),
                 'mlp_solver': ('list', ['lbfgs', 'sgd', 'adam'], 'adam'),
                 'mlp_alpha': ('float', 0.0001, 0.1, 0.0001),
-                'mlp_learning_rate': ('list', ['constant', 'invscaling', 'adaptive'], 'constant')
+                'mlp_learning_rate': ('list', ['constant', 'invscaling', 'adaptive'], 'constant'),
+                'mlp_batch_size': ('list', ['auto', 32, 64, 128], 'auto'),
+                'mlp_tol': ('float', 1e-5, 1e-3, 1e-4)
             },
             'knn': {
                 'knn_neighbors': ('int', 1, 30, 5),
                 'knn_weights': ('list', ['uniform', 'distance'], 'uniform'),
-                'knn_metric': ('list', ['minkowski', 'euclidean', 'manhattan'], 'minkowski')
+                'knn_metric': ('list', ['minkowski', 'euclidean', 'manhattan'], 'minkowski'),
+                'knn_p': ('int', 1, 5, 2),
+                'knn_algorithm': ('list', ['auto', 'ball_tree', 'kd_tree', 'brute'], 'auto')
             },
             'naive_bayes': {
                 'nb_var_smoothing': ('float', 1e-10, 1e-7, 1e-9)
@@ -1411,7 +1434,10 @@ class AutoMLTrainer:
                 'kernel': ('list', ['linear', 'poly', 'rbf', 'sigmoid'], 'rbf'),
                 'gamma': ('list', ['scale', 'auto'], 'scale'),
                 'degree': ('int', 2, 5, 3),
-                'coef0': ('float', 0.0, 10.0, 0.0)
+                'coef0': ('float', 0.0, 10.0, 0.0),
+                'class_weight': ('list', [None, 'balanced'], None),
+                'shrinking': ('list', [True, False], True),
+                'tol': ('float', 1e-4, 1e-2, 1e-3)
             },
             'ridge': {
                 'ridge_alpha': ('float', 0.1, 10.0, 1.0)

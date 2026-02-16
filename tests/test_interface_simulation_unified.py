@@ -160,5 +160,23 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
         lgb_schema = self.trainer_cls.get_model_params_schema('lightgbm')
         self.assertIn('lgb_scale_pos_weight', lgb_schema)
 
+        # New params validation (Completeness Check)
+        self.assertIn('xgb_reg_alpha', xgb_schema)
+        self.assertIn('xgb_reg_lambda', xgb_schema)
+        self.assertIn('lgb_reg_alpha', lgb_schema)
+        
+        # Class Weight checks
+        rf_schema = self.trainer_cls.get_model_params_schema('random_forest')
+        self.assertIn('rf_class_weight', rf_schema)
+        self.assertIn('lr_class_weight', lr_schema)
+        self.assertIn('class_weight', svm_schema)
+        
+        # Test instantiation with new params
+        rf_model = self.trainer_cls._instantiate_model('random_forest', {'rf_class_weight': 'balanced'})
+        self.assertEqual(rf_model.class_weight, 'balanced')
+        
+        lsvc_model = self.trainer_cls._instantiate_model('linear_svc', {'class_weight': 'balanced'})
+        self.assertEqual(lsvc_model.class_weight, 'balanced')
+
 if __name__ == '__main__':
     unittest.main()
