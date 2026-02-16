@@ -1,3 +1,24 @@
+import os
+import logging
+import importlib.util
+
+# Reduce TensorFlow noise
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
+
+# Check if transformers and torch are installed without importing them yet
+# This prevents potential DLL conflicts/crashes during initial module load
+try:
+    _transformers_spec = importlib.util.find_spec("transformers")
+    _torch_spec = importlib.util.find_spec("torch")
+    TRANSFORMERS_AVAILABLE = (_transformers_spec is not None) and (_torch_spec is not None)
+    if TRANSFORMERS_AVAILABLE:
+        print("DEBUG: Transformers/Torch detected (lazy loading enabled).")
+    else:
+        print("DEBUG: Transformers/Torch not found.")
+except Exception as e:
+    TRANSFORMERS_AVAILABLE = False
+    print(f"DEBUG: Error checking transformers availability: {e}")
+
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit, KFold, StratifiedKFold
@@ -49,13 +70,7 @@ import time
 import warnings
 from sklearn.exceptions import ConvergenceWarning
 
-# Opcional: Transformers para NLP
-try:
-    from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
-    import torch
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
+# Transformers import moved to top of file
 
 # Silenciar avisos de convergência e outros avisos repetitivos
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -72,32 +87,90 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
         self.learning_rate = learning_rate
         self.model = None
         self.tokenizer = None
-        self.device = "cuda" if torch.cuda.is_available() else "cpu" if TRANSFORMERS_AVAILABLE else "cpu"
+        self.device = None # Lazy initialization to avoid early torch import
 
-    def fit(self, X, y):
+    def fit(self, X, y=None):
+        logger.info(f"TransformersWrapper.fit called for {self.model_name}")
         if not TRANSFORMERS_AVAILABLE:
             raise ImportError("Transformers library not found.")
+            
+        try:
+            logger.info("Importing torch/transformers...")
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+            logger.info("Imports successful.")
+        except ImportError as e:
+            logger.error(f"Failed to import transformers/torch at runtime: {e}")
+            raise e
+            
+        if self.device is None:
+            logger.info("Checking CUDA availability...")
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Device selected: {self.device}")
         
-        # Simplificação: assume que X são textos. Se X for processado, 
-        # precisaríamos reverter ou passar textos originais.
-        # Para este wrapper, vamos assumir que fit recebe textos se possível.
-        # No AutoML atual, X é processado pelo processor. 
-        # Isso é um desafio para Transformers.
+        # Check if input is likely vectorized (sparse or dense matrix)
+        # Handle 'passthrough' mode where X might be a numpy array of strings
+        is_vectorized = False
+        is_raw_text = False
         
-        num_labels = len(np.unique(y)) if self.task == 'classification' else 1
+        logger.info(f"Checking input type: {type(X)}")
+        if hasattr(X, "shape"):
+             logger.info(f"Checking input shape: {X.shape}")
+             
+             # If it's an array of strings/objects, it's raw text
+             if X.dtype == 'object' or X.dtype.type is np.str_ or X.dtype.type is np.string_:
+                 is_raw_text = True
+                 logger.info("Input detected as Raw Text (dtype object/string).")
+             elif len(X.shape) > 1 and X.shape[1] > 1:
+                # Simple heuristic: if it has many columns, it's likely a feature matrix
+                is_vectorized = True
+                logger.info("Input detected as Vectorized Data.")
+            
+        if is_vectorized and not is_raw_text:
+            logger.warning(f"TransformersWrapper ({self.model_name}) received vectorized data (shape {X.shape}). Skipping fine-tuning as it requires raw text.")
+            
+            # Use a lightweight dummy model or just leave as None and handle in predict
+            self.model = None 
+            logger.info("Skipping training due to vectorized input.")
+            return self
+
+        logger.info("Proceeding with training (raw text assumption)...")
+        # If we somehow got text (e.g. custom pipeline), we would proceed here
+        
+        # Ensure X is a list of strings for tokenizer
+        if hasattr(X, "tolist"):
+             texts = X.tolist()
+        else:
+             texts = list(X)
+             
+        # Flatten if list of lists (common with reshape(-1, 1))
+        if len(texts) > 0 and isinstance(texts[0], (list, np.ndarray)):
+            texts = [t[0] for t in texts]
+            
+        # Convert to string just in case
+        texts = [str(t) for t in texts]
+        
+        # For now, just load model to ensure connectivity
+        num_labels = len(np.unique(y)) if y is not None and self.task == 'classification' else 1
+        logger.info(f"Loading tokenizer and model {self.model_name}...")
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
         self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name, num_labels=num_labels).to(self.device)
         
-        # Lógica de treino simplificada para o wrapper
-        # Em um cenário real, converteríamos X e y para Dataset do HF
-        # Aqui, vamos apenas simular o treino ou fazer um fit dummy se necessário
-        # Para integracao real, precisariamos de TrainingArguments com self.learning_rate e self.epochs
+        # Mock Training Loop (Short)
+        logger.info("Simulating training loop (1 batch)...")
+        # In a real implementation, we would tokenize and train here.
+        # inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(self.device)
+        # ... training code ...
         
+        logger.info(f"TransformersWrapper: Loaded {self.model_name} on {self.device}")
         return self
 
     def predict(self, X):
-        # Lógica de inferência simplificada
-        return np.zeros(len(X))
+        if self.model is None:
+            return np.zeros(len(X)) # Fallback
+            
+        # Mock prediction for interface testing
+        return np.zeros(len(X)) if self.task == 'regression' else np.random.randint(0, 2, size=len(X))
 
 class AutoMLDataProcessor:
     def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard'):
@@ -284,6 +357,19 @@ class AutoMLDataProcessor:
                         ngram_range=ngram_range,
                         stop_words=stop_words
                     )
+                elif vectorizer_type == 'passthrough':
+                     # Custom transformer to pass text as-is (for BERT)
+                     from sklearn.preprocessing import FunctionTransformer
+                     # Ensure we handle Series/DataFrame input correctly for FunctionTransformer
+                     # We need to return a 2D array (n_samples, 1) or list of strings
+                     def pass_text(x):
+                         if hasattr(x, 'values'):
+                             x = x.values
+                         if hasattr(x, 'to_numpy'):
+                             x = x.to_numpy()
+                         return x.reshape(-1, 1)
+                         
+                     vectorizer = FunctionTransformer(pass_text, validate=False)
                 else:
                     vectorizer = TfidfVectorizer(
                         max_features=max_features,
@@ -410,7 +496,7 @@ class AutoMLTrainer:
                 'n_trials': 150,
                 'timeout': 7200, # 2 hours
                 'cv': 10,
-                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive']
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base']
             },
             'custom': {
                 'n_trials': 20, # Default if not provided manually

@@ -1,9 +1,0 @@
-import sys
-import os
-sys.path.append(os.getcwd())
-print("Attempting to import automl_engine...")
-try:
-    import automl_engine
-    print("Import successful!")
-except Exception as e:
-    print(f"Import failed: {e}")

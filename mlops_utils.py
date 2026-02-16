@@ -21,7 +21,10 @@ class MLFlowTracker:
     def log_experiment(self, params, metrics, model, model_name, artifacts=None, register=True):
         with mlflow.start_run():
             mlflow.log_params(params)
-            mlflow.log_metrics(metrics)
+            try:
+                mlflow.log_metrics(metrics)
+            except Exception as e:
+                print(f"Warning: Failed to log metrics due to {e}")
             
             # Log model
             mlflow.sklearn.log_model(
