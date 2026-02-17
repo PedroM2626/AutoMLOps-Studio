@@ -478,9 +478,10 @@ class AutoMLDataProcessor:
         return feature_names
 
 class AutoMLTrainer:
-    def __init__(self, task_type='classification', preset='medium'):
+    def __init__(self, task_type='classification', preset='medium', ensemble_config=None):
         self.task_type = task_type
         self.preset = preset
+        self.ensemble_config = ensemble_config or {}
         self.best_model = None
         self.best_params = None
         self.results = []

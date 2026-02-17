@@ -22,6 +22,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import time
 import plotly.express as px
 from PIL import Image
+import mlflow
 
 # 🎨 Custom Styling
 try:
@@ -71,6 +72,57 @@ with st.sidebar:
         st.success(f"Rows: {st.session_state['df'].shape[0]}\nCols: {st.session_state['df'].shape[1]}")
     else:
         st.warning("No data loaded")
+
+    st.divider()
+    
+    # --- DagsHub Integration ---
+    with st.expander("🔗 DagsHub Integration"):
+        st.caption("Conecte-se ao seu repositório DagsHub para salvar experimentos remotamente.")
+        
+        dh_user = st.text_input("DagsHub Username", key="dh_user")
+        dh_repo = st.text_input("Repository Name", key="dh_repo")
+        dh_token = st.text_input("DagsHub Token (API Key)", type="password", key="dh_token")
+        
+        if st.button("Conectar ao DagsHub"):
+            if dh_user and dh_repo and dh_token:
+                try:
+                    # Configurar variáveis de ambiente para autenticação MLflow
+                    os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
+                    os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
+                    
+                    # Configurar URI de Tracking
+                    remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
+                    mlflow.set_tracking_uri(remote_uri)
+                    
+                    # Tentar listar experimentos para validar conexão
+                    try:
+                        mlflow.search_experiments()
+                        st.success(f"Conectado: {dh_user}/{dh_repo}")
+                        st.session_state['dagshub_connected'] = True
+                        st.session_state['mlflow_uri'] = remote_uri
+                    except Exception as e:
+                        st.error(f"Falha na conexão: {e}")
+                        # Reverter para local em caso de erro
+                        mlflow.set_tracking_uri("sqlite:///mlflow.db")
+                except Exception as e:
+                    st.error(f"Erro ao configurar: {e}")
+            else:
+                st.warning("Preencha todos os campos.")
+        
+        if st.session_state.get('dagshub_connected'):
+            if st.button("Desconectar (Voltar ao Local)"):
+                mlflow.set_tracking_uri("sqlite:///mlflow.db")
+                if "MLFLOW_TRACKING_USERNAME" in os.environ:
+                    del os.environ["MLFLOW_TRACKING_USERNAME"]
+                if "MLFLOW_TRACKING_PASSWORD" in os.environ:
+                    del os.environ["MLFLOW_TRACKING_PASSWORD"]
+                st.session_state['dagshub_connected'] = False
+                st.session_state['mlflow_uri'] = "sqlite:///mlflow.db"
+                st.info("Desconectado. Usando MLflow local.")
+    
+    # Exibir URI atual
+    current_uri = mlflow.get_tracking_uri()
+    st.caption(f"Tracking URI: `{current_uri}`")
 
 st.title("🚀 AutoMLOps Studio")
 st.markdown("Enterprise-grade Automated Machine Learning & MLOps Platform.")
