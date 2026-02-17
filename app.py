@@ -79,46 +79,87 @@ with st.sidebar:
     with st.expander("🔗 DagsHub Integration"):
         st.caption("Conecte-se ao seu repositório DagsHub para salvar experimentos remotamente.")
         
-        dh_user = st.text_input("DagsHub Username", key="dh_user")
-        dh_repo = st.text_input("Repository Name", key="dh_repo")
-        dh_token = st.text_input("DagsHub Token (API Key)", type="password", key="dh_token")
+        # Tentar recuperar configurações do ambiente (.env)
+        env_user = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
+        env_pass = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
+        env_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
         
-        if st.button("Conectar ao DagsHub"):
-            if dh_user and dh_repo and dh_token:
-                try:
-                    # Configurar variáveis de ambiente para autenticação MLflow
-                    os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
-                    os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
-                    
-                    # Configurar URI de Tracking
-                    remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
-                    mlflow.set_tracking_uri(remote_uri)
-                    
-                    # Tentar listar experimentos para validar conexão
+        # Tentar extrair o nome do repositório da URI se for DagsHub
+        default_repo = ""
+        if "dagshub.com" in env_uri:
+            try:
+                # Exemplo: https://dagshub.com/user/repo.mlflow
+                parts = env_uri.split("dagshub.com/")
+                if len(parts) > 1:
+                    repo_part = parts[1].split(".mlflow")[0]
+                    if "/" in repo_part:
+                        default_repo = repo_part.split("/")[1]
+            except:
+                pass
+
+        dh_user = st.text_input("DagsHub Username", value=env_user, key="dh_user_input")
+        dh_repo = st.text_input("Repository Name", value=default_repo, key="dh_repo_input")
+        dh_token = st.text_input("DagsHub Token (API Key)", value=env_pass, type="password", key="dh_token_input")
+        
+        col_dh1, col_dh2 = st.columns(2)
+        
+        with col_dh1:
+            if st.button("Conectar ao DagsHub"):
+                if dh_user and dh_repo and dh_token:
                     try:
-                        mlflow.search_experiments()
-                        st.success(f"Conectado: {dh_user}/{dh_repo}")
-                        st.session_state['dagshub_connected'] = True
-                        st.session_state['mlflow_uri'] = remote_uri
+                        # Configurar variáveis de ambiente para autenticação MLflow
+                        os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
+                        os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
+                        
+                        # Configurar URI de Tracking
+                        remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
+                        os.environ["MLFLOW_TRACKING_URI"] = remote_uri # Atualizar env para persistência na sessão
+                        mlflow.set_tracking_uri(remote_uri)
+                        
+                        # Tentar listar experimentos para validar conexão
+                        try:
+                            # Teste simples de conexão
+                            mlflow.search_experiments(max_results=1)
+                            #st.success(f"✅ Conectado: {dh_user}/{dh_repo}")
+                            st.session_state['dagshub_connected'] = True
+                            st.session_state['mlflow_uri'] = remote_uri
+                        except Exception as e:
+                            st.error(f"❌ Falha na conexão: {e}")
+                            # Reverter para local em caso de erro
+                            local_uri = "sqlite:///mlflow.db"
+                            mlflow.set_tracking_uri(local_uri)
+                            os.environ["MLFLOW_TRACKING_URI"] = local_uri
                     except Exception as e:
-                        st.error(f"Falha na conexão: {e}")
-                        # Reverter para local em caso de erro
-                        mlflow.set_tracking_uri("sqlite:///mlflow.db")
-                except Exception as e:
-                    st.error(f"Erro ao configurar: {e}")
-            else:
-                st.warning("Preencha todos os campos.")
+                        st.error(f"Erro ao configurar: {e}")
+                else:
+                    st.warning("Preencha todos os campos.")
         
-        if st.session_state.get('dagshub_connected'):
-            if st.button("Desconectar (Voltar ao Local)"):
-                mlflow.set_tracking_uri("sqlite:///mlflow.db")
+        with col_dh2:
+            # Botão de desconectar apenas se estiver conectado (ou se a URI apontar para DagsHub)
+            is_dagshub = "dagshub.com" in mlflow.get_tracking_uri()
+            if st.button("Desconectar (Voltar ao Local)", disabled=not is_dagshub):
+                local_uri = "sqlite:///mlflow.db"
+                mlflow.set_tracking_uri(local_uri)
+                os.environ["MLFLOW_TRACKING_URI"] = local_uri
+                
+                # Opcional: Limpar credenciais da sessão (mas manter no env se vieram de lá?)
+                # Por segurança, limpamos do os.environ para garantir desconexão real
                 if "MLFLOW_TRACKING_USERNAME" in os.environ:
                     del os.environ["MLFLOW_TRACKING_USERNAME"]
                 if "MLFLOW_TRACKING_PASSWORD" in os.environ:
                     del os.environ["MLFLOW_TRACKING_PASSWORD"]
+                    
                 st.session_state['dagshub_connected'] = False
-                st.session_state['mlflow_uri'] = "sqlite:///mlflow.db"
-                st.info("Desconectado. Usando MLflow local.")
+                st.info("🔌 Desconectado. Usando MLflow local.")
+                st.rerun()
+
+        # Mostrar status atual
+        current_uri = mlflow.get_tracking_uri()
+        if "dagshub.com" in current_uri:
+            st.success(f"🟢 Conectado ao DagsHub")
+            st.caption(f"URI: {current_uri}")
+        else:
+            st.info("⚪ Usando MLflow Local (SQLite)")
     
     # Exibir URI atual
     current_uri = mlflow.get_tracking_uri()

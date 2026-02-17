@@ -1,0 +1,80 @@
+{
+  "best_model": "LogisticRegression",
+  "results": {
+    "LogisticRegression": {
+      "accuracy": 0.968,
+      "f1_macro": 0.9678149323263309,
+      "classification_report": {
+        "Irrelevant": {
+          "precision": 0.9597701149425287,
+          "recall": 0.9709302325581395,
+          "f1-score": 0.9653179190751445,
+          "support": 172.0
+        },
+        "Negative": {
+          "precision": 0.9809885931558935,
+          "recall": 0.9699248120300752,
+          "f1-score": 0.9754253308128544,
+          "support": 266.0
+        },
+        "Neutral": {
+          "precision": 0.9685314685314685,
+          "recall": 0.9719298245614035,
+          "f1-score": 0.9702276707530648,
+          "support": 285.0
+        },
+        "Positive": {
+          "precision": 0.9602888086642599,
+          "recall": 0.9602888086642599,
+          "f1-score": 0.9602888086642599,
+          "support": 277.0
+        },
+        "accuracy": 0.968,
+        "macro avg": {
+          "precision": 0.9673947463235376,
+          "recall": 0.9682684194534695,
+          "f1-score": 0.9678149323263309,
+          "support": 1000.0
+        },
+        "weighted avg": {
+          "precision": 0.968054894081051,
+          "recall": 0.968,
+          "f1-score": 0.9680127062417676,
+          "support": 1000.0
+        }
+      },
+      "confusion_matrix": [
+        [
+          167,
+          1,
+          0,
+          4
+        ],
+        [
+          1,
+          258,
+          5,
+          2
+        ],
+        [
+          2,
+          1,
+          277,
+          5
+        ],
+        [
+          4,
+          3,
+          4,
+          266
+        ]
+      ]
+    }
+  },
+  "model_classes": [
+    "Irrelevant",
+    "Negative",
+    "Neutral",
+    "Positive"
+  ]
+}
