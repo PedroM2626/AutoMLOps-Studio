@@ -996,6 +996,14 @@ class AutoMLTrainer:
         def objective(trial, forced_model=None):
             nonlocal best_score_so_far, trials_without_improvement
             
+            # Global Time Budget Check
+            if time_budget is not None:
+                elapsed = time.time() - global_start_time
+                if elapsed > time_budget:
+                    logger.warning(f"⏰ Global time budget exceeded ({elapsed:.2f}s > {time_budget}s). Stopping study.")
+                    trial.study.stop()
+                    return 0.0
+
             # 1. Determinar o modelo a ser usado
             all_available = selected_models if selected_models else self.get_available_models()
             if not all_available: all_available = self.get_available_models()
