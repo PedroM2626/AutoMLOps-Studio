@@ -941,7 +941,7 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -965,29 +965,36 @@ class AutoMLTrainer:
         if kwargs.get('auto_split', False):
             validation_strategy = 'auto_split'
             
+        # Lógica de Validação Automática
+        if validation_strategy == 'auto':
+            if self.task_type == 'time_series':
+                validation_strategy = 'time_series_cv'
+                logger.info("🤖 Validação Automática: Escolhido TimeSeriesSplit (dado que é série temporal).")
+            else:
+                # Se tivermos dados suficientes, holdout é mais rápido. Se poucos, CV é mais robusto.
+                n_samples = len(X_train)
+                if n_samples < 1000:
+                    validation_strategy = 'cv'
+                    logger.info(f"🤖 Validação Automática: Escolhido Cross-Validation (N={n_samples} < 1000).")
+                else:
+                    validation_strategy = 'holdout'
+                    logger.info(f"🤖 Validação Automática: Escolhido Holdout/Train-Test Split (N={n_samples} >= 1000).")
+
         if validation_params is None:
             validation_params = {}
         
         tracker = None
-        # Disable MLflow for simulation stability
-        if True:
-             logger.warning(f"⚠️ MLFlow logging disabled for simulation stability.")
-             # Create a dummy tracker
-             class DummyTracker:
-                 def log_experiment(self, **kwargs):
-                     return "dummy_run_id"
-             tracker = DummyTracker()
-        
-        # try:
-        #     from mlops_utils import MLFlowTracker
-        #     tracker = MLFlowTracker(experiment_name)
-        # except Exception as e:
-        #     logger.warning(f"⚠️ MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
-        #     # Create a dummy tracker
-        #     class DummyTracker:
-        #         def log_experiment(self, **kwargs):
-        #             return "dummy_run_id"
-        #     tracker = DummyTracker()
+        try:
+            from mlops_utils import MLFlowTracker
+            tracker = MLFlowTracker(experiment_name)
+            logger.info(f"✅ MLFlowTracker initialized for experiment: {experiment_name}")
+        except Exception as e:
+            logger.warning(f"⚠️ MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
+            # Create a dummy tracker
+            class DummyTracker:
+                def log_experiment(self, **kwargs):
+                    return "dummy_run_id"
+            tracker = DummyTracker()
 
         # Early Stopping & Summary Logic
         best_score_so_far = -np.inf
@@ -1207,9 +1214,31 @@ class AutoMLTrainer:
         # Determinar seed inicial para o sampler
         sampler_seed = self.random_state if isinstance(self.random_state, int) else 42
         
+        # Seleção de Sampler e Pruner baseada no optimization_mode
+        sampler = None
+        pruner = None
+        
+        if optimization_mode == 'random':
+            sampler = optuna.samplers.RandomSampler(seed=sampler_seed)
+            logger.info("🎲 Modo de Otimização: Random Search")
+        elif optimization_mode == 'grid':
+            # Nota: GridSampler requer espaço de busca definido a priori, o que não temos aqui.
+            # Fallback para RandomSampler (que faz busca estocástica, similar a Grid não-exaustivo)
+            sampler = optuna.samplers.RandomSampler(seed=sampler_seed)
+            logger.warning("⚠️ Grid Search selecionado, mas usando Random Search devido à definição dinâmica do espaço de busca.")
+        elif optimization_mode == 'hyperband':
+            # Hyperband usa TPE + Pruning agressivo
+            sampler = optuna.samplers.TPESampler(n_startup_trials=5, seed=sampler_seed)
+            pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource=n_trials, reduction_factor=3)
+            logger.info("⚡ Modo de Otimização: Hyperband (TPE + HyperbandPruner)")
+        else: # bayesian (default) or auto
+            sampler = optuna.samplers.TPESampler(n_startup_trials=max(n_trials // 3, 5), seed=sampler_seed)
+            logger.info("🧠 Modo de Otimização: Bayesian Optimization (TPE)")
+        
         study = optuna.create_study(
             direction=direction,
-            sampler=optuna.samplers.TPESampler(n_startup_trials=max(n_trials // 3, 5), seed=sampler_seed)
+            sampler=sampler,
+            pruner=pruner
         )
         
         # Identificar modelos estáticos (sem hiperparâmetros para otimizar)
@@ -1247,7 +1276,10 @@ class AutoMLTrainer:
             # Se a seed for por modelo, atualizamos o sampler para garantir reprodutibilidade por modelo
             if isinstance(self.random_state, dict):
                 model_seed = self.random_state.get(m_name, 42)
-                study.sampler = optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=model_seed)
+                if optimization_mode == 'random' or optimization_mode == 'grid':
+                     study.sampler = optuna.samplers.RandomSampler(seed=model_seed)
+                else:
+                     study.sampler = optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=model_seed)
                 logger.info(f"🎲 Sampler seed atualizado para {model_seed} (Modelo: {m_name})")
             # Se houver parâmetros manuais para este modelo, enfileira uma tentativa com eles
             if manual_params and manual_params.get('model_name') == m_name:
@@ -1269,11 +1301,16 @@ class AutoMLTrainer:
             logger.info(f"✅ Otimização para {m_name} finalizada.")
         
         self.best_params = study.best_params
+        self.best_value = study.best_value
         best_model_name = self.best_params.get('model_name')
         
         # If model_name was forced (not in params), retrieve from user_attrs
         if not best_model_name and hasattr(study, 'best_trial'):
             best_model_name = study.best_trial.user_attrs.get('model_name')
+        
+        # FIX: Ensure best_params includes model_name
+        if best_model_name:
+            self.best_params['model_name'] = best_model_name
         
         logger.info(f"🏆 Melhor modelo global encontrado: {best_model_name}")
         logger.info(f"📊 Melhores parâmetros: {self.best_params}")

@@ -356,6 +356,23 @@ with tabs[1]:
     st.subheader("🎯 Configuração da Otimização")
     col_opt1, col_opt2 = st.columns(2)
     with col_opt1:
+        # Seletor de Modo de Otimização (Novo)
+        optimization_mode = st.selectbox(
+            "Modo de Otimização de Hiperparâmetros",
+            ["Bayesian Optimization (Padrão)", "Random Search", "Grid Search", "Hyperband"],
+            index=0,
+            help="Bayesian: Mais eficiente. Random: Exploratório. Grid: Exaustivo (lento). Hyperband: Rápido para muitos dados."
+        )
+        
+        # Mapeamento para o backend
+        opt_mode_map = {
+            "Bayesian Optimization (Padrão)": "bayesian",
+            "Random Search": "random",
+            "Grid Search": "grid",
+            "Hyperband": "hyperband"
+        }
+        selected_opt_mode = opt_mode_map[optimization_mode]
+
         # Seletor unificado de preset (incluindo 'custom')
         if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
             training_preset = st.select_slider(
@@ -402,7 +419,7 @@ with tabs[1]:
         
         with col_opt2:
             st.markdown("##### 🛡️ Estratégia de Validação")
-            validation_options = ["K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Treino/Teste)", "Auto-Split (Otimizado)", "Time Series Split"]
+            validation_options = ["Automático (Recomendado)", "K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Treino/Teste)", "Auto-Split (Otimizado)", "Time Series Split"]
             
             # Filtrar opções baseadas na tarefa
             if task == "time_series":
@@ -417,7 +434,10 @@ with tabs[1]:
                 val_strategy_ui = st.selectbox("Método de Validação", opts, index=0)
             
             validation_params = {}
-            if val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
+            if val_strategy_ui == "Automático (Recomendado)":
+                validation_strategy = 'auto'
+                st.info("O sistema escolherá a melhor estratégia baseada no tamanho dos dados.")
+            elif val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
                 n_folds = st.number_input("Número de Folds", 2, 20, 5, key="val_folds")
                 validation_params['folds'] = n_folds
                 validation_strategy = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
@@ -743,7 +763,8 @@ with tabs[1]:
                         random_state=random_seed_config,
                         validation_strategy=validation_strategy,
                         validation_params=validation_params,
-                        custom_models=custom_models
+                        custom_models=custom_models,
+                        optimization_mode=selected_opt_mode
                     )
                     best_params = trainer.best_params
                     
