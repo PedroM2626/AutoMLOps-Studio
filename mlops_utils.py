@@ -93,23 +93,67 @@ class DriftDetector:
         return drifts
 
 class ModelExplainer:
-    def __init__(self, model, X_train):
+    def __init__(self, model, X_train, task_type="classification"):
         self.model = model
         self.X_train = X_train
-        # Use SHAP KernelExplainer for general compatibility or TreeExplainer for trees
-        if hasattr(model, "predict_proba"):
-            self.explainer = shap.Explainer(model.predict, X_train)
-        else:
-            self.explainer = shap.Explainer(model.predict, X_train)
+        self.task_type = task_type
+        
+        # Tentar inicializar o Explainer mais adequado
+        try:
+            # shap.Explainer tenta detectar automaticamente (Tree, Linear, Deep, etc.)
+            # Para modelos sklearn complexos (Pipelines, Voting), pode falhar e cair no fallback
+            self.explainer = shap.Explainer(model, X_train)
+        except Exception:
+            # Fallback explícito para KernelExplainer (genérico, mas mais lento)
+            # Usamos um sample do X_train para background data se for muito grande
+            background = X_train
+            if len(X_train) > 100:
+                background = shap.utils.sample(X_train, 100)
+                
+            if task_type == "classification" and hasattr(model, "predict_proba"):
+                self.explainer = shap.KernelExplainer(model.predict_proba, background)
+            else:
+                self.explainer = shap.KernelExplainer(model.predict, background)
 
     def get_shap_values(self, X):
-        shap_values = self.explainer(X)
+        try:
+            shap_values = self.explainer(X)
+        except:
+            shap_values = self.explainer.shap_values(X)
         return shap_values
 
-    def plot_importance(self, X):
-        shap_values = self.explainer(X)
-        fig, ax = plt.subplots()
-        shap.summary_plot(shap_values, X, show=False)
+    def plot_importance(self, X_test, plot_type="summary"):
+        """
+        Gera plot de importância SHAP.
+        plot_type: 'summary' (beeswarm/bar) ou 'bar'
+        """
+        # Calcular SHAP values para o conjunto de teste
+        try:
+            shap_values = self.explainer(X_test)
+        except:
+            # Fallback para shap_values legacy
+            shap_values = self.explainer.shap_values(X_test)
+
+        # Tratamento para outputs de classificação (lista de arrays ou objeto Explanation com dimensão extra)
+        # Se for lista (um array por classe), geralmente pegamos a classe positiva (índice 1) ou a primeira
+        final_shap_values = shap_values
+        
+        if isinstance(shap_values, list):
+            # Ex: [shap_values_class0, shap_values_class1]
+            # Tentar pegar a classe 1 (positiva) se existir, senão a 0
+            idx = 1 if len(shap_values) > 1 else 0
+            final_shap_values = shap_values[idx]
+        elif hasattr(shap_values, "values") and len(shap_values.values.shape) == 3:
+             # Objeto Explanation com (n_samples, n_features, n_classes)
+             # Selecionar classe 1
+             idx = 1 if shap_values.values.shape[2] > 1 else 0
+             final_shap_values = shap_values[..., idx]
+
+        fig = plt.figure()
+        if plot_type == "bar":
+            shap.summary_plot(final_shap_values, X_test, plot_type="bar", show=False)
+        else:
+            shap.summary_plot(final_shap_values, X_test, show=False)
         return fig
 
 def get_all_runs():

@@ -9,6 +9,7 @@ from mlops_utils import (
     DataLake, register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model
 )
+import shap
 import joblib # type: ignore
 import pickle
 import os
@@ -369,7 +370,7 @@ with tabs[1]:
                 validation_params['folds'] = n_folds
                 validation_strategy = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
             elif val_strategy_ui == "Holdout (Treino/Teste)":
-                test_size = st.slider("Tamanho do Teste (%)", 10, 50, 20, key="val_holdout") / 100.0
+                test_size = st.slider("Tamanho do Teste (%)", 10, 50, 20, key="val_holdout", help="Porcentagem do dataset de Treino reservada para Validação Interna durante a otimização (não confundir com o Teste Final).") / 100.0
                 validation_params['test_size'] = test_size
                 validation_strategy = 'holdout'
             elif val_strategy_ui == "Auto-Split (Otimizado)":
@@ -492,11 +493,11 @@ with tabs[1]:
                     # Configuração de Papel do Dataset (Granularidade Solicitada)
                     if validation_strategy == 'holdout':
                         st.caption("Defina como usar este dataset:")
-                        role = st.radio("Papel", ["Treino + Teste (Split)", "Apenas Treino (100%)", "Apenas Teste (100%)"], key=f"role_{ds_name}")
+                        role = st.radio("Papel", ["Treino + Teste (Split)", "Apenas Treino (100%)", "Apenas Teste (100%)"], key=f"role_{ds_name}", help="Define o destino final dos dados. 'Apenas Teste' reserva os dados para avaliação final (não visto no treino). 'Treino' entra no pool de treinamento.")
                         
                         split = 100
                         if role == "Treino + Teste (Split)":
-                            split = st.slider(f"% Treino", 10, 95, 80, key=f"split_{ds_name}")
+                            split = st.slider(f"% Treino", 10, 95, 80, key=f"split_{ds_name}", help="Porcentagem deste dataset que vai para o pool de Treino. O restante vai para o Teste Final.")
                         elif role == "Apenas Teste (100%)":
                             split = 0
                     else:
@@ -761,9 +762,42 @@ with tabs[1]:
                                                      labels=dict(x="Predito", y="Real", color="Quantidade"))
                                     st.plotly_chart(fig_cm)
                             with col_v2:
-                                # Feature Importance
-                                if hasattr(trainer, 'feature_importance') and trainer.feature_importance:
-                                    st.markdown("#### 📈 Importância das Features")
+                                # Feature Importance (SHAP - SHapley Additive exPlanations)
+                                st.markdown("#### 📈 Importância das Features (SHAP)")
+                                st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
+                                
+                                shap_success = False
+                                try:
+                                    # Usar sample para performance
+                                    sample_train = X_train_proc
+                                    if len(sample_train) > 200:
+                                        sample_train = shap.utils.sample(sample_train, 200)
+                                        
+                                    sample_test = X_test_proc
+                                    if sample_test is not None and len(sample_test) > 100:
+                                        sample_test = shap.utils.sample(sample_test, 100)
+
+                                    if sample_test is not None:
+                                        explainer = ModelExplainer(best_model, sample_train, task_type=task)
+                                        
+                                        # Plot Beeswarm (Resumo)
+                                        st.markdown("**SHAP Summary Plot**")
+                                        st.caption("Mostra como cada feature impacta a saída do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
+                                        fig_shap = explainer.plot_importance(sample_test, plot_type="summary")
+                                        st.pyplot(fig_shap)
+                                        
+                                        # Plot Bar (Importância Global)
+                                        st.markdown("**SHAP Feature Importance (Bar)**")
+                                        st.caption("Média absoluta do impacto de cada feature.")
+                                        fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
+                                        st.pyplot(fig_shap_bar)
+                                        shap_success = True
+                                except Exception as e:
+                                    st.warning(f"Não foi possível gerar SHAP plot: {e}")
+
+                                # Fallback para feature importance manual se SHAP falhar
+                                if not shap_success and hasattr(trainer, 'feature_importance') and trainer.feature_importance:
+                                    st.info("Exibindo importância baseada em coeficientes/árvores (método alternativo).")
                                     fi_data = pd.DataFrame({
                                         'Feature': processor.get_feature_names(),
                                         'Importância': trainer.feature_importance
@@ -773,14 +807,6 @@ with tabs[1]:
                                                   title="Top 15 Features mais Importantes")
                                     fig_fi.update_layout(yaxis={'categoryorder':'total ascending'})
                                     st.plotly_chart(fig_fi, use_container_width=True)
-                                else:
-                                    # Fallback for complex models
-                                    st.info("Calculando importância das features via SHAP...")
-                                    try:
-                                        explainer = ModelExplainer(best_model, X_train_proc[:100])
-                                        st.pyplot(explainer.plot_importance(X_test_proc[:100]))
-                                    except:
-                                        st.warning("Não foi possível gerar SHAP plot para este modelo.")
 
                         elif task in ["regression", "time_series"]:
                             df_res = pd.DataFrame({"Real": y_test_proc, "Predito": y_pred})
