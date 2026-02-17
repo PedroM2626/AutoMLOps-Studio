@@ -1286,27 +1286,25 @@ with tabs[6]:
 
 # --- TAB 7: ESTABILIDADE ---
 with tabs[7]:
-    st.header("⚖️ Análise de Estabilidade e Robustez Avançada")
-    st.markdown("Avaliação de consistência do modelo com configurações de MLOps, NLP e validação cruzada.")
+    st.header("⚖️ Análise de Estabilidade e Robustez")
+    st.markdown("Avalie a confiabilidade do seu modelo sob diferentes condições.")
 
     col_config, col_main = st.columns([1, 2])
 
     with col_config:
-        st.subheader("⚙️ Configuração do Experimento")
+        st.subheader("⚙️ Configuração")
         
-        # --- 1. DADOS ---
-        st.markdown("### 1. 📂 Dados e Tarefa")
+        # --- 1. SELEÇÃO DE DADOS ---
+        st.markdown("### 1. 📂 Dados")
         dataset_names = datalake.list_datasets()
         if not dataset_names:
             st.warning("Nenhum dataset no Data Lake.")
-            selected_ds = None
             df_stab = None
         else:
-            selected_ds = st.selectbox("Dataset", dataset_names, key="stab_ds")
+            selected_ds = st.selectbox("Dataset", dataset_names, key="stab_ds_refactored")
             if selected_ds:
                 versions = datalake.list_versions(selected_ds)
-                selected_ver = st.selectbox("Versão", versions, key="stab_ver")
-                
+                selected_ver = st.selectbox("Versão", versions, key="stab_ver_refactored")
                 try:
                     df_stab = datalake.load_version(selected_ds, selected_ver)
                     st.success(f"Carregado: {len(df_stab)} linhas")
@@ -1314,10 +1312,10 @@ with tabs[7]:
                     all_cols = df_stab.columns.tolist()
                     default_target = all_cols[-1]
                     if 'target' in all_cols: default_target = 'target'
-                    if 'class' in all_cols: default_target = 'class'
+                    elif 'class' in all_cols: default_target = 'class'
                     
-                    target_col = st.selectbox("Coluna Alvo (Target)", all_cols, index=all_cols.index(default_target) if default_target in all_cols else 0, key="stab_target")
-                    task_type = st.selectbox("Tipo de Tarefa", ["classification", "regression", "time_series", "anomaly_detection", "clustering"], key="stab_task")
+                    target_col = st.selectbox("Coluna Alvo (Target)", all_cols, index=all_cols.index(default_target) if default_target in all_cols else len(all_cols)-1, key="stab_target_refactored")
+                    task_type = st.selectbox("Tipo de Tarefa", ["classification", "regression"], key="stab_task_refactored")
                     
                 except Exception as e:
                     st.error(f"Erro ao carregar dados: {e}")
@@ -1327,532 +1325,219 @@ with tabs[7]:
 
         st.divider()
 
-        # --- 2. PRÉ-PROCESSAMENTO & NLP ---
-        st.markdown("### 2. 🔧 Pré-processamento")
-        with st.expander("Configurações Avançadas de Dados", expanded=False):
-            # Scaler
-            scaler_type = st.selectbox("Scaler (Normalização)", ["standard", "minmax", "robust", "none"], format_func=lambda x: x.capitalize(), key="stab_scaler")
-            
-            # NLP Config
-            st.markdown("**Processamento de Texto (NLP)**")
-            use_nlp = st.checkbox("Habilitar NLP", key="stab_use_nlp")
-            nlp_config = {}
-            nlp_cols = []
-            if use_nlp and df_stab is not None:
-                text_cols = df_stab.select_dtypes(include=['object']).columns.tolist()
-                if not text_cols:
-                    st.warning("Nenhuma coluna de texto detectada.")
-                else:
-                    nlp_cols = st.multiselect("Colunas de Texto", text_cols, key="stab_nlp_cols")
-                    
-                    vectorizer = st.selectbox("Vetorização", ["tfidf", "count"], key="stab_vect")
-                    ngram_min, ngram_max = st.slider("N-Grams Range", 1, 3, (1, 2), key="stab_ngram")
-                    remove_stopwords = st.checkbox("Remover Stopwords (English)", value=True, key="stab_stop")
-                    max_features = st.number_input("Max Features", 100, 10000, 1000, key="stab_max_feat")
-                    
-                    nlp_config = {
-                        "vectorizer": vectorizer,
-                        "ngram_range": (ngram_min, ngram_max),
-                        "stop_words": remove_stopwords,
-                        "max_features": max_features,
-                        "lemmatization": st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="stab_lemma")
-                    }
-
-        st.divider()
-
-        # --- 3. MODELO ---
-        st.markdown("### 3. 🤖 Modelo")
-        model_source = st.radio("Fonte do Modelo", ["Sessão Atual (AutoML)", "Model Registry", "Configuração Manual", "Upload Arquivo (.pkl/.joblib)"], key="stab_model_source")
+        # --- 2. SELEÇÃO DE MODELO ---
+        st.markdown("### 2. 🤖 Modelo")
+        model_source = st.radio("Fonte do Modelo", ["Sessão Atual (AutoML)", "Model Registry", "Upload Arquivo (.pkl/.joblib)"], key="stab_model_source_refactored")
         
         model_instance = None
-        model_params = {}
         
         if model_source == "Sessão Atual (AutoML)":
-            # Check for best_model
-            has_best = 'best_model' in st.session_state and st.session_state['best_model'] is not None
-            # Check for results list
-            has_results = 'automl_results' in st.session_state and st.session_state['automl_results']
-            
-            model_options = []
-            if has_best:
-                model_options.append("Best Model")
-            if has_results:
-                for i, res in enumerate(st.session_state['automl_results']):
-                     # res should be a dict with model_name, params, metrics
-                     m_name = res.get('model_name', 'Unknown')
-                     acc = res.get('accuracy', res.get('r2', 0))
-                     model_options.append(f"Model {i+1}: {m_name} (Score: {acc:.4f})")
-            
-            if not model_options:
-                st.warning("Nenhum modelo treinado nesta sessão.")
+            if 'best_model' in st.session_state and st.session_state['best_model'] is not None:
+                st.info(f"Usando Melhor Modelo da Sessão: {st.session_state.get('best_model_name', 'Best Model')}")
+                model_instance = st.session_state['best_model']
             else:
-                selected_model_str = st.selectbox("Selecione o Modelo", model_options, key="stab_sess_model")
-                
-                if selected_model_str == "Best Model":
-                     model_instance = st.session_state['best_model']
-                else:
-                     # Reconstruct model from params
-                     try:
-                         idx = int(selected_model_str.split(":")[0].replace("Model ", "")) - 1
-                         res = st.session_state['automl_results'][idx]
-                         m_name = res.get('model_name')
-                         params = res.get('params', {})
-                         
-                         trainer_temp = AutoMLTrainer(task_type=task_type)
-                         # Try to use _instantiate_model because params likely have prefixes from Optuna
-                         # Accessing protected method is fine here
-                         model_instance = trainer_temp._instantiate_model(m_name, params)
-                         st.success(f"Modelo {m_name} reconstruído com sucesso.")
-                     except Exception as e:
-                         st.error(f"Erro ao recuperar modelo: {e}")
+                st.warning("Nenhum modelo treinado nesta sessão.")
                 
         elif model_source == "Model Registry":
             reg_models = get_registered_models()
             if reg_models:
-                sel_reg_model_name = st.selectbox("Modelo Registrado", [m['name'] for m in reg_models], key="stab_reg_model")
-                st.info("Para usar modelos do Registry, carregue os parâmetros manualmente abaixo ou use a sessão atual.")
+                sel_reg_model_name = st.selectbox("Modelo Registrado", [m['name'] for m in reg_models], key="stab_reg_model_refactored")
+                try:
+                    # Load model from registry (mockup logic as get_registered_models returns metadata)
+                    # Assuming load_registered_model exists or we construct path
+                    # Using load_registered_model from utils
+                    model_instance = load_registered_model(sel_reg_model_name) 
+                    if model_instance:
+                        st.success(f"Modelo {sel_reg_model_name} carregado.")
+                except Exception as e:
+                    st.error(f"Erro ao carregar do Registry: {e}")
             else:
                 st.warning("Nenhum modelo registrado.")
 
         elif model_source == "Upload Arquivo (.pkl/.joblib)":
-            uploaded_model = st.file_uploader("Carregar modelo treinado", type=["pkl", "joblib"], key="stab_upload")
+            uploaded_model = st.file_uploader("Carregar modelo", type=["pkl", "joblib"], key="stab_upload_refactored")
             if uploaded_model:
                 try:
                     model_instance = joblib.load(uploaded_model)
                     st.success("Modelo carregado com sucesso!")
                 except Exception as e:
                     st.error(f"Erro ao carregar modelo: {e}")
-                
-        elif model_source == "Configuração Manual":
-            # Dynamic Model List from AutoMLTrainer
-            trainer_stab = AutoMLTrainer(task_type=task_type)
-            available_models = trainer_stab.get_supported_models()
-            
-            if not available_models:
-                st.error(f"Nenhum modelo suportado encontrado para a tarefa: {task_type}")
-            else:
-                model_algo = st.selectbox("Algoritmo", available_models, key="stab_algo")
-                
-                st.markdown("##### Hiperparâmetros Dinâmicos")
-                model_params = {}
-                
-                # --- Custom Ensemble Builder UI ---
-                if model_algo in ['custom_voting', 'custom_stacking']:
-                    st.info("Configure os componentes do Ensemble.")
-                    
-                    # Filter base models (exclude ensembles to avoid recursion)
-                    base_candidates = [m for m in available_models if 'ensemble' not in m and 'custom' not in m]
-                    
-                    selected_base_models = st.multiselect(
-                        "Estimadores Base", 
-                        base_candidates, 
-                        default=base_candidates[:3] if len(base_candidates) > 3 else base_candidates,
-                        key="stab_ens_base"
-                    )
-                    
-                    if len(selected_base_models) < 2:
-                        st.warning("⚠️ Selecione pelo menos 2 modelos.")
-                    
-                    ensemble_config = {}
-                    
-                    if model_algo == 'custom_voting':
-                        if task_type == "classification":
-                            voting_type = st.selectbox("Tipo de Votação", ["soft", "hard"], key="stab_ens_vtype")
-                        else:
-                            voting_type = 'soft' # Regression
-                        
-                        use_weights = st.checkbox("Definir Pesos", key="stab_ens_weights")
-                        voting_weights = None
-                        if use_weights:
-                            weights_input = st.text_input("Pesos (ex: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)), key="stab_ens_w_in")
-                            try:
-                                voting_weights = [float(w.strip()) for w in weights_input.split(',')]
-                            except:
-                                st.error("Pesos inválidos.")
-                        
-                        ensemble_config = {
-                            'voting_estimators': selected_base_models,
-                            'voting_type': voting_type,
-                            'voting_weights': voting_weights
-                        }
-                        
-                    elif model_algo == 'custom_stacking':
-                        # Final estimator selection
-                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'linear_regression', 'ridge']
-                        if task_type == 'classification':
-                             meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'linear_regression' and m != 'ridge']
-                             if not meta_candidates: meta_candidates = ['logistic_regression']
-                        else:
-                             meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'logistic_regression']
-                             if not meta_candidates: meta_candidates = ['linear_regression']
-
-                        final_est_name = st.selectbox("Meta-Modelo", meta_candidates, key="stab_ens_meta")
-                        ensemble_config = {
-                            'stacking_estimators': selected_base_models,
-                            'stacking_final_estimator': final_est_name
-                        }
-                    
-                    model_params['ensemble_config'] = ensemble_config
-
-                # --- Standard Models UI ---
-                elif "random_forest" in model_algo or "extra_trees" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_estimators = st.number_input("Number of Trees (n_estimators)", 10, 1000, 100, step=10, key="stab_n_est")
-                        max_depth = st.number_input("Max Depth", 1, 100, 10, key="stab_max_depth")
-                    with c2:
-                        min_samples_split = st.number_input("Min Samples Split", 2, 20, 2, key="stab_min_samples")
-                        criterion = st.selectbox("Criterion", ["gini", "entropy", "log_loss"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "absolute_error"], key="stab_crit")
-                    model_params = {"n_estimators": n_estimators, "max_depth": max_depth, "min_samples_split": min_samples_split, "criterion": criterion}
-                
-                elif "xgboost" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_estimators = st.number_input("n_estimators", 10, 1000, 100, step=10, key="stab_xgb_n")
-                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_xgb_lr")
-                    with c2:
-                        max_depth = st.number_input("Max Depth", 1, 20, 6, key="stab_xgb_d")
-                        subsample = st.slider("Subsample", 0.1, 1.0, 0.8, key="stab_xgb_sub")
-                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate, "max_depth": max_depth, "subsample": subsample}
-
-                elif "lightgbm" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_estimators = st.number_input("n_estimators", 10, 1000, 100, step=10, key="stab_lgb_n")
-                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_lgb_lr")
-                    with c2:
-                        num_leaves = st.number_input("Num Leaves", 2, 256, 31, key="stab_lgb_leaves")
-                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate, "num_leaves": num_leaves}
-
-                elif "logistic" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        C = st.number_input("Regularization (C)", 0.01, 100.0, 1.0, format="%.2f", key="stab_lr_c")
-                    with c2:
-                        penalty = st.selectbox("Penalty", ["l2", "l1", "elasticnet", "none"], key="stab_lr_p")
-                    model_params = {"C": C, "penalty": penalty if penalty != "none" else None}
-                    if penalty == "elasticnet":
-                        l1_ratio = st.slider("L1 Ratio", 0.0, 1.0, 0.5, key="stab_lr_l1")
-                        model_params["l1_ratio"] = l1_ratio
-                        model_params["solver"] = "saga" # Required for elasticnet
-
-                elif "svm" in model_algo or "svr" in model_algo or "linear_svc" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        C = st.number_input("C", 0.01, 100.0, 1.0, format="%.2f", key="stab_svm_c")
-                        if "linear_svc" not in model_algo:
-                            kernel = st.selectbox("Kernel", ["rbf", "linear", "poly", "sigmoid"], key="stab_svm_k")
-                            model_params = {"C": C, "kernel": kernel}
-                        else:
-                            model_params = {"C": C, "loss": "squared_hinge"}
-
-                elif "kmeans" in model_algo:
-                    n_clusters = st.number_input("Number of Clusters", 2, 50, 3, key="stab_km_k")
-                    init = st.selectbox("Init", ["k-means++", "random"], key="stab_km_init")
-                    model_params = {"n_clusters": n_clusters, "init": init}
-
-                # --- NEW MODELS UI ---
-                elif "decision_tree" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        max_depth = st.number_input("Max Depth", 1, 100, 10, key="stab_dt_depth")
-                        min_samples_split = st.number_input("Min Samples Split", 2, 20, 2, key="stab_dt_split")
-                    with c2:
-                        criterion = st.selectbox("Criterion", ["gini", "entropy", "log_loss"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "absolute_error", "friedman_mse", "poisson"], key="stab_dt_crit")
-                    model_params = {"max_depth": max_depth, "min_samples_split": min_samples_split, "criterion": criterion}
-
-                elif "knn" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_neighbors = st.number_input("Neighbors (k)", 1, 100, 5, key="stab_knn_k")
-                        weights = st.selectbox("Weights", ["uniform", "distance"], key="stab_knn_w")
-                    with c2:
-                        algorithm = st.selectbox("Algorithm", ["auto", "ball_tree", "kd_tree", "brute"], key="stab_knn_alg")
-                    model_params = {"n_neighbors": n_neighbors, "weights": weights, "algorithm": algorithm}
-
-                elif "mlp" in model_algo:
-                    st.caption("Multi-layer Perceptron (Neural Network)")
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        hidden_layers_str = st.text_input("Hidden Layers (ex: 100 or 100,50)", "100", key="stab_mlp_layers")
-                        activation = st.selectbox("Activation", ["relu", "tanh", "logistic", "identity"], key="stab_mlp_act")
-                    with c2:
-                        solver = st.selectbox("Solver", ["adam", "sgd", "lbfgs"], key="stab_mlp_solver")
-                        alpha = st.number_input("Alpha (L2 Penalty)", 0.0001, 1.0, 0.0001, format="%.4f", key="stab_mlp_alpha")
-                    
-                    try:
-                        layers = tuple(map(int, hidden_layers_str.split(',')))
-                    except:
-                        layers = (100,)
-                    model_params = {"hidden_layer_sizes": layers, "activation": activation, "solver": solver, "alpha": alpha}
-
-                elif "sgd" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        loss = st.selectbox("Loss", ["hinge", "log_loss", "modified_huber"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "huber", "epsilon_insensitive"], key="stab_sgd_loss")
-                        penalty = st.selectbox("Penalty", ["l2", "l1", "elasticnet"], key="stab_sgd_pen")
-                    with c2:
-                        alpha = st.number_input("Alpha", 0.0001, 1.0, 0.0001, format="%.4f", key="stab_sgd_alpha")
-                        learning_rate = st.selectbox("Learning Rate", ["optimal", "constant", "invscaling", "adaptive"], key="stab_sgd_lr")
-                    model_params = {"loss": loss, "penalty": penalty, "alpha": alpha, "learning_rate": learning_rate}
-
-                elif "adaboost" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        n_estimators = st.number_input("n_estimators", 10, 1000, 50, step=10, key="stab_ada_n")
-                    with c2:
-                        learning_rate = st.number_input("Learning Rate", 0.01, 10.0, 1.0, format="%.2f", key="stab_ada_lr")
-                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate}
-
-                elif "naive_bayes" in model_algo:
-                    var_smoothing = st.number_input("Var Smoothing (Stability)", 1e-10, 1e-8, 1e-9, format="%.10f", key="stab_nb_var")
-                    model_params = {"var_smoothing": var_smoothing}
-
-                elif model_algo in ["ridge", "lasso", "elastic_net", "linear_regression", "ridge_classifier"]:
-                    if model_algo == "linear_regression":
-                         fit_intercept = st.checkbox("Fit Intercept", True, key="stab_lin_int")
-                         model_params = {"fit_intercept": fit_intercept}
-                    else:
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            alpha = st.number_input("Alpha", 0.01, 100.0, 1.0, format="%.2f", key="stab_lin_alpha")
-                        with c2:
-                            if model_algo == "elastic_net":
-                                l1_ratio = st.slider("L1 Ratio", 0.0, 1.0, 0.5, key="stab_en_l1")
-                                model_params = {"alpha": alpha, "l1_ratio": l1_ratio}
-                            else:
-                                model_params = {"alpha": alpha}
-                
-                elif "catboost" in model_algo:
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        iterations = st.number_input("Iterations", 10, 1000, 100, step=10, key="stab_cat_it")
-                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_cat_lr")
-                    with c2:
-                        depth = st.number_input("Depth", 1, 16, 6, key="stab_cat_depth")
-                    model_params = {"iterations": iterations, "learning_rate": learning_rate, "depth": depth}
-
-                else:
-                    # Fallback to JSON for other models
-                    st.info(f"Configuração UI simplificada não disponível para {model_algo}. Use JSON abaixo.")
-                    params_json = st.text_area("Parâmetros (JSON)", value="{}", height=100, key="stab_params_json")
-                    try:
-                        model_params = json.loads(params_json)
-                    except json.JSONDecodeError:
-                        model_params = {}
-
-        st.divider()
-        
-        # --- 4. VALIDAÇÃO E ESTABILIDADE ---
-        st.markdown("### 4. 🧪 Configuração de Teste")
-        
-        # 4.1 Seed Configuration
-        st.markdown("**Configuração de Seed (Reprodutibilidade)**")
-        seed_mode_stab = st.radio("Modo de Seed", ["Automático", "Manual"], key="stab_seed_mode", horizontal=True)
-        if seed_mode_stab == "Manual":
-            manual_seed_stab = st.number_input("Seed Manual", 0, 999999, 42, key="stab_manual_seed")
-        else:
-            manual_seed_stab = 42 # Será sobrescrito ou usado como base se necessário
-            st.info("Seed será gerada automaticamente.")
 
         st.divider()
 
-        # 4.2 Test Strategy
-        st.markdown("**Estratégia de Estabilidade**")
-        stability_type = st.radio(
-            "O que você deseja testar?",
-            ["Robustez a Variação de Dados (Split/CV)", 
-             "Robustez à Inicialização (Seed)", 
-             "Sensibilidade a Hiperparâmetros",
-             "Análise Geral de Estabilidade"],
-            key="stab_type"
+        # --- 3. TIPO DE TESTE ---
+        st.markdown("### 3. 🧪 Tipo de Teste")
+        test_type = st.radio(
+            "Selecione o Teste de Estabilidade:",
+            [
+                "Robustez a Variação de Dados",
+                "Robustez à Inicialização", 
+                "Sensibilidade a Hiperparâmetros", 
+                "Análise Geral"
+            ],
+            key="stab_test_type"
         )
-        
-        # Defaults
-        cv_folds = 5
-        n_iterations = 10
-        perturbation = 0.0
-        cv_strategy = 'monte_carlo'
-        test_size = 0.2
-        hyperparam_name = None
-        hyperparam_values = []
 
-        if stability_type == "Análise Geral de Estabilidade":
-            st.caption("Executa testes de Seed e Split para gerar um score unificado de estabilidade.")
-            n_iterations = st.slider("Iterações por Teste", 5, 50, 10, key="stab_iter_gen")
-            st.info("Este modo executa ambos os testes de Seed e Split (Monte Carlo) e combina os resultados.")
-
-        elif stability_type == "Robustez a Variação de Dados (Split/CV)":
-            st.caption("Testa como o modelo se comporta com diferentes divisões de treino/teste.")
-            test_mode = st.radio("Método de Split", ["Simples (Holdout Repetido)", "Avançado (Cross-Validation)"], key="stab_mode_split")
-        
-            if test_mode == "Avançado (Cross-Validation)":
-                cv_type_label = st.selectbox("Estratégia CV", ["Monte Carlo (ShuffleSplit)", "K-Fold", "Stratified K-Fold", "Time Series Split"], key="stab_cv_type")
-                if cv_type_label == "K-Fold": cv_strategy = 'kfold'
-                elif cv_type_label == "Stratified K-Fold": cv_strategy = 'stratified_kfold'
-                elif cv_type_label == "Time Series Split": cv_strategy = 'time_series_split'
-                else: cv_strategy = 'monte_carlo'
-                
-                n_iterations = st.slider("Número de Folds / Iterações", 2, 50, 5, key="stab_folds")
-                perturbation = st.slider("Perturbação (Ruído Gaussiano)", 0.0, 0.5, 0.0, key="stab_pert")
-                test_size = 0.2 # Ignored for KFold/Stratified but used for Monte Carlo
-                if cv_strategy == 'monte_carlo':
-                     test_size = st.slider("Tamanho Teste (Monte Carlo)", 0.1, 0.5, 0.2, key="stab_test_size_mc")
-            else:
-                # Simples
-                cv_strategy = 'monte_carlo'
-                n_iterations = st.slider("Repetições (Seeds)", 5, 50, 10, key="stab_iter_simple")
-                test_size = st.slider("Tamanho do Teste", 0.1, 0.5, 0.2, key="stab_test_size")
-                perturbation = st.slider("Adicionar Ruído (Perturbação)", 0.0, 0.5, 0.0, key="stab_pert_simple")
-
-        elif stability_type == "Robustez à Inicialização (Seed)":
-            st.caption("Testa se a inicialização aleatória do modelo afeta o resultado (mantendo os dados fixos).")
-            n_iterations = st.slider("Número de Repetições (Seeds de Modelo)", 5, 50, 10, key="stab_iter_seed")
-            test_size = st.slider("Tamanho do Split de Validação Fixa", 0.1, 0.5, 0.2, key="stab_test_size_seed")
-            
-        elif stability_type == "Sensibilidade a Hiperparâmetros":
-            st.caption("Testa como a variação de um hiperparâmetro afeta o modelo (mantendo dados e seed fixos).")
-            hyperparam_name = st.text_input("Nome do Hiperparâmetro (ex: n_estimators, C, max_depth)", value="n_estimators")
-            hyperparam_values_str = st.text_input("Valores (separados por vírgula)", value="10, 50, 100, 200")
-            try:
-                # Tentar converter para int ou float
-                vals = [v.strip() for v in hyperparam_values_str.split(',')]
-                hyperparam_values = []
-                for v in vals:
-                    try:
-                        if '.' in v: hyperparam_values.append(float(v))
-                        else: hyperparam_values.append(int(v))
-                    except:
-                        hyperparam_values.append(v) # Keep as string if not number
-            except:
-                st.error("Formato de valores inválido.")
-            
     with col_main:
-        if st.button("🚀 Executar Análise de Estabilidade", type="primary"):
-            if df_stab is not None and target_col:
-                with st.spinner("Executando pipeline completo (NLP + Preprocessamento + Estabilidade)..."):
-                    try:
-                        # 1. Configurar Processor
-                        processor = AutoMLDataProcessor(
-                            task_type=task_type, 
-                            target_column=target_col,
-                            nlp_config=nlp_config,
-                            scaler_type=scaler_type
-                        )
-                        
-                        # 2. Executar Transformação (Passar DF completo!)
-                        # nlp_cols deve ser lista de nomes ou None
-                        nlp_cols_arg = nlp_cols if (use_nlp and nlp_cols) else None
-                        
-                        X_proc, y_proc = processor.fit_transform(df_stab, nlp_cols=nlp_cols_arg)
-                        
-                        # 3. Instanciar Modelo Manual (se necessário)
-                        if model_source == "Configuração Manual":
-                            trainer = AutoMLTrainer(task_type=task_type)
-                            # model_algo holds the internal name from the dropdown
-                            model_instance = trainer.create_model_instance(model_algo, model_params)
-                            
-                        if model_instance:
-                            # 4. Executar Análise
-                            analyzer = StabilityAnalyzer(model_instance, X_proc, y_proc, task_type=task_type, random_state=manual_seed_stab)
-                            
-                            if stability_type == "Análise Geral de Estabilidade":
-                                report = analyzer.run_general_stability_check(n_iterations=n_iterations)
-                                st.success("Análise Geral Concluída!")
-                                
-                                st.markdown("### 📊 Relatório Geral de Estabilidade")
-                                
-                                c1, c2 = st.columns(2)
-                                with c1:
-                                    st.markdown("#### 1. Estabilidade de Inicialização (Seed)")
-                                    st.caption("Variação de performance devido apenas à semente aleatória do modelo.")
-                                    st.dataframe(report['seed_stability'].style.highlight_max(axis=0, color='lightgreen'))
-                                with c2:
-                                    st.markdown("#### 2. Estabilidade de Dados (Split)")
-                                    st.caption("Variação de performance devido à divisão dos dados (Monte Carlo CV).")
-                                    st.dataframe(report['split_stability'].style.highlight_max(axis=0, color='lightgreen'))
-                                
-                                st.markdown("---")
-                                st.markdown("#### Comparativo Visual")
-                                
-                                # Visual Comparison for Accuracy/R2/F1
-                                seed_df = report['raw_seed']
-                                split_df = report['raw_split']
-                                seed_df['Type'] = 'Seed Stability'
-                                split_df['Type'] = 'Split Stability'
-                                
-                                combined_df = pd.concat([seed_df, split_df], ignore_index=True)
-                                metric_cols = [c for c in combined_df.columns if c not in ['iteration', 'seed', 'split_seed', 'param_value', 'Type']]
-                                
-                                for metric in metric_cols:
-                                    fig = px.box(combined_df, x='Type', y=metric, color='Type', title=f"Comparativo de Variância: {metric}", points="all")
-                                    st.plotly_chart(fig, use_container_width=True)
+        if df_stab is not None and model_instance is not None:
+            st.subheader(f"Executando: {test_type}")
+            
+            # Prepare Data (Basic Preprocessing for Stability Analysis if needed)
+            # Assuming model handles it or data is numeric. 
+            # StabilityAnalyzer expects X, y.
+            X = df_stab.drop(columns=[target_col])
+            y = df_stab[target_col]
+            
+            # Simple encoding for categorical features if model is not a pipeline
+            # If model is a pipeline, we pass raw X.
+            # We try to detect if model is pipeline.
+            from sklearn.pipeline import Pipeline
+            is_pipeline = isinstance(model_instance, Pipeline)
+            
+            if not is_pipeline:
+                # Basic encoding for non-pipeline models to avoid errors
+                # This is a fallback. Ideally models in AutoMLOps are pipelines.
+                # Only apply if we detect object columns
+                obj_cols = X.select_dtypes(include=['object', 'category']).columns
+                if len(obj_cols) > 0:
+                    st.caption("⚠️ Modelo não é pipeline e dados contêm texto/categorias. Aplicando Ordinal Encoding simples para o teste.")
+                    for c in obj_cols:
+                        X[c] = X[c].astype('category').cat.codes
 
+            # Instantiate Analyzer
+            analyzer = StabilityAnalyzer(model_instance, X, y, task_type=task_type)
+
+            # --- DYNAMIC CONFIGURATION BASED ON TEST TYPE ---
+            if test_type == "Robustez a Variação de Dados":
+                st.info("Testa como o desempenho varia com diferentes divisões de Treino/Teste (Split).")
+                n_splits = st.slider("Número de Divisões (Splits)", 5, 50, 10, key="stab_split_n")
+                test_size = st.slider("Tamanho do Teste (%)", 0.1, 0.5, 0.2, key="stab_split_size")
+                
+                if st.button("Executar Teste de Variação de Dados"):
+                    with st.spinner("Executando..."):
+                        results = analyzer.run_split_stability(n_splits=n_splits, test_size=test_size)
+                        st.write("### Resultados")
+                        st.dataframe(results)
+                        
+                        # Plot
+                        if not results.empty:
+                            metrics = [c for c in results.columns if c not in ['iteration', 'split_seed']]
+                            for m in metrics:
+                                fig = px.box(results, y=m, title=f"Variação de {m} por Split", points="all")
+                                st.plotly_chart(fig, use_container_width=True)
+
+            elif test_type == "Robustez à Inicialização":
+                st.info("Testa como o desempenho varia com diferentes sementes aleatórias (Seeds) do modelo, mantendo os dados fixos.")
+                n_iter = st.slider("Número de Iterações", 5, 50, 10, key="stab_seed_n")
+                
+                if st.button("Executar Teste de Inicialização"):
+                    with st.spinner("Executando..."):
+                        results = analyzer.run_seed_stability(n_iterations=n_iter)
+                        st.write("### Resultados")
+                        st.dataframe(results)
+                        
+                        if not results.empty:
+                            metrics = [c for c in results.columns if c not in ['iteration', 'seed']]
+                            for m in metrics:
+                                fig = px.histogram(results, x=m, title=f"Distribuição de {m} (Seed Stability)", nbins=10)
+                                st.plotly_chart(fig, use_container_width=True)
+
+            elif test_type == "Sensibilidade a Hiperparâmetros":
+                st.info("Testa como o desempenho varia ao alterar um hiperparâmetro específico.")
+                
+                # Try to guess params
+                try:
+                    params = model_instance.get_params()
+                    param_name = st.selectbox("Selecione o Hiperparâmetro", list(params.keys()), key="stab_hp_name")
+                    
+                    current_val = params.get(param_name)
+                    st.write(f"Valor Atual: {current_val}")
+                    
+                    # Manual input for values
+                    values_input = st.text_input("Valores para testar (separados por vírgula)", value="0.1, 1.0, 10.0" if isinstance(current_val, (int, float)) else "gini, entropy")
+                    
+                    if st.button("Executar Análise de Sensibilidade"):
+                        # Parse values
+                        try:
+                            # Try float/int first
+                            if "," in values_input:
+                                raw_vals = [v.strip() for v in values_input.split(",")]
+                                parsed_vals = []
+                                for v in raw_vals:
+                                    try:
+                                        if "." in v: parsed_vals.append(float(v))
+                                        else: parsed_vals.append(int(v))
+                                    except:
+                                        parsed_vals.append(v)
                             else:
-                                if stability_type == "Robustez à Inicialização (Seed)":
-                                    results = analyzer.run_seed_stability(n_iterations=n_iterations)
-                                elif stability_type == "Sensibilidade a Hiperparâmetros":
-                                    if not hyperparam_name or not hyperparam_values:
-                                        st.error("Configure os hiperparâmetros corretamente.")
-                                        st.stop()
-                                    results = analyzer.run_hyperparameter_stability(hyperparam_name, hyperparam_values)
-                                else:
-                                    # Padrão (Split/CV)
-                                    results = analyzer.run_stability_test(
-                                        n_iterations=n_iterations, 
-                                        test_size=test_size, 
-                                        perturbation=perturbation,
-                                        cv_strategy=cv_strategy
-                                    )
+                                parsed_vals = [values_input]
                                 
-                                st.success("Análise concluída com sucesso!")
-                                
-                                # Display Metrics
-                                st.markdown("### 📊 Resultados de Estabilidade")
-                                
-                                # Metrics Table
-                                summary_df = analyzer.calculate_stability_metrics(results)
-                                st.markdown("#### Resumo e Score de Estabilidade")
-                                st.dataframe(summary_df.style.highlight_max(axis=0, color='lightgreen'))
-                                
-                                st.markdown("---")
-                                st.markdown("#### Detalhes por Iteração")
+                            with st.spinner(f"Testando {param_name} = {parsed_vals}..."):
+                                results = analyzer.run_hyperparameter_stability(param_name, parsed_vals)
+                                st.write("### Resultados")
                                 st.dataframe(results)
                                 
-                                # Visualizations
-                                st.markdown("#### Visualização")
-                                df_res = results
-                                
-                                if stability_type == "Sensibilidade a Hiperparâmetros":
-                                    metric_cols = [c for c in df_res.columns if c not in ['iteration', 'param_value', 'seed', 'split_seed']]
-                                    x_col = 'param_value'
-                                    for metric in metric_cols:
-                                        fig = px.line(df_res, x=x_col, y=metric, markers=True, title=f"{metric} vs {hyperparam_name}")
-                                        st.plotly_chart(fig, use_container_width=True)
-                                else:
-                                    # Distribuição (Boxplot/Histograma)
-                                    metric_cols = [c for c in df_res.columns if c not in ['iteration', 'seed', 'split_seed', 'param_value']]
-                                    if metric_cols:
-                                        c1, c2 = st.columns(2)
-                                        for i, metric in enumerate(metric_cols):
-                                            with (c1 if i % 2 == 0 else c2):
-                                                fig = px.box(df_res, y=metric, title=f"Estabilidade: {metric}", points="all")
-                                                st.plotly_chart(fig, use_container_width=True)
-                                                
-                                        st.markdown("#### Histograma das Métricas")
-                                        c3, c4 = st.columns(2)
-                                        for i, metric in enumerate(metric_cols):
-                                            with (c3 if i % 2 == 0 else c4):
-                                                fig = px.histogram(df_res, x=metric, nbins=15, title=f"Histograma: {metric}")
-                                                st.plotly_chart(fig, use_container_width=True)
+                                if not results.empty:
+                                    metrics = [c for c in results.columns if c not in ['param_value']]
+                                    # Plot
+                                    metric_to_plot = st.selectbox("Métrica para Gráfico", metrics, key="stab_hp_metric")
+                                    
+                                    # Check if param_value is numeric for line plot, else bar
+                                    is_numeric_param = pd.to_numeric(results['param_value'], errors='coerce').notnull().all()
+                                    
+                                    if is_numeric_param:
+                                        fig = px.line(results, x='param_value', y=metric_to_plot, title=f"Sensibilidade: {param_name} vs {metric_to_plot}", markers=True)
                                     else:
-                                        st.warning("Sem métricas numéricas para visualizar.")
+                                        fig = px.bar(results, x='param_value', y=metric_to_plot, title=f"Sensibilidade: {param_name} vs {metric_to_plot}")
+                                    st.plotly_chart(fig, use_container_width=True)
 
-                        else:
-                            st.error("Modelo não configurado corretamente ou falha na criação.")
-                            
-                    except Exception as e:
-                        st.error(f"Erro durante a análise: {e}")
-                        st.exception(e)
-            else:
-                st.warning("👈 Por favor, selecione um dataset e configure o modelo na barra lateral esquerda.")
+                        except Exception as e:
+                            st.error(f"Erro ao processar valores: {e}")
+
+                except Exception as e:
+                    st.error(f"Não foi possível ler os parâmetros do modelo: {e}")
+
+            elif test_type == "Análise Geral":
+                st.info("Executa uma bateria completa de testes de estabilidade (Seed + Split) e gera um relatório resumido.")
+                n_iter = st.slider("Iterações por Teste", 5, 20, 10, key="stab_general_n")
+                
+                if st.button("Executar Análise Geral"):
+                    with st.spinner("Executando Bateria de Testes..."):
+                        report = analyzer.run_general_stability_check(n_iterations=n_iter)
+                        
+                        st.subheader("📊 Relatório de Estabilidade")
+                        
+                        st.markdown("#### 1. Estabilidade de Inicialização (Seed)")
+                        st.dataframe(report['seed_stability'])
+                        
+                        st.markdown("#### 2. Estabilidade de Dados (Split)")
+                        st.dataframe(report['split_stability'])
+                        
+                        # Visualization of distributions
+                        st.markdown("#### 3. Distribuições")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.caption("Seed Stability (Accuracy/R2)")
+                            raw_seed = report['raw_seed']
+                            if not raw_seed.empty:
+                                main_metric = 'accuracy' if 'accuracy' in raw_seed.columns else 'r2' if 'r2' in raw_seed.columns else raw_seed.columns[0]
+                                fig1 = px.box(raw_seed, y=main_metric, title=f"Seed Var: {main_metric}")
+                                st.plotly_chart(fig1, use_container_width=True)
+                                
+                        with c2:
+                            st.caption("Split Stability (Accuracy/R2)")
+                            raw_split = report['raw_split']
+                            if not raw_split.empty:
+                                main_metric = 'accuracy' if 'accuracy' in raw_split.columns else 'r2' if 'r2' in raw_split.columns else raw_split.columns[0]
+                                fig2 = px.box(raw_split, y=main_metric, title=f"Split Var: {main_metric}")
+                                st.plotly_chart(fig2, use_container_width=True)
+
+        else:
+            st.info("👈 Selecione um Dataset e um Modelo na barra lateral para começar.")
+            if df_stab is None:
+                st.warning("Dataset não selecionado.")
+            if model_instance is None:
+                st.warning("Modelo não selecionado.")
+
+
+

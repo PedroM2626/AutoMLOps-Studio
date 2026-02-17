@@ -4,10 +4,18 @@ import numpy as np
 from automl_engine import AutoMLTrainer, AutoMLDataProcessor
 import os
 import logging
+import mlflow
+import time
 
 # Configuração de Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Use a fresh DB for simulation to avoid locks
+SIM_DB_URI = f"sqlite:///mlflow_sim_{int(time.time())}.db"
+os.environ["MLFLOW_TRACKING_URI"] = SIM_DB_URI
+mlflow.set_tracking_uri(SIM_DB_URI)
+print(f"🔬 Using simulation DB: {SIM_DB_URI}")
 
 def callback(trial, score, full_name, dur, metrics=None):
     print(f"Callback -> Trial {trial.number}: {full_name} | Score: {score:.4f} | Duração: {dur:.2f}s")

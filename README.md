@@ -13,6 +13,10 @@ O **AutoMLOps Studio** é um projeto educacional desenvolvido de um **estudante 
 
 **Este projeto não é uma solução empresarial**, mas sim um laboratório interativo para aprender conceitos de AutoML, MLOps e Visão Computacional na prática, facilitando a experimentação rápida sem a necessidade de escrever centenas de linhas de código de infraestrutura.
 
+Este documento serve como referência central para todas as funcionalidades, opções de configuração e aprendizados técnicos desenvolvidos durante a criação do projeto.
+
+---
+
 ## 🎯 Objetivo e Problemática
 
 Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e código complexo. Este projeto resolve isso ao centralizar:
@@ -26,28 +30,111 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
 - **Curiosos e Entusiastas de ML**: Que buscam uma ferramenta ágil para explorar datasets sem barreiras técnicas.
 - **Desenvolvedores em Aprendizado**: Que desejam entender como integrar modelos de ML em APIs e Dashboards de forma simplificada.
 
-## ✨ Funcionalidades Principais
+---
 
-### 🧠 Otimização de Hiperparâmetros Avançada
-Agora você pode escolher **manualmente** a estratégia de otimização que melhor se adapta ao seu problema:
-- **Bayesian Optimization (Padrão)**: Utiliza Processos Gaussianos (TPE) para encontrar os melhores hiperparâmetros de forma eficiente.
-- **Random Search**: Exploração aleatória do espaço de busca, ideal para benchmarks.
-- **Grid Search**: Busca exaustiva (fallback para Random se o espaço for dinâmico).
-- **Hyperband**: Método avançado que descarta configurações ruins rapidamente (Bandit-based), ideal para grandes volumes de dados.
+## ✨ Funcionalidades e Detalhes Técnicos
 
-### 🤖 Validação Automática Inteligente
-O sistema agora conta com um modo **Automático** para escolha da estratégia de validação:
-- **Séries Temporais**: Detecta automaticamente e aplica `TimeSeriesSplit`.
-- **Pequenos Datasets (<1000 amostras)**: Aplica `Cross-Validation` para garantir robustez.
-- **Grandes Datasets (>=1000 amostras)**: Aplica `Holdout (Train-Test Split)` para eficiência.
+### 1. Gestão de Dados (Data Lake)
+- **Upload de Dados:** Suporte para arquivos CSV.
+- **Data Lake Local:** Armazenamento versionado de datasets (raw/processed).
+- **Carregamento de Dados:** Seleção de datasets e versões específicas para o workspace de trabalho.
 
-### 📊 Outras Funcionalidades
-- **AutoML Tabular**: Classificação, Regressão, Clustering, Séries Temporais, Detecção de Anomalias.
-- **Performance**: Paralelismo total (`n_jobs=-1`) e integração com Optuna.
-- **Integração MLOps**: Rastreamento completo via MLflow (parâmetros, métricas, artefatos).
+### 2. Configuração de Treino (AutoML)
+
+#### 2.1. Definição da Tarefa
+O sistema suporta os seguintes tipos de problemas de Machine Learning:
+- **Classification:** Previsão de classes discretas (ex: fraude/não fraude).
+- **Regression:** Previsão de valores contínuos (ex: preço de imóveis).
+- **Clustering:** Agrupamento não supervisionado.
+- **Time Series:** Previsão temporal (ex: vendas futuras).
+- **Anomaly Detection:** Detecção de outliers.
+
+#### 2.2. Fonte do Modelo
+- **AutoML Standard:** Utiliza bibliotecas padrão (Scikit-Learn, XGBoost, Transformers).
+- **Model Registry:** Permite selecionar um modelo previamente treinado e registrado para *fine-tuning* ou re-treino.
+- **Upload Local (.pkl):** Permite carregar um modelo serializado externamente.
+
+#### 2.3. Seleção de Modelos
+- **Automático (Preset):** O sistema escolhe os melhores candidatos.
+- **Manual (Selecionar):** O usuário escolhe especificamente quais algoritmos testar (ex: Random Forest, XGBoost, SVM).
+- **Custom Ensemble Builder:**
+    - **Voting:** Combina predições por voto majoritário (Hard) ou média de probabilidades (Soft). Suporta pesos customizados.
+    - **Stacking:** Treina um "Meta-Modelo" (ex: Regressão Logística) que aprende a combinar as saídas dos modelos base.
+
+#### 2.4. Otimização de Hiperparâmetros (HPO)
+O sistema utiliza **Optuna** como motor de otimização, oferecendo quatro modos selecionáveis manualmente:
+- **Bayesian Optimization (TPE):** (Padrão) Utiliza o estimador *Tree-structured Parzen Estimator* para focar nas áreas promissoras do espaço de busca. Mais eficiente que Random/Grid.
+- **Random Search:** Exploração aleatória do espaço de busca, ideal para benchmarks.
+- **Grid Search:** Busca exaustiva em uma grade pré-definida. (Implementado via amostragem controlada no Optuna para garantir cobertura).
+- **Hyperband:** Técnica avançada que descarta configurações ruins rapidamente (early stopping agressivo), permitindo testar muito mais combinações em menos tempo.
+
+#### 2.5. Validação Automática Inteligente
+Define como os modelos são avaliados para evitar *overfitting*. O sistema conta com um modo **Automático Inteligente**:
+- **Automático (Recomendado):**
+    - **Séries Temporais:** Detecta automaticamente e aplica `TimeSeriesSplit`.
+    - **Pequenos Datasets (<1000 amostras):** Aplica `Cross-Validation` para garantir robustez.
+    - **Grandes Datasets (>=1000 amostras):** Aplica `Holdout (Train-Test Split)` para eficiência.
+- **Modos Manuais:**
+    - **K-Fold Cross Validation**
+    - **Stratified K-Fold** (Apenas Classificação)
+    - **Holdout**
+    - **Time Series Split**
+
+### 3. ⚖️ Análise de Estabilidade e Robustez
+A aba de **Estabilidade** permite avaliar a confiabilidade dos modelos gerados através de testes rigorosos:
+- **Robustez a Variação de Dados**: Testa o modelo em múltiplos splits de treino/teste para verificar a consistência das métricas.
+- **Robustez à Inicialização**: Avalia o impacto de diferentes sementes aleatórias (seeds) no treinamento.
+- **Sensibilidade a Hiperparâmetros**: Analisa como a performance varia ao alterar um hiperparâmetro específico.
+- **Análise Geral**: Executa uma bateria completa de testes e gera um relatório unificado de estabilidade.
+
+### 4. MLOps e Integrações
+- **MLflow Integration:** Rastreamento completo de experimentos (parâmetros, métricas, artefatos).
+- **DagsHub Connection:**
+    - Sincronização com repositórios remotos DagsHub.
+    - Autenticação via Token.
+    - Visualização de status de conexão em tempo real.
+- **Drift Detection:** Monitoramento de desvio de dados entre treino e produção (Data Drift).
+- **Model Registry:** Versionamento e gestão de estágios de modelos (Staging, Production, Archived).
 - **Explicabilidade**: Integração nativa com SHAP.
-- **Data Lake**: Versionamento de datasets brutos e processados.
 - **Docker Ready**: Ambiente containerizado pronto para uso.
+
+---
+
+## 🧠 Aprendizados e Decisões Técnicas
+
+### 1. Flexibilidade com Optuna
+Optamos pelo **Optuna** em vez do `GridSearchCV` do Scikit-Learn devido à sua arquitetura "define-by-run". Isso permitiu:
+- Implementar *Bayesian Optimization* facilmente.
+- Simular *Grid Search* e *Random Search* apenas alterando o `sampler` (TPESampler, RandomSampler, GridSampler).
+- Integrar *Pruning* (Hyperband) para interromper treinos ruins cedo, economizando recursos computacionais.
+
+### 2. Desafios do Grid Search em Espaços Contínuos
+Aprendemos que o *Grid Search* tradicional é incompatível com distribuições contínuas (ex: `loguniform` para learning rate).
+- **Solução:** Quando o usuário seleciona "Grid Search", o sistema restringe o espaço de busca a um conjunto finito de valores discretos ou reverte para *Random Search* com alta contagem de tentativas se o espaço for muito complexo.
+
+### 3. Validação Automática Inteligente
+Implementamos uma lógica de decisão para a validação automática (`validation_strategy='auto'`):
+- **Time Series:** Sempre usa `TimeSeriesSplit`.
+- **Dados Pequenos (< 1000 amostras):** Usa `Cross-Validation` (CV) para maior robustez estatística.
+- **Dados Grandes (>= 1000 amostras):** Usa `Holdout` para eficiência computacional, já que a variância da estimativa de erro diminui com o volume de dados.
+
+### 4. Persistência e Estado na Interface (Streamlit)
+O Streamlit reexecuta o script a cada interação. Para manter conexões (como DagsHub) e configurações:
+- Usamos `st.session_state` para variáveis temporárias.
+- Usamos `os.environ` para credenciais e URIs do MLflow, garantindo que o `automl_engine.py` (que roda em outro processo ou contexto) tenha acesso às configurações definidas na UI.
+
+### 5. Integração Híbrida MLflow (Local vs Remoto)
+- **SQLite (Local):** Ótimo para desenvolvimento rápido e sem internet, mas tem problemas de *locking* com múltiplas threads.
+- **DagsHub (Remoto):** Resolve a colaboração e visualização, mas requer tratamento de erros de rede e autenticação.
+- **Solução:** Criamos um "switch" na interface que altera dinamicamente a `MLFLOW_TRACKING_URI` e recarrega o cliente MLflow sem precisar reiniciar a aplicação.
+
+### 6. Separação de Responsabilidades
+- `app.py`: Apenas UI e captura de input.
+- `automl_engine.py`: Lógica pesada de ML, independente da UI.
+- `mlops_utils.py`: Funções utilitárias reutilizáveis.
+Isso facilitou a criação de scripts de teste (`test_interface_simulation.py`) que validam o motor de ML sem precisar clicar na interface.
+
+---
 
 ## 📂 Estrutura do Projeto
 
@@ -58,6 +145,8 @@ O sistema agora conta com um modo **Automático** para escolha da estratégia de
 - `api.py`: API de serving (FastAPI).
 - `test_interface_simulation.py`: Script de teste para validação das funcionalidades de otimização e interface.
 - `docker-compose.yml` & `Dockerfile`: Configuração de containers.
+
+---
 
 ## 🚀 Instalação e Uso
 
@@ -109,6 +198,8 @@ O sistema agora conta com um modo **Automático** para escolha da estratégia de
    python -m uvicorn api:app --reload
    ```
 
+---
+
 ## 🧪 Testes e Validação
 
 Para verificar se todas as funcionalidades de otimização (Grid, Random, Bayesian, Hyperband) e validação automática estão funcionando corretamente, execute o script de simulação:
@@ -119,4 +210,12 @@ python test_interface_simulation.py
 Este script simula o comportamento da interface utilizando os datasets disponíveis no `data_lake`.
 
 ---
+
+## 🔮 Próximos Passos Sugeridos
+*   **Deploy Automatizado:** Gerar containers Docker com o modelo treinado (servindo via API REST/FastAPI) com um clique.
+*   **Explainability (XAI):** Adicionar SHAP/LIME na aba de experimentos para explicar as decisões dos modelos.
+*   **Pipeline de Retreino:** Configurar Jobs agendados para verificar Drift e disparar retreino automático.
+
+---
+
 **Desenvolvido por Pedro Morato Lahoz.**

@@ -8,9 +8,6 @@ services:
       - "8000:8000"
     volumes:
       - .:/app
-      - ./mlruns:/app/mlruns
-      - ./data_lake:/app/data_lake
-      - ./models:/app/models
     env_file:
       - .env
     restart: unless-stopped
@@ -24,22 +21,20 @@ services:
       - "8501:8501"
     volumes:
       - .:/app
-      - ./mlruns:/app/mlruns
-      - ./data_lake:/app/data_lake
-      - ./models:/app/models
     env_file:
       - .env
     depends_on:
       - api
     restart: unless-stopped
 
-  # MLflow UI (Opcional, mas útil para ver experimentos fora do app)
+  # MLflow UI (Visualização de Experimentos)
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v3.9.0
+    image: ghcr.io/mlflow/mlflow:v2.19.0
     container_name: automl-mlflow
     ports:
       - "5000:5000"
     volumes:
-      - ./mlruns:/mlruns
-    command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:///mlruns/mlflow.db --default-artifact-root /mlruns
+      - .:/app
+    # Aponta para o banco SQLite na raiz e artifacts no mlruns
+    command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns
     restart: unless-stopped
