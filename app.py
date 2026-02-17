@@ -580,7 +580,7 @@ with tabs[1]:
                     with col_nlp2:
                         remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
                         lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
-                        max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=20000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 20000) para capturar mais vocabulário. Otimizado automaticamente.")
+                        max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 5000+) para capturar mais vocabulário. Otimizado automaticamente.")
 
                     nlp_config_automl = {
                         "vectorizer": vectorizer_automl,

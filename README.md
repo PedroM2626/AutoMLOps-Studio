@@ -9,7 +9,7 @@ O **AutoMLOps Studio** é um projeto educacional desenvolvido de um **estudante 
 Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e código complexo. Este projeto resolve isso ao centralizar:
 - **Aprendizado Prático**: Entenda como o pré-processamento, o treinamento e o monitoramento se conectam.
 - **Prototipagem Rápida**: Teste ideias de modelos em segundos com arquivos CSV ou imagens.
-- **Desmistificação de MLOps**: Veja na prática como o versionamento de modelos (MLflow) e a detecção de desvios (Drift) funcionam em um fluxo real.
+- **Desmistificação de MLOps**: Veja na prática como o versionamento de modelos (MLflow), integração com DagsHub e a detecção de desvios (Drift) funcionam em um fluxo real.
 
 ## 👥 Público Alvo
 - **Estudantes de Ciência de Dados**: Que querem ver a teoria aplicada em uma interface visual.
@@ -19,9 +19,18 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
 ## ✨ Funcionalidades
 
 - **AutoML Tabular**: Suporte para Classificação, Regressão, Agrupamento (Clustering), Séries Temporais e Detecção de Anomalias com **Controle Total de Hiperparâmetros**.
+- **Performance Extrema**: 
+    - **Paralelismo Total**: Utilização de todos os núcleos de CPU disponíveis (`n_jobs=-1`) para modelos Scikit-Learn e CatBoost.
+    - **Otimização Dinâmica**: Otimização inteligente de hiperparâmetros do CatBoost baseada no preset escolhido (Fast/Medium vs Best Quality/God Mode).
+- **Integração DagsHub & MLflow Remoto**: 
+    - Conecte-se facilmente a repositórios remotos do DagsHub via **Platform Control** na barra lateral.
+    - Rastreamento automático de experimentos, métricas e artefatos na nuvem ou localmente.
+- **Explicabilidade Avançada (SHAP)**: 
+    - Integração nativa com **SHAP (SHapley Additive exPlanations)**.
+    - Visualizações ricas incluindo **Beeswarm Plots** (impacto global e direção) e **Bar Plots** (importância média).
 - **Modelos Existentes (Fine-Tune)**: Aba integrada ao AutoML para carregar modelos do **Model Registry** ou arquivos locais para predição (Inference) ou retreinamento (Retraining) contra Data Drift.
 - **Visualização Avançada**: Gráficos dinâmicos de performance, Matrizes de Confusão interativas, Curvas Real vs Predito e **Projeções PCA** para visualização de clusters e anomalias.
-- **MLOps Completo**: Integração profunda com **MLflow 3.9.0** para rastreamento automático de **todos** os experimentos. Salva automaticamente:
+- **MLOps Completo**: Integração profunda com **MLflow** para rastreamento automático de **todos** os experimentos. Salva automaticamente:
     - Tipo do modelo e configurações.
     - Todos os hiperparâmetros utilizados.
     - Métricas de avaliação detalhadas.
@@ -32,16 +41,15 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
     - **Clustering**: K-Means, DBSCAN, Agglomerative Clustering, Spectral Clustering, Gaussian Mixture.
     - **Anomaly Detection**: Isolation Forest, Local Outlier Factor, One-Class SVM.
 - **Estratégias de Split Inteligentes**: Split aleatório e **Split Temporal** automático para séries temporais.
-- **Explicabilidade (SHAP)**: Integração com SHAP para entender a importância das features em modelos de classificação.
 - **🐳 Docker Ready**: Orquestração multi-serviço (API, Dashboard, MLflow) pronta para deploy.
 - **🔌 REST API**: Camada de serving baseada em FastAPI com autenticação via API Key.
 
 ## 📂 Estrutura do Projeto
 
-- `app.py`: Dashboard interativo em Streamlit.
-- `automl_engine.py`: Core de pré-processamento, treinamento e otimização.
+- `app.py`: Dashboard interativo em Streamlit (Interface Principal).
+- `automl_engine.py`: Core de pré-processamento, treinamento e otimização (inclui lógica de paralelismo e presets).
 - `cv_engine.py`: Motor para tarefas de Visão Computacional.
-- `mlops_utils.py`: Utilitários de MLOps (MLflow, Data Lake, Drift, SHAP).
+- `mlops_utils.py`: Utilitários de MLOps (MLflow, DagsHub, Data Lake, Drift, SHAP).
 - `api.py`: API de serving de modelos.
 - `docker-compose.yml` & `Dockerfile`: Configurações de containerização.
 - `tests/`: Suíte de testes automatizados.
@@ -79,14 +87,19 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 
 ## 🛠️ Guia de Uso do Dashboard
 
-1.  **📊 Data**: Faça o upload do seu CSV e salve no **Data Lake** para habilitar o versionamento.
-2.  **🤖 AutoML**: 
-    - **Novo Treino**: Configure o treino automático ou manual. Selecione modelos, defina a estratégia de hiperparâmetros e acompanhe o progresso em tempo real.
+1.  **⚙️ Platform Control**: Na barra lateral, configure sua conexão com **DagsHub** (Repositório, Usuário, Token) para salvar seus experimentos na nuvem.
+2.  **📊 Data**: Faça o upload do seu CSV e salve no **Data Lake** para habilitar o versionamento.
+3.  **🤖 AutoML**: 
+    - **Novo Treino**: 
+        - Escolha o **Preset de Treinamento**:
+            - *Fast/Medium*: Para iterações rápidas e validação de hipóteses (CatBoost otimizado para velocidade).
+            - *Best Quality*: Para busca exaustiva e máxima performance (CatBoost em modo "God Mode").
+        - Acompanhe o progresso em tempo real com gráficos de otimização.
     - **Modelos Existentes (Fine-Tune)**: Gerencie modelos já treinados. Carregue do Registry ou via upload para prever novos dados ou retreinar o modelo com dados atualizados do Data Lake.
-3.  **🧪 Experiments**: Explore o histórico de treinos, compare métricas e registre os melhores modelos.
-4.  **🖼️ Computer Vision**: Treine modelos de classificação de imagens.
-5.  **📈 Drift/Monitoring**: Detecte desvios estatísticos entre dados de referência e atuais.
-6.  **🗂️ Model Registry**: Catálogo oficial de modelos aprovados para produção.
+4.  **🧪 Experiments**: Explore o histórico de treinos, compare métricas e veja explicações detalhadas com **SHAP**.
+5.  **🖼️ Computer Vision**: Treine modelos de classificação de imagens.
+6.  **📈 Drift/Monitoring**: Detecte desvios estatísticos entre dados de referência e atuais.
+7.  **🗂️ Model Registry**: Catálogo oficial de modelos aprovados para produção.
 
 ## 🧪 Testes
 
@@ -112,10 +125,12 @@ pytest tests/
 
 O projeto utiliza um arquivo `requirements.txt` com versões pinadas para garantir a estabilidade. As principais dependências incluem:
 
-- **MLflow 3.9.0**: Para rastreamento de experimentos e registro de modelos.
+- **MLflow**: Para rastreamento de experimentos e registro de modelos.
+- **DagsHub**: Para integração com repositórios remotos e armazenamento de MLflow na nuvem.
+- **SHAP**: Para explicabilidade avançada de modelos.
 - **Streamlit**: Para a interface do dashboard.
 - **FastAPI**: Para a API de serving.
-- **Scikit-learn, XGBoost, LightGBM**: Motores de machine learning.
+- **Scikit-learn, XGBoost, LightGBM, CatBoost**: Motores de machine learning.
 
 ### Docker (Recomendado)
 
@@ -128,13 +143,14 @@ docker-compose up --build
 Isso iniciará:
 - **Dashboard**: http://localhost:8501
 - **API**: http://localhost:8000
-- **MLflow UI**: http://localhost:5000 (Versão 3.9.0)
+- **MLflow UI**: http://localhost:5000
 
 ## 🛠️ Configuração
 
-Configure as variáveis de ambiente no arquivo `.env`:
+Configure as variáveis de ambiente no arquivo `.env` (ou use a interface Platform Control):
 - `API_SECRET_KEY`: Chave de segurança para a API REST.
-- `MLFLOW_TRACKING_URI`: Localização dos logs do MLflow (padrão: `./mlruns`).
+- `MLFLOW_TRACKING_URI`: Localização dos logs do MLflow (padrão: `./mlruns` ou URI do DagsHub).
+- `DAGSHUB_USER_TOKEN`: Token de autenticação do DagsHub (opcional).
 
 ---
 Desenvolvido por Pedro Morato Lahoz

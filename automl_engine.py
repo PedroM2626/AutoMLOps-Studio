@@ -350,7 +350,7 @@ class AutoMLDataProcessor:
             
             vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
             ngram_range = self.nlp_config.get('ngram_range', (1, 3))
-            max_features = self.nlp_config.get('max_features', 20000)
+            max_features = self.nlp_config.get('max_features', 5000) # Reduced from 20000 to 5000 for speed
             stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
             
             for col in nlp_features:
@@ -501,9 +501,9 @@ class AutoMLTrainer:
                 'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp']
             },
             'best_quality': {
-                'n_trials': 5, # Increased for better search
-                'timeout': 7200, # 2 hours
-                'cv': 10,
+                'n_trials': 3, # Reduced to avoid long wait times
+                'timeout': 3600, # 1 hour
+                'cv': 5, # Reduced from 10 to 5 for speed
                 # Use a representative subset for interface simulation speed
                 'models': ['voting_ensemble', 'sgd_classifier', 'bert-base-uncased', 'xgboost']
                 # Full list: ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base']
@@ -535,7 +535,7 @@ class AutoMLTrainer:
             if name == 'naive_bayes': return GaussianNB()
             if name == 'ridge_classifier': return RidgeClassifier(random_state=random_state)
             if name == 'adaboost': return AdaBoostClassifier(random_state=random_state)
-            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostClassifier(verbose=0, thread_count=1, random_seed=random_state)
+            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostClassifier(verbose=0, thread_count=-1, random_seed=random_state)
         elif self.task_type == 'regression':
             if name == 'linear_regression': return LinearRegression()
             if name == 'random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
@@ -551,7 +551,7 @@ class AutoMLTrainer:
             if name == 'elastic_net': return ElasticNet(random_state=random_state)
             if name == 'sgd_regressor': return SGDRegressor(max_iter=1000, random_state=random_state)
             if name == 'adaboost': return AdaBoostRegressor(random_state=random_state)
-            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=1, random_seed=random_state)
+            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=-1, random_seed=random_state)
             
         return None
 
@@ -589,11 +589,11 @@ class AutoMLTrainer:
                 'voting_ensemble': lambda t: VotingClassifier(
                     estimators=[
                         ('pa', PassiveAggressiveClassifier(max_iter=1000, random_state=random_state, C=0.5)),
-                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=1, random_state=random_state)),
-                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=1, random_state=random_state))
+                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=-1, random_state=random_state)),
+                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=-1, random_state=random_state))
                     ],
                     voting='hard',
-                    n_jobs=1 # Changed to 1 to avoid Windows multiprocessing issues
+                    n_jobs=-1 # Changed to 1 to avoid Windows multiprocessing issues
                 ),
                 'custom_voting': lambda t: VotingClassifier(
                     estimators=self._resolve_estimators(
@@ -605,7 +605,7 @@ class AutoMLTrainer:
                     ),
                     voting=self.ensemble_config.get('voting_type', 'soft'),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=1
+                    n_jobs=-1
                 ),
                 'custom_stacking': lambda t: StackingClassifier(
                     estimators=self._resolve_estimators(
@@ -618,13 +618,13 @@ class AutoMLTrainer:
                     final_estimator=self._get_default_model(self.ensemble_config.get('stacking_final_estimator'), random_state) 
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str) 
                                     else self.ensemble_config.get('stacking_final_estimator', LogisticRegression(random_state=random_state)),
-                    n_jobs=1
+                    n_jobs=-1
                 ),
                 'logistic_regression': lambda t: LogisticRegression(
                     C=t.suggest_float('lr_C', 0.001, 100.0, log=True),
                     solver=t.suggest_categorical('lr_solver', ['lbfgs', 'liblinear', 'saga']),
                     max_iter=1000,
-                    n_jobs=1,
+                    n_jobs=-1,
                     random_state=random_state
                 ),
                 'random_forest': lambda t: RandomForestClassifier(
@@ -725,12 +725,12 @@ class AutoMLTrainer:
                     random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostClassifier(
-                    iterations=t.suggest_int('cb_iterations', 100, 1000),
+                    iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
                     learning_rate=t.suggest_float('cb_lr', 0.001, 0.3, log=True),
-                    depth=t.suggest_int('cb_depth', 4, 10),
+                    depth=t.suggest_int('cb_depth', 4, 10) if self.preset == 'best_quality' else t.suggest_int('cb_depth', 4, 6),
                     l2_leaf_reg=t.suggest_float('cb_l2', 1, 10),
                     verbose=0,
-                    thread_count=1,
+                    thread_count=-1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
@@ -751,7 +751,7 @@ class AutoMLTrainer:
                         random_state
                     ),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=1
+                    n_jobs=-1
                 ),
                 'custom_stacking': lambda t: StackingRegressor(
                     estimators=self._resolve_estimators(
@@ -764,7 +764,7 @@ class AutoMLTrainer:
                     final_estimator=self._get_default_model(self.ensemble_config.get('stacking_final_estimator'), random_state)
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str)
                                     else self.ensemble_config.get('stacking_final_estimator', LinearRegression()),
-                    n_jobs=1
+                    n_jobs=-1
                 ),
                 'linear_regression': lambda t: LinearRegression(),
                 'random_forest': lambda t: RandomForestRegressor(
@@ -830,11 +830,12 @@ class AutoMLTrainer:
                     random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostRegressor(
-                    iterations=t.suggest_int('cb_iterations', 50, 200),
-                    learning_rate=t.suggest_float('cb_lr', 0.01, 0.3),
-                    depth=t.suggest_int('cb_depth', 3, 10),
+                    iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
+                    learning_rate=t.suggest_float('cb_lr', 0.001, 0.3, log=True),
+                    depth=t.suggest_int('cb_depth', 4, 10) if self.preset == 'best_quality' else t.suggest_int('cb_depth', 4, 6),
+                    l2_leaf_reg=t.suggest_float('cb_l2', 1, 10),
                     verbose=0,
-                    thread_count=1,
+                    thread_count=-1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
@@ -1395,11 +1396,11 @@ class AutoMLTrainer:
                     return VotingClassifier(
                         estimators=[
                             ('pa', PassiveAggressiveClassifier(max_iter=1000, random_state=42, C=0.5)),
-                            ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=1, random_state=42)),
-                            ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=1, random_state=42))
+                            ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=-1, random_state=42)),
+                            ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=-1, random_state=42))
                         ],
                         voting='hard',
-                        n_jobs=1
+                        n_jobs=-1
                     )
                 
                 if model_name == 'custom_voting':
@@ -1411,7 +1412,7 @@ class AutoMLTrainer:
                         ),
                         voting=ensemble_config.get('voting_type', 'soft'),
                         weights=ensemble_config.get('voting_weights', None),
-                        n_jobs=1
+                        n_jobs=-1
                     )
                 
                 if model_name == 'custom_stacking':
@@ -1423,7 +1424,7 @@ class AutoMLTrainer:
                             42
                         ),
                         final_estimator=self._get_default_model(final_est_name, 42) if isinstance(final_est_name, str) else final_est_name,
-                        n_jobs=1
+                        n_jobs=-1
                     )
 
             elif self.task_type == 'regression':
@@ -1435,7 +1436,7 @@ class AutoMLTrainer:
                             42
                         ),
                         weights=ensemble_config.get('voting_weights', None),
-                        n_jobs=1
+                        n_jobs=-1
                     )
                 
                 if model_name == 'custom_stacking':
@@ -1447,7 +1448,7 @@ class AutoMLTrainer:
                             42
                         ),
                         final_estimator=self._get_default_model(final_est_name, 42) if isinstance(final_est_name, str) else final_est_name,
-                        n_jobs=1
+                        n_jobs=-1
                     )
                 
                 if model_name == 'linear_regression': return LinearRegression(**clean_params)
@@ -1511,7 +1512,7 @@ class AutoMLTrainer:
                     ),
                     voting=self.ensemble_config.get('voting_type', 'soft'),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=1
+                    n_jobs=-1
                 )
             if name == 'custom_stacking':
                 return StackingClassifier(
@@ -1523,7 +1524,7 @@ class AutoMLTrainer:
                         42
                     ),
                     final_estimator=self.ensemble_config.get('stacking_final_estimator', LogisticRegression(random_state=42)),
-                    n_jobs=1
+                    n_jobs=-1
                 )
             if name == 'logistic_regression':  
                 lr_params = {k.replace('lr_', ''): v for k, v in params.items() if k.startswith('lr_')}
@@ -1583,11 +1584,11 @@ class AutoMLTrainer:
                 return VotingClassifier(
                     estimators=[
                         ('pa', PassiveAggressiveClassifier(max_iter=1000, random_state=42, C=0.5)),
-                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=1, random_state=42)),
-                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=1, random_state=42))
+                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=-1, random_state=42)),
+                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=-1, random_state=42))
                     ],
                     voting='hard',
-                    n_jobs=1
+                    n_jobs=-1
                 )
         elif self.task_type == 'regression':
             if name == 'custom_voting':
@@ -1600,7 +1601,7 @@ class AutoMLTrainer:
                         42
                     ),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=1
+                    n_jobs=-1
                 )
             if name == 'custom_stacking':
                 return StackingRegressor(
@@ -1612,7 +1613,7 @@ class AutoMLTrainer:
                         42
                     ),
                     final_estimator=self.ensemble_config.get('stacking_final_estimator', LinearRegression()),
-                    n_jobs=1
+                    n_jobs=-1
                 )
             if name == 'linear_regression': return LinearRegression()
             if name == 'random_forest': 
