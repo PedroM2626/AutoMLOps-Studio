@@ -1296,8 +1296,66 @@ with tabs[7]:
                 st.markdown("##### Hiperparâmetros Dinâmicos")
                 model_params = {}
                 
-                # Dynamic UI based on model selection
-                if "random_forest" in model_algo or "extra_trees" in model_algo:
+                # --- Custom Ensemble Builder UI ---
+                if model_algo in ['custom_voting', 'custom_stacking']:
+                    st.info("Configure os componentes do Ensemble.")
+                    
+                    # Filter base models (exclude ensembles to avoid recursion)
+                    base_candidates = [m for m in available_models if 'ensemble' not in m and 'custom' not in m]
+                    
+                    selected_base_models = st.multiselect(
+                        "Estimadores Base", 
+                        base_candidates, 
+                        default=base_candidates[:3] if len(base_candidates) > 3 else base_candidates,
+                        key="stab_ens_base"
+                    )
+                    
+                    if len(selected_base_models) < 2:
+                        st.warning("⚠️ Selecione pelo menos 2 modelos.")
+                    
+                    ensemble_config = {}
+                    
+                    if model_algo == 'custom_voting':
+                        if task_type == "classification":
+                            voting_type = st.selectbox("Tipo de Votação", ["soft", "hard"], key="stab_ens_vtype")
+                        else:
+                            voting_type = 'soft' # Regression
+                        
+                        use_weights = st.checkbox("Definir Pesos", key="stab_ens_weights")
+                        voting_weights = None
+                        if use_weights:
+                            weights_input = st.text_input("Pesos (ex: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)), key="stab_ens_w_in")
+                            try:
+                                voting_weights = [float(w.strip()) for w in weights_input.split(',')]
+                            except:
+                                st.error("Pesos inválidos.")
+                        
+                        ensemble_config = {
+                            'voting_estimators': selected_base_models,
+                            'voting_type': voting_type,
+                            'voting_weights': voting_weights
+                        }
+                        
+                    elif model_algo == 'custom_stacking':
+                        # Final estimator selection
+                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'linear_regression', 'ridge']
+                        if task_type == 'classification':
+                             meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'linear_regression' and m != 'ridge']
+                             if not meta_candidates: meta_candidates = ['logistic_regression']
+                        else:
+                             meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'logistic_regression']
+                             if not meta_candidates: meta_candidates = ['linear_regression']
+
+                        final_est_name = st.selectbox("Meta-Modelo", meta_candidates, key="stab_ens_meta")
+                        ensemble_config = {
+                            'stacking_estimators': selected_base_models,
+                            'stacking_final_estimator': final_est_name
+                        }
+                    
+                    model_params['ensemble_config'] = ensemble_config
+
+                # --- Standard Models UI ---
+                elif "random_forest" in model_algo or "extra_trees" in model_algo:
                     c1, c2 = st.columns(2)
                     with c1:
                         n_estimators = st.number_input("Number of Trees (n_estimators)", 10, 1000, 100, step=10, key="stab_n_est")
@@ -1338,18 +1396,102 @@ with tabs[7]:
                         model_params["l1_ratio"] = l1_ratio
                         model_params["solver"] = "saga" # Required for elasticnet
 
-                elif "svm" in model_algo or "svr" in model_algo:
+                elif "svm" in model_algo or "svr" in model_algo or "linear_svc" in model_algo:
                     c1, c2 = st.columns(2)
                     with c1:
                         C = st.number_input("C", 0.01, 100.0, 1.0, format="%.2f", key="stab_svm_c")
-                        kernel = st.selectbox("Kernel", ["rbf", "linear", "poly", "sigmoid"], key="stab_svm_k")
-                    model_params = {"C": C, "kernel": kernel}
+                        if "linear_svc" not in model_algo:
+                            kernel = st.selectbox("Kernel", ["rbf", "linear", "poly", "sigmoid"], key="stab_svm_k")
+                            model_params = {"C": C, "kernel": kernel}
+                        else:
+                            model_params = {"C": C, "loss": "squared_hinge"}
 
                 elif "kmeans" in model_algo:
                     n_clusters = st.number_input("Number of Clusters", 2, 50, 3, key="stab_km_k")
                     init = st.selectbox("Init", ["k-means++", "random"], key="stab_km_init")
                     model_params = {"n_clusters": n_clusters, "init": init}
+
+                # --- NEW MODELS UI ---
+                elif "decision_tree" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        max_depth = st.number_input("Max Depth", 1, 100, 10, key="stab_dt_depth")
+                        min_samples_split = st.number_input("Min Samples Split", 2, 20, 2, key="stab_dt_split")
+                    with c2:
+                        criterion = st.selectbox("Criterion", ["gini", "entropy", "log_loss"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "absolute_error", "friedman_mse", "poisson"], key="stab_dt_crit")
+                    model_params = {"max_depth": max_depth, "min_samples_split": min_samples_split, "criterion": criterion}
+
+                elif "knn" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        n_neighbors = st.number_input("Neighbors (k)", 1, 100, 5, key="stab_knn_k")
+                        weights = st.selectbox("Weights", ["uniform", "distance"], key="stab_knn_w")
+                    with c2:
+                        algorithm = st.selectbox("Algorithm", ["auto", "ball_tree", "kd_tree", "brute"], key="stab_knn_alg")
+                    model_params = {"n_neighbors": n_neighbors, "weights": weights, "algorithm": algorithm}
+
+                elif "mlp" in model_algo:
+                    st.caption("Multi-layer Perceptron (Neural Network)")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        hidden_layers_str = st.text_input("Hidden Layers (ex: 100 or 100,50)", "100", key="stab_mlp_layers")
+                        activation = st.selectbox("Activation", ["relu", "tanh", "logistic", "identity"], key="stab_mlp_act")
+                    with c2:
+                        solver = st.selectbox("Solver", ["adam", "sgd", "lbfgs"], key="stab_mlp_solver")
+                        alpha = st.number_input("Alpha (L2 Penalty)", 0.0001, 1.0, 0.0001, format="%.4f", key="stab_mlp_alpha")
+                    
+                    try:
+                        layers = tuple(map(int, hidden_layers_str.split(',')))
+                    except:
+                        layers = (100,)
+                    model_params = {"hidden_layer_sizes": layers, "activation": activation, "solver": solver, "alpha": alpha}
+
+                elif "sgd" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        loss = st.selectbox("Loss", ["hinge", "log_loss", "modified_huber"] if "classifier" in model_algo or task_type == "classification" else ["squared_error", "huber", "epsilon_insensitive"], key="stab_sgd_loss")
+                        penalty = st.selectbox("Penalty", ["l2", "l1", "elasticnet"], key="stab_sgd_pen")
+                    with c2:
+                        alpha = st.number_input("Alpha", 0.0001, 1.0, 0.0001, format="%.4f", key="stab_sgd_alpha")
+                        learning_rate = st.selectbox("Learning Rate", ["optimal", "constant", "invscaling", "adaptive"], key="stab_sgd_lr")
+                    model_params = {"loss": loss, "penalty": penalty, "alpha": alpha, "learning_rate": learning_rate}
+
+                elif "adaboost" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        n_estimators = st.number_input("n_estimators", 10, 1000, 50, step=10, key="stab_ada_n")
+                    with c2:
+                        learning_rate = st.number_input("Learning Rate", 0.01, 10.0, 1.0, format="%.2f", key="stab_ada_lr")
+                    model_params = {"n_estimators": n_estimators, "learning_rate": learning_rate}
+
+                elif "naive_bayes" in model_algo:
+                    var_smoothing = st.number_input("Var Smoothing (Stability)", 1e-10, 1e-8, 1e-9, format="%.10f", key="stab_nb_var")
+                    model_params = {"var_smoothing": var_smoothing}
+
+                elif model_algo in ["ridge", "lasso", "elastic_net", "linear_regression", "ridge_classifier"]:
+                    if model_algo == "linear_regression":
+                         fit_intercept = st.checkbox("Fit Intercept", True, key="stab_lin_int")
+                         model_params = {"fit_intercept": fit_intercept}
+                    else:
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            alpha = st.number_input("Alpha", 0.01, 100.0, 1.0, format="%.2f", key="stab_lin_alpha")
+                        with c2:
+                            if model_algo == "elastic_net":
+                                l1_ratio = st.slider("L1 Ratio", 0.0, 1.0, 0.5, key="stab_en_l1")
+                                model_params = {"alpha": alpha, "l1_ratio": l1_ratio}
+                            else:
+                                model_params = {"alpha": alpha}
                 
+                elif "catboost" in model_algo:
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        iterations = st.number_input("Iterations", 10, 1000, 100, step=10, key="stab_cat_it")
+                        learning_rate = st.number_input("Learning Rate", 0.001, 1.0, 0.1, format="%.3f", key="stab_cat_lr")
+                    with c2:
+                        depth = st.number_input("Depth", 1, 16, 6, key="stab_cat_depth")
+                    model_params = {"iterations": iterations, "learning_rate": learning_rate, "depth": depth}
+
                 else:
                     # Fallback to JSON for other models
                     st.info(f"Configuração UI simplificada não disponível para {model_algo}. Use JSON abaixo.")

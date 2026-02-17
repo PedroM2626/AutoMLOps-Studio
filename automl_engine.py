@@ -1321,7 +1321,8 @@ class AutoMLTrainer:
             models = [
                 'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 
                 'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
-                'svm', 'knn', 'naive_bayes', 'sgd_classifier', 'mlp', 'linear_svc', 'ridge_classifier'
+                'svm', 'knn', 'naive_bayes', 'sgd_classifier', 'mlp', 'linear_svc', 'ridge_classifier',
+                'voting_ensemble', 'custom_voting', 'custom_stacking'
             ]
             if TRANSFORMERS_AVAILABLE:
                 models.extend([
@@ -1334,7 +1335,8 @@ class AutoMLTrainer:
                 'linear_regression', 'random_forest', 'xgboost', 'lightgbm', 
                 'catboost', 'extra_trees', 'adaboost', 'decision_tree', 
                 'svm', 'knn', 'ridge', 'lasso', 'elastic_net', 
-                'sgd_regressor', 'mlp'
+                'sgd_regressor', 'mlp',
+                'custom_voting', 'custom_stacking'
             ]
             if TRANSFORMERS_AVAILABLE:
                 models.extend([
@@ -1377,6 +1379,8 @@ class AutoMLTrainer:
                 if model_name == 'naive_bayes': return GaussianNB(**clean_params)
                 if model_name == 'sgd_classifier': return SGDClassifier(max_iter=1000, **clean_params)
                 if model_name == 'mlp': return MLPClassifier(max_iter=1000, **clean_params)
+                if model_name == 'linear_svc': return LinearSVC(**clean_params)
+                if model_name == 'ridge_classifier': return RidgeClassifier(**clean_params)
                 if model_name == 'voting_ensemble':
                     # Default God Mode Ensemble
                     return VotingClassifier(
@@ -1388,8 +1392,55 @@ class AutoMLTrainer:
                         voting='hard',
                         n_jobs=1
                     )
+                
+                if model_name == 'custom_voting':
+                    ensemble_config = params.get('ensemble_config', {})
+                    return VotingClassifier(
+                        estimators=self._resolve_estimators(
+                            ensemble_config.get('voting_estimators', []),
+                            42
+                        ),
+                        voting=ensemble_config.get('voting_type', 'soft'),
+                        weights=ensemble_config.get('voting_weights', None),
+                        n_jobs=1
+                    )
+                
+                if model_name == 'custom_stacking':
+                    ensemble_config = params.get('ensemble_config', {})
+                    final_est_name = ensemble_config.get('stacking_final_estimator', 'logistic_regression')
+                    return StackingClassifier(
+                        estimators=self._resolve_estimators(
+                            ensemble_config.get('stacking_estimators', []),
+                            42
+                        ),
+                        final_estimator=self._get_default_model(final_est_name, 42) if isinstance(final_est_name, str) else final_est_name,
+                        n_jobs=1
+                    )
 
             elif self.task_type == 'regression':
+                if model_name == 'custom_voting':
+                    ensemble_config = params.get('ensemble_config', {})
+                    return VotingRegressor(
+                        estimators=self._resolve_estimators(
+                            ensemble_config.get('voting_estimators', []),
+                            42
+                        ),
+                        weights=ensemble_config.get('voting_weights', None),
+                        n_jobs=1
+                    )
+                
+                if model_name == 'custom_stacking':
+                    ensemble_config = params.get('ensemble_config', {})
+                    final_est_name = ensemble_config.get('stacking_final_estimator', 'linear_regression')
+                    return StackingRegressor(
+                        estimators=self._resolve_estimators(
+                            ensemble_config.get('stacking_estimators', []),
+                            42
+                        ),
+                        final_estimator=self._get_default_model(final_est_name, 42) if isinstance(final_est_name, str) else final_est_name,
+                        n_jobs=1
+                    )
+                
                 if model_name == 'linear_regression': return LinearRegression(**clean_params)
                 if model_name == 'random_forest': return RandomForestRegressor(**clean_params)
                 if model_name == 'xgboost': return xgb.XGBRegressor(objective='reg:squarederror', **clean_params)
