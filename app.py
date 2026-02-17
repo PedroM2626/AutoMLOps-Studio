@@ -203,10 +203,87 @@ with tabs[1]:
     manual_params = None
     
     # Lógica de Seleção Baseada na Fonte
+    ensemble_config = {} # Initialize empty ensemble config
+
     if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
-        mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)"], horizontal=True)
+        mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)", "Custom Ensemble Builder"], horizontal=True)
+        
         if mode_selection == "Manual (Selecionar)":
             selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2] if available_models else None)
+            
+        elif mode_selection == "Custom Ensemble Builder":
+            st.markdown("##### 🏗️ Construção de Ensemble Customizado")
+            st.info("Crie um ensemble combinando múltiplos modelos base. O sistema treinará o ensemble final.")
+            
+            ensemble_type = st.selectbox("Tipo de Ensemble", ["Voting (Votação)", "Stacking (Empilhamento)"])
+            
+            # Filter base models (exclude other ensembles/custom models to avoid recursion for now)
+            base_candidates = [m for m in available_models if 'ensemble' not in m and 'custom' not in m]
+            
+            st.markdown("**1. Selecione os Estimadores Base**")
+            selected_base_models = st.multiselect(
+                "Estimadores Base (Componentes)", 
+                base_candidates, 
+                default=base_candidates[:3] if len(base_candidates) > 3 else base_candidates
+            )
+            
+            if len(selected_base_models) < 2:
+                st.warning("⚠️ Selecione pelo menos 2 modelos para formar um ensemble robusto.")
+            
+            if ensemble_type == "Voting (Votação)":
+                st.markdown("**2. Configuração do Voting**")
+                if task == "classification":
+                    voting_type = st.selectbox("Tipo de Votação", ["soft", "hard"], help="Soft: Média das probabilidades. Hard: Votação majoritária das classes.")
+                else:
+                    voting_type = 'soft' # Not used in regressor but safe to keep
+                    st.caption("Regressão usa média das predições.")
+                
+                use_weights = st.checkbox("Definir Pesos (Weighted Voting)", help="Permite atribuir pesos diferentes para cada modelo na votação.")
+                voting_weights = None
+                
+                if use_weights:
+                    st.caption("Insira os pesos separados por vírgula na mesma ordem dos modelos selecionados.")
+                    weights_input = st.text_input("Pesos (ex: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)))
+                    try:
+                        voting_weights = [float(w.strip()) for w in weights_input.split(',')]
+                        if len(voting_weights) != len(selected_base_models):
+                            st.error(f"⚠️ Número de pesos ({len(voting_weights)}) diferente do número de modelos ({len(selected_base_models)}). Usando pesos iguais.")
+                            voting_weights = None
+                    except:
+                        st.error("⚠️ Formato inválido. Use números separados por vírgula.")
+                        voting_weights = None
+
+                ensemble_config = {
+                    'voting_estimators': selected_base_models,
+                    'voting_type': voting_type,
+                    'voting_weights': voting_weights
+                }
+                selected_models = ['custom_voting']
+                
+            elif ensemble_type == "Stacking (Empilhamento)":
+                st.markdown("**2. Configuração do Stacking**")
+                st.info("Stacking treina um 'Meta-Modelo' para aprender a melhor combinação dos modelos base.")
+                
+                # Final estimator selection
+                meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'linear_regression', 'ridge']
+                # Filter by task
+                if task == 'classification':
+                     meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'linear_regression' and m != 'ridge']
+                     if not meta_candidates: meta_candidates = ['logistic_regression']
+                else:
+                     meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'logistic_regression']
+                     if not meta_candidates: meta_candidates = ['linear_regression']
+
+                final_est_name = st.selectbox("Meta-Modelo (Final Estimator)", meta_candidates)
+                
+                st.caption(f"Meta-Modelo selecionado: {final_est_name}")
+                
+                ensemble_config = {
+                    'stacking_estimators': selected_base_models,
+                    'stacking_final_estimator': final_est_name
+                }
+                selected_models = ['custom_stacking']
+
     
     elif model_source == "Model Registry (Registrados)":
         reg_models = get_registered_models()
@@ -246,6 +323,7 @@ with tabs[1]:
             st.markdown("##### 🛠️ Configuração Customizada")
             n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 1000, 20, key="cust_trials")
             timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 7200, 600, key="cust_timeout")
+            total_time_budget = st.number_input("Tempo Máximo Total (segundos)", 60, 86400, 3600, key="cust_total_time", help="Tempo máximo para executar TODO o experimento. Se excedido, o treino para após o modelo atual.")
             early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7, key="cust_es")
             
             st.markdown("##### ⚡ Parâmetros Avançados")
@@ -264,6 +342,7 @@ with tabs[1]:
         else:
             n_trials = None
             timeout_per_model = None
+            total_time_budget = None
             early_stopping = 10
             manual_params = {}
 
@@ -595,13 +674,14 @@ with tabs[1]:
                              st.error(f"Erro ao carregar do registry: {e}")
                              st.stop()
 
-                    trainer = AutoMLTrainer(task_type=task, preset=training_preset)
+                    trainer = AutoMLTrainer(task_type=task, preset=training_preset, ensemble_config=ensemble_config)
                     
                     best_model = trainer.train(
                         X_train_proc, 
                         y_train_proc, 
                         n_trials=n_trials,
                         timeout=timeout_per_model,
+                        time_budget=total_time_budget,
                         callback=callback, 
                         selected_models=selected_models, 
                         early_stopping_rounds=early_stopping,

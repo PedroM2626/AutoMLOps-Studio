@@ -27,9 +27,10 @@ class MLFlowTracker:
                 print(f"Warning: Failed to log metrics due to {e}")
             
             # Log model
+            safe_artifact_path = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
             mlflow.sklearn.log_model(
                 model, 
-                model_name, 
+                safe_artifact_path, 
                 registered_model_name=model_name if register else None
             )
             
