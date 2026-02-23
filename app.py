@@ -60,6 +60,10 @@ def get_cached_registered_models():
 
 # 📊 Sidebar Metrics & Summary
 with st.sidebar:
+    # Hybrid Rendering Detection
+    if os.environ.get('IS_ELECTRON_APP') == 'true':
+        st.markdown("`🖥️ Desktop Mode`")
+        
     st.title("🛡️ Platform Control")
     st.divider()
     

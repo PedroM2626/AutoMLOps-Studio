@@ -219,6 +219,27 @@ Isso facilitou a criação de scripts de teste (`test_interface_simulation.py`) 
    python -m uvicorn api:app --reload
    ```
 
+### 🖥️ Aplicação Desktop (Electron)
+
+Você pode executar o projeto como uma aplicação desktop híbrida (Electron + Python).
+
+1. **Pré-requisitos**: Certifique-se de ter o `Node.js` e `npm` instalados.
+2. **Instale as dependências do Electron**:
+   ```bash
+   npm install
+   ```
+3. **Inicie em modo de desenvolvimento**:
+   ```bash
+   npm start
+   ```
+   Isso iniciará o servidor Python em segundo plano e abrirá a janela do Electron.
+
+4. **Build do Executável**:
+   Para criar um instalador (.exe, .dmg, .AppImage):
+   ```bash
+   npm run dist
+   ```
+
 ---
 
 ## 🧪 Testes e Validação
