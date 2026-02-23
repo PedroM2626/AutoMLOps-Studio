@@ -2,6 +2,7 @@
 
 ### Exploratory ML & MLOps Learning Engine
 
+![Version](https://img.shields.io/badge/Version-v1.1.0-blue)
 ![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)
@@ -34,10 +35,10 @@ Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e códig
 
 ## ✨ Funcionalidades e Detalhes Técnicos
 
-### 1. Gestão de Dados (Data Lake)
+### 1. Gestão de Dados (Data Lake) & Drift Analysis
 - **Upload de Dados:** Suporte para arquivos CSV.
 - **Data Lake Local:** Armazenamento versionado de datasets (raw/processed).
-- **Carregamento de Dados:** Seleção de datasets e versões específicas para o workspace de trabalho.
+- **Detecção de Drift:** Análise estatística (KS, PSI) e visualização de distribuição de dados integrada na fase de ingestão, permitindo identificar mudanças no perfil dos dados antes mesmo do treinamento.
 
 ### 2. Configuração de Treino (AutoML)
 
@@ -103,57 +104,54 @@ A aba de **Estabilidade** permite avaliar a confiabilidade dos modelos gerados a
 - **Sensibilidade a Hiperparâmetros**: Analisa como a performance varia ao alterar um hiperparâmetro específico.
 - **Análise Geral**: Executa uma bateria completa de testes e gera um relatório unificado de estabilidade.
 
-### 5. MLOps, API e Integrações
-- **MLflow Integration:** Rastreamento completo de experimentos (parâmetros, métricas, artefatos).
-- **DagsHub Connection:**
-    - Sincronização com repositórios remotos DagsHub.
-    - Autenticação via Token.
-    - Visualização de status de conexão em tempo real.
-- **Drift Detection:** Monitoramento de desvio de dados entre treino e produção (Data Drift).
-- **Model Registry:** Versionamento e gestão de estágios de modelos (Staging, Production, Archived).
-- **Explicabilidade**: Integração nativa com SHAP.
-- **Docker Ready**: Ambiente containerizado pronto para uso.
-- **API Serving (FastAPI):**
-    - Módulo `api.py` fornece uma interface REST robusta.
-    - **Endpoints:** `/predict` para inferência e `/` para health check.
-    - **Segurança:** Autenticação via `x-api-key` no header.
-    - **Auto-Reload:** Carrega automaticamente o modelo mais recente salvo em `models/`.
+### 5. 🚀 Model Registry & Deployment Unificado
+A nova arquitetura unifica o ciclo de vida pós-treinamento em uma única interface poderosa:
+- **Model Registry Centralizado:** Visualize, versione e gerencie estágios de modelos (Staging, Production, Archived) integrados ao MLflow.
+- **Deployment Simulator:**
+    - Interface para simular deployment em ambientes (Dev, Staging, Prod).
+    - Configuração de recursos (CPU/RAM) e réplicas.
+    - Geração automática de endpoints de API simulados.
+- **Teste de Inferência Real-time:** Valide seus modelos implantados instantaneamente com upload de JSON/CSV e visualize as predições na hora, sem sair da tela de registro.
+- **Monitoramento de Performance:** Dashboard integrado com métricas de latência, erros, e uso de recursos para modelos ativos.
 
 ---
 
 ## 🧠 Aprendizados e Decisões Técnicas
 
-### 1. Flexibilidade com Optuna
+### 1. Arquitetura Centrada no Ciclo de Vida (Workflow-First)
+Evoluímos a interface de uma abordagem baseada em "ferramentas" (abas isoladas para Drift, Teste, Monitoramento) para uma abordagem baseada em "fluxo de trabalho" (Dados -> Modelo -> Deploy).
+- **Aprendizado:** Agrupar funcionalidades por contexto (ex: Drift junto com Dados, Teste junto com Registro) reduz a carga cognitiva e o "context switching", tornando a ferramenta mais intuitiva para o usuário final.
+
+### 2. Simulação de Infraestrutura (Mocking para Educação)
+Para ensinar conceitos complexos de Deployment sem exigir Kubernetes ou AWS:
+- **Solução:** Criamos um sistema de "Mock Deployment" que usa o estado da sessão (`st.session_state`) para simular endpoints ativos.
+- **Benefício:** O aluno aprende o *conceito* de promover um modelo para Produção e testar um endpoint, sem a barreira de entrada da infraestrutura pesada.
+
+### 3. Flexibilidade com Optuna
 Optamos pelo **Optuna** em vez do `GridSearchCV` do Scikit-Learn devido à sua arquitetura "define-by-run". Isso permitiu:
 - Implementar *Bayesian Optimization* facilmente.
 - Simular *Grid Search* e *Random Search* apenas alterando o `sampler` (TPESampler, RandomSampler, GridSampler).
 - Integrar *Pruning* (Hyperband) para interromper treinos ruins cedo, economizando recursos computacionais.
 
-### 2. Desafios do Grid Search em Espaços Contínuos
+### 4. Desafios do Grid Search em Espaços Contínuos
 Aprendemos que o *Grid Search* tradicional é incompatível com distribuições contínuas (ex: `loguniform` para learning rate).
 - **Solução:** Quando o usuário seleciona "Grid Search", o sistema restringe o espaço de busca a um conjunto finito de valores discretos ou reverte para *Random Search* com alta contagem de tentativas se o espaço for muito complexo.
 
-### 3. Validação Automática Inteligente
+### 5. Validação Automática Inteligente
 Implementamos uma lógica de decisão para a validação automática (`validation_strategy='auto'`):
 - **Time Series:** Sempre usa `TimeSeriesSplit`.
 - **Dados Pequenos (< 1000 amostras):** Usa `Cross-Validation` (CV) para maior robustez estatística.
 - **Dados Grandes (>= 1000 amostras):** Usa `Holdout` para eficiência computacional, já que a variância da estimativa de erro diminui com o volume de dados.
 
-### 4. Persistência e Estado na Interface (Streamlit)
+### 6. Persistência e Estado na Interface (Streamlit)
 O Streamlit reexecuta o script a cada interação. Para manter conexões (como DagsHub) e configurações:
 - Usamos `st.session_state` para variáveis temporárias.
 - Usamos `os.environ` para credenciais e URIs do MLflow, garantindo que o `automl_engine.py` (que roda em outro processo ou contexto) tenha acesso às configurações definidas na UI.
 
-### 5. Integração Híbrida MLflow (Local vs Remoto)
+### 7. Integração Híbrida MLflow (Local vs Remoto)
 - **SQLite (Local):** Ótimo para desenvolvimento rápido e sem internet, mas tem problemas de *locking* com múltiplas threads.
 - **DagsHub (Remoto):** Resolve a colaboração e visualização, mas requer tratamento de erros de rede e autenticação.
 - **Solução:** Criamos um "switch" na interface que altera dinamicamente a `MLFLOW_TRACKING_URI` e recarrega o cliente MLflow sem precisar reiniciar a aplicação.
-
-### 6. Separação de Responsabilidades
-- `app.py`: Apenas UI e captura de input.
-- `automl_engine.py`: Lógica pesada de ML, independente da UI.
-- `mlops_utils.py`: Funções utilitárias reutilizáveis.
-Isso facilitou a criação de scripts de teste (`test_interface_simulation.py`) que validam o motor de ML sem precisar clicar na interface.
 
 ---
 
@@ -254,9 +252,9 @@ Este script simula o comportamento da interface utilizando os datasets disponív
 ---
 
 ## 🔮 Próximos Passos Sugeridos
-*   **Deploy Automatizado:** Gerar containers Docker com o modelo treinado (servindo via API REST/FastAPI) com um clique.
-*   **Explainability (XAI):** Adicionar SHAP/LIME na aba de experimentos para explicar as decisões dos modelos.
-*   **Pipeline de Retreino:** Configurar Jobs agendados para verificar Drift e disparar retreino automático.
+*   **Pipeline de Retreino Automático:** Configurar Jobs agendados para verificar Drift e disparar retreino automático.
+*   **Integração com Kubeflow/Airflow:** Para orquestração de pipelines mais complexos em produção real.
+*   **Suporte a NLP:** Adicionar tarefas de Processamento de Linguagem Natural (ex: Análise de Sentimento).
 
 ---
 
