@@ -1,6 +1,6 @@
 from automl_engine import AutoMLDataProcessor, AutoMLTrainer, save_pipeline, get_technical_explanation
 from stability_engine import StabilityAnalyzer
-from cv_engine import CVAutoMLTrainer, get_cv_explanation
+# from cv_engine import CVAutoMLTrainer, get_cv_explanation # Moved to local scope
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,13 +9,13 @@ from mlops_utils import (
     DataLake, register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model
 )
-import shap
+# import shap # Moved to local scope
 import joblib # type: ignore
 import pickle
 import os
 import json
-import matplotlib.pyplot as plt
-import seaborn as sns
+# import matplotlib.pyplot as plt # Moved to local scope
+# import seaborn as sns # Moved to local scope
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -50,14 +50,22 @@ st.markdown("""
 
 datalake = DataLake()
 
+@st.cache_data(ttl=60)
+def get_cached_all_runs():
+    return get_all_runs()
+
+@st.cache_data(ttl=60)
+def get_cached_registered_models():
+    return get_registered_models()
+
 # 📊 Sidebar Metrics & Summary
 with st.sidebar:
     st.title("🛡️ Platform Control")
     st.divider()
     
-    # Quick Stats
-    all_runs_df = get_all_runs()
-    reg_models = get_registered_models()
+    # Quick Stats (Cached)
+    all_runs_df = get_cached_all_runs()
+    reg_models = get_cached_registered_models()
     
     st.markdown("### 📈 System Overview")
     col_s1, col_s2 = st.columns(2)
@@ -414,13 +422,13 @@ with tabs[1]:
         }
         selected_opt_mode = opt_mode_map[optimization_mode]
 
-        # Seletor unificado de preset (incluindo 'custom')
+        # Seletor unificado de preset (incluindo 'custom' e 'test')
         if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
             training_preset = st.select_slider(
                 "Modo de Treinamento (Preset)",
-                options=["fast", "medium", "best_quality", "custom"],
+                options=["test", "fast", "medium", "best_quality", "custom"],
                 value="medium",
-                help="fast: Rápido. medium: Equilibrado. best_quality: Exaustivo. custom: Defina suas regras."
+                help="test: Teste rápido (1 trial). fast: Rápido. medium: Equilibrado. best_quality: Exaustivo. custom: Defina suas regras."
             )
         else:
             # Para outros modos, permitimos customizar mas iniciamos com medium
@@ -440,16 +448,16 @@ with tabs[1]:
             st.markdown("##### ⚡ Parâmetros Avançados")
             custom_max_iter = st.number_input("Máximo de Iterações (max_iter)", 100, 100000, 1000, help="Limite de iterações para solvers (LogisticRegression, SVM, MLP). Valores muito altos podem causar lentidão.")
             
-            # NLP Configuration (if applicable)
-            st.markdown("##### 📝 NLP Avançado")
-            nlp_max_features = st.number_input("Max Features (Vetorização)", min_value=100, max_value=None, value=20000, step=1000, help="Número máximo de features para TF-IDF/CountVectorizer. Deixe alto para capturar mais vocabulário (ex: 20000+). Otimizado automaticamente se for muito alto.")
-            nlp_ngram_range_max = st.slider("N-Gram Range Max", 1, 3, 2, help="Tamanho máximo dos n-grams (1=unigramas, 2=bigramas, 3=trigramas).")
-            
             manual_params = {
-                'max_iter': custom_max_iter,
-                'nlp_max_features': nlp_max_features,
-                'nlp_ngram_range': (1, nlp_ngram_range_max)
+                'max_iter': custom_max_iter
             }
+        elif training_preset == "test":
+             st.warning("⚠️ MODO TESTE: Executando com apenas 1 trial e timeout curto para validação de pipeline.")
+             n_trials = 1
+             timeout_per_model = 30
+             total_time_budget = 60
+             early_stopping = 1
+             manual_params = {}
         else:
             n_trials = None
             timeout_per_model = None
@@ -505,6 +513,18 @@ with tabs[1]:
 
             if task == "time_series":
                 st.info("💡 Split temporal obrigatório para séries temporais.")
+
+        # Novo Seletor de Métrica Alvo (Optimization Metric)
+        metric_options = {
+            'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
+            'regression': ['r2', 'rmse', 'mae'],
+            'clustering': ['silhouette'],
+            'time_series': ['rmse', 'mae', 'mape'],
+            'anomaly_detection': ['f1']
+        }
+        
+        target_metric_options = metric_options.get(task, ['accuracy'])
+        optimization_metric = st.selectbox("Métrica Alvo (Otimização)", target_metric_options, index=0, help="Métrica que o AutoML tentará maximizar (ou minimizar, dependendo da métrica).")
 
         st.divider()
         st.subheader("🌱 Configuração de Reprodutibilidade (Seed)")
@@ -707,6 +727,10 @@ with tabs[1]:
                 progress_bar = st.progress(0)
                 chart_c = st.empty()
                 
+                # Container for per-model reports (NEW)
+                st.markdown("### 📊 Relatórios por Modelo (Tempo Real)")
+                report_container = st.container()
+
                 # Calcular total real de trials para a barra de progresso
                 # Instancia o trainer com o preset para pegar as configs
                 trainer_for_info = AutoMLTrainer(task_type=task, preset=training_preset)
@@ -717,6 +741,25 @@ with tabs[1]:
                 total_expected_trials = n_trials_val * len(effective_models_list)
                 
                 def callback(trial, score, full_name, dur, metrics=None):
+                    # Check for special report event
+                    if metrics and '__report__' in metrics:
+                        report = metrics['__report__']
+                        with report_container:
+                            with st.expander(f"📄 Relatório Final: {report['model_name']} (Score: {report['score']:.4f})", expanded=False):
+                                col_rep1, col_rep2 = st.columns([1, 2])
+                                with col_rep1:
+                                    st.markdown("**Métricas de Validação**")
+                                    st.json(report['metrics'])
+                                    st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
+                                    st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
+                                with col_rep2:
+                                    if 'plots' in report:
+                                        tab_plots = st.tabs(list(report['plots'].keys()))
+                                        for i, (plot_name, fig_obj) in enumerate(report['plots'].items()):
+                                            with tab_plots[i]:
+                                                st.pyplot(fig_obj)
+                        return
+
                     # Extrair nome do algoritmo e o número do trial do modelo
                     algo_name = full_name.split(" - ")[0]
                     trial_label = full_name.split(" - ")[1] # "Trial X"
@@ -734,8 +777,13 @@ with tabs[1]:
                     # Adicionar outras métricas ao dicionário do trial
                     if metrics:
                         for m_name, m_val in metrics.items():
-                            if m_name != 'confusion_matrix' and isinstance(m_val, (int, float, np.number)):
-                                trial_info[m_name.upper()] = m_val
+                            if m_name != 'confusion_matrix' and isinstance(m_val, (int, float, np.number, str, bool)):
+                                # Add params directly or metrics
+                                if m_name.startswith('param_'):
+                                    clean_name = m_name.replace('param_', '')
+                                    trial_info[clean_name] = m_val
+                                else:
+                                    trial_info[m_name.upper()] = m_val
 
                     st.session_state['trials_data'].append(trial_info)
                     
@@ -759,9 +807,36 @@ with tabs[1]:
                         if metrics:
                             main_metric_name = next(iter(metrics)).upper()
                         
+                        # Prepare rich hover data
+                        # Only include columns that actually exist in df_trials
+                        available_cols = df_trials.columns.tolist()
+                        hover_data_cols = [c for c in ["Modelo", "Identificador", "Score", "Duração (s)"] if c in available_cols]
+                        
+                        # Add dynamic metrics/params to hover data if they exist in the dataframe
+                        if metrics:
+                            for m_name in metrics.keys():
+                                # Check how it was added to trial_info
+                                col_name = m_name
+                                if m_name.startswith('param_'):
+                                    col_name = m_name.replace('param_', '')
+                                else:
+                                    col_name = m_name.upper()
+                                
+                                if col_name in available_cols and col_name not in hover_data_cols:
+                                    hover_data_cols.append(col_name)
+                        
                         fig = px.line(df_trials, x="Trial Modelo", y="Score", color="Modelo", 
-                                    markers=True, hover_name="Identificador",
+                                    markers=True, 
+                                    hover_name="Identificador",
+                                    hover_data=hover_data_cols,
                                     title="Progresso da Otimização por Algoritmo")
+                        
+                        # Customize tooltip template safely
+                        # We use default hovertemplate if customdata is complex, or build it dynamically
+                        # But simple way is to let Plotly handle it with hover_data
+                        # fig.update_traces(...) # Removed fixed template to avoid index errors
+
+                        
                         fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title=f"Score ({main_metric_name})")
                         st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
 
@@ -805,7 +880,8 @@ with tabs[1]:
                         validation_strategy=validation_strategy,
                         validation_params=validation_params,
                         custom_models=custom_models,
-                        optimization_mode=selected_opt_mode
+                        optimization_mode=selected_opt_mode,
+                        optimization_metric=optimization_metric
                     )
                     best_params = trainer.best_params
                     
@@ -879,6 +955,9 @@ with tabs[1]:
                                 # Feature Importance (SHAP - SHapley Additive exPlanations)
                                 st.markdown("#### 📈 Importância das Features (SHAP)")
                                 st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
+                                
+                                import shap
+                                import matplotlib.pyplot as plt
                                 
                                 shap_success = False
                                 try:
@@ -959,7 +1038,7 @@ with tabs[2]:
     st.header("🧪 Experiments Explorer")
     st.markdown("Aqui você encontra o histórico de **todos os treinos**. Escolha os melhores para registrar no catálogo oficial.")
     
-    runs = get_all_runs()
+    runs = get_cached_all_runs()
     if not runs.empty:
         # Filtros de Experimento
         exp_names = runs['experiment_name'].unique().tolist()
@@ -1013,6 +1092,8 @@ with tabs[3]:
         lr_cv = st.number_input("Learning Rate", 0.0001, 0.1, 0.001, format="%.4f")
 
     if st.button("🚀 Start CV Training"):
+        from cv_engine import CVAutoMLTrainer
+        
         trainer = CVAutoMLTrainer(task_type=cv_task)
         
         status_cv = st.empty()
@@ -1091,7 +1172,7 @@ with tabs[5]:
     st.header("🗂️ Official Model Registry")
     st.markdown("Apenas modelos validados e registrados manualmente via aba Experiments.")
     
-    models = get_registered_models()
+    models = get_cached_registered_models()
     if models:
         for m in models:
             with st.expander(f"📦 {m.name}"):

@@ -69,7 +69,11 @@ import os
 import logging
 import time
 import warnings
+# import matplotlib.pyplot as plt # Moved to local scope
+# import seaborn as sns # Moved to local scope
+import mlflow
 from sklearn.exceptions import ConvergenceWarning
+from sklearn.model_selection import cross_val_predict
 
 # Transformers import moved to top of file
 
@@ -119,7 +123,7 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
              logger.info(f"Checking input shape: {X.shape}")
              
              # If it's an array of strings/objects, it's raw text
-             if X.dtype == 'object' or X.dtype.type is np.str_ or X.dtype.type is np.string_:
+             if X.dtype == 'object' or X.dtype.type is np.str_ or X.dtype.type is np.bytes_:
                  is_raw_text = True
                  logger.info("Input detected as Raw Text (dtype object/string).")
              elif len(X.shape) > 1 and X.shape[1] > 1:
@@ -513,6 +517,13 @@ class AutoMLTrainer:
                 'timeout': 600,
                 'cv': 5,
                 'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees'] # Default selection
+            },
+            'test': {
+                'n_trials': 1, # Minimal for speed
+                'timeout': 30, # 30 seconds max
+                'cv': 2, # Minimal folds
+                # Removed MLP because it is slow
+                'models': ['logistic_regression', 'decision_tree'] 
             }
         }
 
@@ -822,12 +833,12 @@ class AutoMLTrainer:
                 ),
                 'sgd_regressor': lambda t: SGDRegressor(max_iter=1000, random_state=random_state),
                 'mlp': lambda t: MLPRegressor(
-                    hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(50, 50)", "(100, 50)"])),
-                    max_iter=t.suggest_int('mlp_max_iter', 200, 500),
-                    early_stopping=True,
-                    validation_fraction=0.1,
-                    n_iter_no_change=10,
-                    random_state=random_state
+                    hidden_layer_sizes=t.suggest_categorical('mlp_hidden', [(50,), (100,), (50, 50)]),
+                    activation=t.suggest_categorical('mlp_activation', ['relu', 'tanh']),
+                    alpha=t.suggest_float('mlp_alpha', 1e-4, 1e-1, log=True),
+                    max_iter=t.suggest_categorical('max_iter', [200, 500]) if not t.user_attrs.get("max_iter") else t.user_attrs.get("max_iter"),
+                    random_state=random_state,
+                    early_stopping=True # Force early stopping for speed
                 ),
                 'catboost': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
@@ -941,7 +952,7 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -988,16 +999,17 @@ class AutoMLTrainer:
             validation_params = {}
         
         tracker = None
+        # Define DummyTracker here to ensure scope availability
+        class DummyTracker:
+            def log_experiment(self, **kwargs):
+                return "dummy_run_id"
+
         try:
             from mlops_utils import MLFlowTracker
             tracker = MLFlowTracker(experiment_name)
             logger.info(f"✅ MLFlowTracker initialized for experiment: {experiment_name}")
         except Exception as e:
             logger.warning(f"⚠️ MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
-            # Create a dummy tracker
-            class DummyTracker:
-                def log_experiment(self, **kwargs):
-                    return "dummy_run_id"
             tracker = DummyTracker()
 
         # Early Stopping & Summary Logic
@@ -1005,6 +1017,7 @@ class AutoMLTrainer:
         trials_without_improvement = 0
         model_trial_counts = {} # Corrigir índice do gráfico: contador real por modelo
         self.model_summaries = {} # Armazenar melhor métrica de cada modelo
+        self.detailed_model_reports = {} # Armazenar relatórios detalhados para exibição
 
         def objective(trial, forced_model=None):
             nonlocal best_score_so_far, trials_without_improvement
@@ -1120,11 +1133,37 @@ class AutoMLTrainer:
                         logger.info("DEBUG: fit() completed.")
                         y_pred_val = model.predict(X_val)
                         if self.task_type == 'classification':
-                            score = accuracy_score(y_val, y_pred_val)
-                            trial_metrics['accuracy'] = score
+                            if optimization_metric == 'accuracy':
+                                score = accuracy_score(y_val, y_pred_val)
+                            elif optimization_metric == 'f1':
+                                score = f1_score(y_val, y_pred_val, average='weighted')
+                            elif optimization_metric == 'precision':
+                                score = precision_score(y_val, y_pred_val, average='weighted')
+                            elif optimization_metric == 'recall':
+                                score = recall_score(y_val, y_pred_val, average='weighted')
+                            elif optimization_metric == 'roc_auc':
+                                try:
+                                    y_prob_val = model.predict_proba(X_val)
+                                    score = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
+                                except:
+                                    score = 0.5 # Fail-safe
+                            else:
+                                score = accuracy_score(y_val, y_pred_val)
+
+                            trial_metrics['accuracy'] = accuracy_score(y_val, y_pred_val)
+                            trial_metrics['score'] = score
                         else:
-                            score = r2_score(y_val, y_pred_val)
-                            trial_metrics['r2'] = score
+                            if optimization_metric == 'r2':
+                                score = r2_score(y_val, y_pred_val)
+                            elif optimization_metric == 'rmse':
+                                score = -np.sqrt(mean_squared_error(y_val, y_pred_val)) # Negativo pois Optuna maximiza
+                            elif optimization_metric == 'mae':
+                                score = -mean_absolute_error(y_val, y_pred_val)
+                            else:
+                                score = r2_score(y_val, y_pred_val)
+                            
+                            trial_metrics['r2'] = r2_score(y_val, y_pred_val)
+                            trial_metrics['score'] = score
                     else:
                         # Cross Validation Logic
                         n_splits = validation_params.get('folds', 3) if validation_params else 3
@@ -1133,25 +1172,56 @@ class AutoMLTrainer:
                         
                         if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
                             cv = TimeSeriesSplit(n_splits=n_splits)
-                            scoring = 'r2'
+                            scoring = 'neg_root_mean_squared_error' if optimization_metric == 'rmse' else 'r2'
                         elif self.task_type == 'classification':
-                            scoring = 'accuracy'
+                            if optimization_metric == 'roc_auc':
+                                scoring = 'roc_auc_ovr'
+                            elif optimization_metric == 'f1':
+                                scoring = 'f1_weighted'
+                            elif optimization_metric == 'precision':
+                                scoring = 'precision_weighted'
+                            elif optimization_metric == 'recall':
+                                scoring = 'recall_weighted'
+                            else:
+                                scoring = 'accuracy'
+                                
                             if validation_strategy == 'stratified_cv':
                                 cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
                             else:
                                 cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
                         else: # Regression
-                            scoring = 'r2'
+                            if optimization_metric == 'rmse':
+                                scoring = 'neg_root_mean_squared_error'
+                            elif optimization_metric == 'mae':
+                                scoring = 'neg_mean_absolute_error'
+                            else:
+                                scoring = 'r2'
+                                
                             cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
                             
                         score = cross_val_score(model, X_tr, y_tr, cv=cv, scoring=scoring).mean()
                         trial_metrics[scoring] = score
+                        trial_metrics['score'] = score
                         
                         # Para salvar o modelo e artefatos, precisamos dar fit no treino completo do trial
                         # Nota: Fit final no trial_set sem CV para logging
                         logger.info(f"✨ Finalizando treino do modelo {full_trial_name}...")
                         model.fit(X_tr, y_tr)
                         logger.info(f"✅ Treino finalizado para {full_trial_name}")
+
+                        # ADDED: Log multiple metrics for every trial (not just the optimization one)
+                        if self.task_type == 'classification' and hasattr(model, 'predict'):
+                            try:
+                                # Get predictions on a holdout subset or OOF if possible (OOF is expensive here, so use simple predict on train for logging purposes - warning: overfitting metrics!)
+                                # Better: Use a small holdout from X_tr for quick logging metrics
+                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
+                                model.fit(X_sub_train, y_sub_train)
+                                y_sub_pred = model.predict(X_sub_val)
+                                trial_metrics['val_accuracy'] = accuracy_score(y_sub_val, y_sub_pred)
+                                trial_metrics['val_f1'] = f1_score(y_sub_val, y_sub_pred, average='weighted')
+                                # Re-fit full for the final model artifact
+                                model.fit(X_tr, y_tr)
+                            except: pass
                         
                 elif self.task_type == 'anomaly_detection':
                     model.fit(X_tr)
@@ -1187,6 +1257,12 @@ class AutoMLTrainer:
 
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
+            
+            # Enrich trial metrics with parameters for easy access in callbacks
+            # Prefix params to distinguish them
+            for p_k, p_v in trial_params.items():
+                if p_k not in trial_metrics:
+                    trial_metrics[f"param_{p_k}"] = p_v
             
             trial.set_user_attr("run_id", run_id)
             trial.set_user_attr("full_name", full_trial_name)
@@ -1255,7 +1331,7 @@ class AutoMLTrainer:
         models_to_tune = selected_models if selected_models else self.get_available_models()
         
         for m_name in models_to_tune:
-            # Check global time budget
+            # 1. Verificação do Orçamento Global
             if time_budget is not None:
                 elapsed_total = time.time() - global_start_time
                 if elapsed_total > time_budget:
@@ -1263,14 +1339,16 @@ class AutoMLTrainer:
                     break
                 
                 remaining_budget = time_budget - elapsed_total
-                # Adjust timeout for current model: use the smaller of (model timeout, remaining global budget)
+                
+                # 2. Ajuste do Timeout do Modelo Atual
+                # Usa o menor valor entre o timeout definido para o modelo e o tempo restante global
                 current_timeout = timeout
                 if current_timeout is None:
                     current_timeout = remaining_budget
                 else:
                     current_timeout = min(current_timeout, remaining_budget)
                     
-                # Ensure we have at least some minimal time, or skip
+                # Pula se o tempo restante for irrelevante (< 1s)
                 if current_timeout < 1.0:
                     logger.warning(f"⏰ Tempo restante insuficiente para {m_name}. Pulando.")
                     continue
@@ -1296,8 +1374,232 @@ class AutoMLTrainer:
             current_n_trials = 1 if m_name in static_models else n_trials
             
             trials_without_improvement = 0 
-            logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials, Timeout: {current_timeout}s)")
-            study.optimize(lambda t: objective(t, forced_model=m_name), n_trials=current_n_trials, timeout=current_timeout)
+            logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials, Timeout: {current_timeout:.2f}s)")
+            
+            try:
+                # O parâmetro timeout aqui garante que o Optuna pare de iniciar novos trials após o tempo limite
+                study.optimize(
+                    lambda t: objective(t, forced_model=m_name), 
+                    n_trials=current_n_trials, 
+                    timeout=current_timeout
+                )
+            except Exception as e:
+                logger.error(f"Erro durante otimização de {m_name}: {e}")
+            
+            # --- Per-Model Reporting & Logging (Post-Optimization) ---
+            try:
+                # 1. Recuperar o melhor trial para este modelo específico
+                best_trial_for_model = None
+                best_score_for_model = -np.inf
+                
+                for t in study.trials:
+                    # Check if trial was for this model and completed
+                    if t.state == optuna.trial.TrialState.COMPLETE and t.user_attrs.get("model_name") == m_name:
+                         if t.value > best_score_for_model:
+                             best_score_for_model = t.value
+                             best_trial_for_model = t
+                
+                if best_trial_for_model:
+                    logger.info(f"🏆 Melhor trial para {m_name}: Trial {best_trial_for_model.number} (Score: {best_score_for_model:.4f})")
+                    
+                    # 2. Re-instanciar o melhor modelo
+                    best_params_model = best_trial_for_model.params.copy()
+                    best_params_model['model_name'] = m_name # Ensure model name is present
+                    
+                    # Use specific seed if applicable
+                    model_seed = self.random_state
+                    if isinstance(self.random_state, dict):
+                        model_seed = self.random_state.get(m_name, 42)
+                    
+                    best_model_instance = self._instantiate_model(m_name, best_params_model)
+                    
+                    # Set seed
+                    if hasattr(best_model_instance, 'random_state'):
+                        best_model_instance.set_params(random_state=model_seed)
+                    elif hasattr(best_model_instance, 'random_seed'):
+                         best_model_instance.set_params(random_seed=model_seed)
+                    
+                    # Enable probability for classification plots
+                    if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                         # SVM needs explicit probability=True
+                         if m_name == 'svm' or isinstance(best_model_instance, SVC):
+                             best_model_instance.set_params(probability=True)
+
+                    # 3. Gerar previsões de validação robustas (CV ou Holdout) para os gráficos
+                    # Precisamos de y_true e y_pred (e y_proba)
+                    y_true_plot = None
+                    y_pred_plot = None
+                    y_proba_plot = None
+                    
+                    # Handle Data Input (Raw vs Vectorized)
+                    effective_X_plot = X_train
+                    if X_raw is not None and isinstance(best_model_instance, TransformersWrapper):
+                        effective_X_plot = X_raw
+                    
+                    # Generate predictions using cross_val_predict or holdout split
+                    # To be consistent with optimization, let's use CV if data allows, otherwise Holdout
+                    # For plotting, we want out-of-sample predictions on the training set
+                    
+                    # Check for high dimensionality to avoid memory explosion in reports
+                    is_high_dim = False
+                    if hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[1] > 5000:
+                        is_high_dim = True
+                        logger.warning(f"⚠️ High dimensionality detected ({effective_X_plot.shape[1]} features). Skipping full report generation to save memory.")
+                    
+                    if validation_strategy == 'time_series_cv' or self.task_type == 'time_series':
+                         # Time Series is tricky for 'full' plot. We'll skip complex plot generation here 
+                         # or just do a simple validation split at end
+                         pass 
+                    elif hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[0] < 50:
+                         # Too small for CV plotting, skip
+                         pass
+                    elif not hasattr(effective_X_plot, 'shape') and len(effective_X_plot) < 50:
+                         pass
+                    elif is_high_dim:
+                         # Skip detailed plotting for high dim data
+                         pass
+                    else:
+                        # Use 3-fold CV to get clean predictions for the whole training set
+                        # This gives us a confusion matrix for the whole dataset based on OOF predictions
+                        try:
+                            # IMPORTANT: Ensure X is numeric/processed before CV
+                            if isinstance(effective_X_plot, pd.DataFrame):
+                                # If DataFrame, check dtypes. If object, might fail if model not pipeline.
+                                # But best_model_instance SHOULD handle it if it was trained on it.
+                                pass
+                                
+                            logger.info(f"📊 Gerando previsões via CV (3-fold) para relatório do modelo {m_name}...")
+                            method = 'predict'
+                            y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
+                            y_true_plot = y_train
+                            
+                            if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                try:
+                                    y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
+                                except:
+                                    pass
+                        except Exception as cv_err:
+                            logger.warning(f"Failed to generate CV predictions for report: {cv_err}")
+                            # Fallback: Simple predict on X_train (Overfit warning)
+                            logger.info("Falling back to training set predictions (Warning: Metrics may be optimistic)")
+                            best_model_instance.fit(effective_X_plot, y_train)
+                            y_pred_plot = best_model_instance.predict(effective_X_plot)
+                            y_true_plot = y_train
+                            if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
+                    
+                    # 4. Calcular métricas detalhadas
+                    report_metrics = {}
+                    if y_true_plot is not None and y_pred_plot is not None:
+                        if self.task_type == 'classification':
+                            report_metrics['accuracy'] = accuracy_score(y_true_plot, y_pred_plot)
+                            report_metrics['f1'] = f1_score(y_true_plot, y_pred_plot, average='weighted')
+                            report_metrics['precision'] = precision_score(y_true_plot, y_pred_plot, average='weighted')
+                            report_metrics['recall'] = recall_score(y_true_plot, y_pred_plot, average='weighted')
+                            if y_proba_plot is not None:
+                                try:
+                                    report_metrics['roc_auc'] = roc_auc_score(y_true_plot, y_proba_plot, multi_class='ovr')
+                                except: pass
+                        elif self.task_type == 'regression':
+                            report_metrics['r2'] = r2_score(y_true_plot, y_pred_plot)
+                            report_metrics['rmse'] = np.sqrt(mean_squared_error(y_true_plot, y_pred_plot))
+                            report_metrics['mae'] = mean_absolute_error(y_true_plot, y_pred_plot)
+
+                    # 5. Criar objetos de plotagem (Matplotlib Figures)
+                    plots = {}
+                    if y_true_plot is not None and y_pred_plot is not None:
+                        import matplotlib.pyplot as plt
+                        import seaborn as sns
+                        
+                        if self.task_type == 'classification':
+                            # Confusion Matrix
+                            cm = confusion_matrix(y_true_plot, y_pred_plot)
+                            fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm)
+                            ax_cm.set_title(f'Confusion Matrix - {m_name}')
+                            ax_cm.set_ylabel('True Label')
+                            ax_cm.set_xlabel('Predicted Label')
+                            plots[f'confusion_matrix_{m_name}'] = fig_cm
+                            
+                            if y_proba_plot is not None and hasattr(best_model_instance, 'classes_'):
+                                from sklearn.preprocessing import label_binarize
+                                from sklearn.metrics import roc_curve, auc
+                                
+                                # ROC Curve
+                                fig_roc, ax_roc = plt.subplots(figsize=(6, 5))
+                                n_classes = len(np.unique(y_true_plot))
+                                
+                                if n_classes == 2:
+                                    fpr, tpr, _ = roc_curve(y_true_plot, y_proba_plot[:, 1])
+                                    roc_auc = auc(fpr, tpr)
+                                    ax_roc.plot(fpr, tpr, label=f'ROC curve (area = {roc_auc:.2f})')
+                                else:
+                                    # Multiclass ROC (Macro)
+                                    # This is a simplification
+                                    pass
+                                    
+                                ax_roc.plot([0, 1], [0, 1], 'k--')
+                                ax_roc.set_xlabel('False Positive Rate')
+                                ax_roc.set_ylabel('True Positive Rate')
+                                ax_roc.set_title(f'ROC Curve - {m_name}')
+                                ax_roc.legend(loc="lower right")
+                                plots[f'roc_curve_{m_name}'] = fig_roc
+
+                        elif self.task_type == 'regression':
+                            # Pred vs Actual
+                            fig_reg, ax_reg = plt.subplots(figsize=(6, 5))
+                            ax_reg.scatter(y_true_plot, y_pred_plot, alpha=0.5)
+                            ax_reg.plot([y_true_plot.min(), y_true_plot.max()], [y_true_plot.min(), y_true_plot.max()], 'k--', lw=2)
+                            ax_reg.set_xlabel('Actual')
+                            ax_reg.set_ylabel('Predicted')
+                            ax_reg.set_title(f'Actual vs Predicted - {m_name}')
+                            plots[f'pred_vs_actual_{m_name}'] = fig_reg
+                            # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
+                            # Better: Return the Figure object.
+                            
+                    # 6. Salvar no MLflow (sob o run_id do melhor trial)
+                    # Precisamos recuperar o run_id do trial
+                    best_run_id = best_trial_for_model.user_attrs.get("run_id")
+                    if best_run_id and tracker and not isinstance(tracker, DummyTracker):
+                        logger.info(f"💾 Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+                        with mlflow.start_run(run_id=best_run_id):
+                            # Log full params just in case
+                            mlflow.log_params(best_params_model)
+                            # Log extra metrics
+                            if report_metrics:
+                                mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                            
+                            # Log plots
+                            for plot_name, fig_obj in plots.items():
+                                try:
+                                    mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                                    # plt.close(fig_obj) # DO NOT CLOSE if we want to show in Streamlit
+                                except Exception as e:
+                                    logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                    
+                    # 7. Disparar Callback de Relatório Completo
+                    if callback:
+                         # Prepare rich report object
+                         full_report = {
+                             'model_name': m_name,
+                             'best_trial_number': best_trial_for_model.number,
+                             'score': best_score_for_model,
+                             'params': best_params_model,
+                             'metrics': report_metrics,
+                             'plots': plots,
+                             'run_id': best_run_id
+                         }
+                         
+                         report_payload = trial_metrics.copy() if 'trial_metrics' in locals() else {}
+                         report_payload['__report__'] = full_report
+                         
+                         callback(best_trial_for_model, best_score_for_model, f"{m_name} - FINAL", 0.0, report_payload)
+
+            except Exception as e:
+                logger.error(f"❌ Erro ao gerar relatório final para {m_name}: {e}")
+                # import traceback
+                # traceback.print_exc()
+
             # Resetar o flag de parada para permitir que o próximo modelo seja otimizado
             # O study.stop() define este flag como True
             if hasattr(study, '_stop_flag'):
