@@ -68,7 +68,12 @@ O sistema utiliza **Optuna** como motor de otimização, oferecendo quatro modos
 - **Grid Search:** Busca exaustiva em uma grade pré-definida. (Implementado via amostragem controlada no Optuna para garantir cobertura).
 - **Hyperband:** Técnica avançada que descarta configurações ruins rapidamente (early stopping agressivo), permitindo testar muito mais combinações em menos tempo.
 
-#### 2.5. Validação Automática Inteligente
+#### 2.5. Presets de Treino (AutoML)
+Para agilidade, o sistema oferece perfis pré-configurados (`automl_engine.py`):
+- **Fast:** ~15 trials. Foca em modelos leves (Logistic Regression, Random Forest) com validação simples. Ideal para testes rápidos.
+- **Medium:** ~40 trials. Inclui modelos de Gradient Boosting (XGBoost, LightGBM) e validação cruzada mais robusta (CV=5).
+
+#### 2.6. Validação Automática Inteligente
 Define como os modelos são avaliados para evitar *overfitting*. O sistema conta com um modo **Automático Inteligente**:
 - **Automático (Recomendado):**
     - **Séries Temporais:** Detecta automaticamente e aplica `TimeSeriesSplit`.
@@ -80,14 +85,25 @@ Define como os modelos são avaliados para evitar *overfitting*. O sistema conta
     - **Holdout**
     - **Time Series Split**
 
-### 3. ⚖️ Análise de Estabilidade e Robustez
+### 3. 👁️ Visão Computacional (CV Engine)
+O módulo `cv_engine.py` expande as capacidades para Deep Learning e Visão Computacional:
+- **Tarefas Suportadas:**
+    - **Classificação de Imagens:** Identificação de classes (ex: Gato vs Cachorro).
+    - **Segmentação Semântica:** Classificação pixel a pixel (ex: separar fundo e objeto) usando DeepLabV3.
+    - **Detecção de Objetos:** Localização com Bounding Boxes usando Faster R-CNN.
+- **Modelos & Transfer Learning:**
+    - **ResNet18 / ResNet50:** Arquiteturas robustas para classificação geral.
+    - **MobileNetV2:** Otimizado para eficiência e dispositivos móveis.
+    - **Backbones:** Pesos pré-treinados no ImageNet para convergência rápida.
+
+### 4. ⚖️ Análise de Estabilidade e Robustez
 A aba de **Estabilidade** permite avaliar a confiabilidade dos modelos gerados através de testes rigorosos:
 - **Robustez a Variação de Dados**: Testa o modelo em múltiplos splits de treino/teste para verificar a consistência das métricas.
 - **Robustez à Inicialização**: Avalia o impacto de diferentes sementes aleatórias (seeds) no treinamento.
 - **Sensibilidade a Hiperparâmetros**: Analisa como a performance varia ao alterar um hiperparâmetro específico.
 - **Análise Geral**: Executa uma bateria completa de testes e gera um relatório unificado de estabilidade.
 
-### 4. MLOps e Integrações
+### 5. MLOps, API e Integrações
 - **MLflow Integration:** Rastreamento completo de experimentos (parâmetros, métricas, artefatos).
 - **DagsHub Connection:**
     - Sincronização com repositórios remotos DagsHub.
@@ -97,6 +113,11 @@ A aba de **Estabilidade** permite avaliar a confiabilidade dos modelos gerados a
 - **Model Registry:** Versionamento e gestão de estágios de modelos (Staging, Production, Archived).
 - **Explicabilidade**: Integração nativa com SHAP.
 - **Docker Ready**: Ambiente containerizado pronto para uso.
+- **API Serving (FastAPI):**
+    - Módulo `api.py` fornece uma interface REST robusta.
+    - **Endpoints:** `/predict` para inferência e `/` para health check.
+    - **Segurança:** Autenticação via `x-api-key` no header.
+    - **Auto-Reload:** Carrega automaticamente o modelo mais recente salvo em `models/`.
 
 ---
 

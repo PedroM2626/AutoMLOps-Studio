@@ -972,7 +972,11 @@ class AutoMLTrainer:
                 logger.info("🤖 Validação Automática: Escolhido TimeSeriesSplit (dado que é série temporal).")
             else:
                 # Se tivermos dados suficientes, holdout é mais rápido. Se poucos, CV é mais robusto.
-                n_samples = len(X_train)
+                if hasattr(X_train, 'shape'):
+                    n_samples = X_train.shape[0]
+                else:
+                    n_samples = len(X_train)
+
                 if n_samples < 1000:
                     validation_strategy = 'cv'
                     logger.info(f"🤖 Validação Automática: Escolhido Cross-Validation (N={n_samples} < 1000).")
