@@ -194,7 +194,7 @@ class AutoMLDataProcessor:
         """Applies text cleaning to a specific column in DataFrame."""
         if col in df.columns:
             cleaning_mode = self.nlp_config.get('cleaning_mode', 'standard')
-            logger.info(f"🧹 Limpando texto da coluna: {col} (Mode: {cleaning_mode})")
+            logger.info(f"Limpando texto da coluna: {col} (Mode: {cleaning_mode})")
             
             def clean_text_optimized(text):
                 text = str(text).lower()
@@ -980,7 +980,7 @@ class AutoMLTrainer:
         if validation_strategy == 'auto':
             if self.task_type == 'time_series':
                 validation_strategy = 'time_series_cv'
-                logger.info("🤖 Validação Automática: Escolhido TimeSeriesSplit (dado que é série temporal).")
+                logger.info("Validacao Automatica: Escolhido TimeSeriesSplit (dado que e serie temporal).")
             else:
                 # Se tivermos dados suficientes, holdout é mais rápido. Se poucos, CV é mais robusto.
                 if hasattr(X_train, 'shape'):
@@ -990,10 +990,10 @@ class AutoMLTrainer:
 
                 if n_samples < 1000:
                     validation_strategy = 'cv'
-                    logger.info(f"🤖 Validação Automática: Escolhido Cross-Validation (N={n_samples} < 1000).")
+                    logger.info(f"Validacao Automatica: Escolhido Cross-Validation (N={n_samples} < 1000).")
                 else:
                     validation_strategy = 'holdout'
-                    logger.info(f"🤖 Validação Automática: Escolhido Holdout/Train-Test Split (N={n_samples} >= 1000).")
+                    logger.info(f"Validacao Automatica: Escolhido Holdout/Train-Test Split (N={n_samples} >= 1000).")
 
         if validation_params is None:
             validation_params = {}
@@ -1007,9 +1007,9 @@ class AutoMLTrainer:
         try:
             from mlops_utils import MLFlowTracker
             tracker = MLFlowTracker(experiment_name)
-            logger.info(f"✅ MLFlowTracker initialized for experiment: {experiment_name}")
+            logger.info(f"MLFlowTracker initialized for experiment: {experiment_name}")
         except Exception as e:
-            logger.warning(f"⚠️ MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
+            logger.warning(f"MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
             tracker = DummyTracker()
 
         # Early Stopping & Summary Logic
@@ -1026,7 +1026,7 @@ class AutoMLTrainer:
             if time_budget is not None:
                 elapsed = time.time() - global_start_time
                 if elapsed > time_budget:
-                    logger.warning(f"⏰ Global time budget exceeded ({elapsed:.2f}s > {time_budget}s). Stopping study.")
+                    logger.warning(f"Global time budget exceeded ({elapsed:.2f}s > {time_budget}s). Stopping study.")
                     trial.study.stop()
                     return 0.0
 
@@ -1051,7 +1051,7 @@ class AutoMLTrainer:
             if isinstance(self.random_state, dict):
                 current_seed = self.random_state.get(model_name, 42)
             
-            logger.info(f"📍 Trial {trial.number} mapeado para {full_trial_name} (Seed: {current_seed})")
+            logger.info(f"Trial {trial.number} mapeado para {full_trial_name} (Seed: {current_seed})")
 
             run_id = None
 
@@ -1071,9 +1071,9 @@ class AutoMLTrainer:
             effective_X = X_train
             if X_raw is not None and isinstance(model, TransformersWrapper):
                 effective_X = X_raw
-                logger.info(f"🤖 Model {model_name} uses Transformers: Using RAW TEXT input.")
+                logger.info(f"Model {model_name} uses Transformers: Using RAW TEXT input.")
             elif isinstance(model, TransformersWrapper):
-                logger.warning(f"⚠️ Model {model_name} is a Transformer but X_raw was not provided. Expect failure if input is vectorized.")
+                logger.warning(f"Model {model_name} is a Transformer but X_raw was not provided. Expect failure if input is vectorized.")
 
             # Lógica de Validação e Split de Dados
             X_tr, X_val, y_tr, y_val = None, None, None, None
@@ -1118,7 +1118,7 @@ class AutoMLTrainer:
                 X_val, y_val = None, None
 
             start_time = time.time()
-            logger.info(f"⏳ Treinando {full_trial_name}...")
+            logger.info(f"Treinando {full_trial_name}...")
             trial_metrics = {}
             trial_params = trial.params.copy()
             trial_params['task_type'] = self.task_type
@@ -1151,63 +1151,70 @@ class AutoMLTrainer:
                                 score = accuracy_score(y_val, y_pred_val)
 
                             trial_metrics['accuracy'] = accuracy_score(y_val, y_pred_val)
-                            trial_metrics['score'] = score
+                            trial_metrics['f1'] = f1_score(y_val, y_pred_val, average='weighted')
+                            trial_metrics['precision'] = precision_score(y_val, y_pred_val, average='weighted')
+                            trial_metrics['recall'] = recall_score(y_val, y_pred_val, average='weighted')
+                            try:
+                                y_prob_val = model.predict_proba(X_val)
+                                trial_metrics['roc_auc'] = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
+                            except: pass
                         else:
-                            if optimization_metric == 'r2':
-                                score = r2_score(y_val, y_pred_val)
-                            elif optimization_metric == 'rmse':
-                                score = -np.sqrt(mean_squared_error(y_val, y_pred_val)) # Negativo pois Optuna maximiza
-                            elif optimization_metric == 'mae':
-                                score = -mean_absolute_error(y_val, y_pred_val)
-                            else:
-                                score = r2_score(y_val, y_pred_val)
-                            
                             trial_metrics['r2'] = r2_score(y_val, y_pred_val)
-                            trial_metrics['score'] = score
+                            trial_metrics['rmse'] = np.sqrt(mean_squared_error(y_val, y_pred_val))
+                            trial_metrics['mae'] = mean_absolute_error(y_val, y_pred_val)
                     else:
                         # Cross Validation Logic
                         n_splits = validation_params.get('folds', 3) if validation_params else 3
                         # Fallback se folds não estiver definido
                         if not isinstance(n_splits, int): n_splits = 3
                         
-                        if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
-                            cv = TimeSeriesSplit(n_splits=n_splits)
-                            scoring = 'neg_root_mean_squared_error' if optimization_metric == 'rmse' else 'r2'
-                        elif self.task_type == 'classification':
-                            if optimization_metric == 'roc_auc':
-                                scoring = 'roc_auc_ovr'
-                            elif optimization_metric == 'f1':
-                                scoring = 'f1_weighted'
-                            elif optimization_metric == 'precision':
-                                scoring = 'precision_weighted'
-                            elif optimization_metric == 'recall':
-                                scoring = 'recall_weighted'
-                            else:
-                                scoring = 'accuracy'
-                                
+                        # Definir métricas para calcular via cross_validate
+                        if self.task_type == 'classification':
+                            scoring_list = ['accuracy', 'f1_weighted', 'precision_weighted', 'recall_weighted']
+                            # Adicionar roc_auc se o modelo suportar predict_proba
+                            if hasattr(model, 'predict_proba'):
+                                scoring_list.append('roc_auc_ovr')
+                            
                             if validation_strategy == 'stratified_cv':
                                 cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
                             else:
                                 cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
-                        else: # Regression
-                            if optimization_metric == 'rmse':
-                                scoring = 'neg_root_mean_squared_error'
-                            elif optimization_metric == 'mae':
-                                scoring = 'neg_mean_absolute_error'
+                        elif self.task_type == 'regression' or self.task_type == 'time_series':
+                            scoring_list = ['r2', 'neg_root_mean_squared_error', 'neg_mean_absolute_error']
+                            if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
+                                cv = TimeSeriesSplit(n_splits=n_splits)
                             else:
-                                scoring = 'r2'
-                                
-                            cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
-                            
-                        score = cross_val_score(model, X_tr, y_tr, cv=cv, scoring=scoring).mean()
-                        trial_metrics[scoring] = score
-                        trial_metrics['score'] = score
+                                cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                        
+                        from sklearn.model_selection import cross_validate
+                        cv_results = cross_validate(model, X_tr, y_tr, cv=cv, scoring=scoring_list)
+                        
+                        # Mapear resultados do cv_results para trial_metrics
+                        for s_key in scoring_list:
+                            val = cv_results[f'test_{s_key}'].mean()
+                            # Ajustar métricas negativas
+                            if s_key.startswith('neg_'):
+                                clean_name = s_key.replace('neg_', '')
+                                trial_metrics[clean_name] = -val
+                            else:
+                                trial_metrics[s_key.replace('_weighted', '').replace('_ovr', '')] = val
+                        
+                        # O score principal para o Optuna
+                        if self.task_type == 'classification':
+                            opt_key = optimization_metric if optimization_metric != 'accuracy' else 'accuracy'
+                            score = trial_metrics.get(opt_key, trial_metrics['accuracy'])
+                        else:
+                            opt_key = optimization_metric if optimization_metric != 'r2' else 'r2'
+                            score = trial_metrics.get(opt_key, trial_metrics['r2'])
+                            # Para métricas de erro que queremos minimizar (RMSE/MAE), o Optuna precisa do valor negativo para maximizar
+                            if optimization_metric in ['rmse', 'mae']:
+                                score = -score
                         
                         # Para salvar o modelo e artefatos, precisamos dar fit no treino completo do trial
                         # Nota: Fit final no trial_set sem CV para logging
-                        logger.info(f"✨ Finalizando treino do modelo {full_trial_name}...")
+                        logger.info(f"Finalizando treino do modelo {full_trial_name}...")
                         model.fit(X_tr, y_tr)
-                        logger.info(f"✅ Treino finalizado para {full_trial_name}")
+                        logger.info(f"Treino finalizado para {full_trial_name}")
 
                         # ADDED: Log multiple metrics for every trial (not just the optimization one)
                         if self.task_type == 'classification' and hasattr(model, 'predict'):
@@ -1240,7 +1247,7 @@ class AutoMLTrainer:
                     trial_metrics['silhouette'] = score
 
                 # Unified Logging for all tasks/strategies
-                logger.info(f"📊 Registrando {full_trial_name} no MLflow...")
+                logger.info(f"Registrando {full_trial_name} no MLflow...")
                 run_id = tracker.log_experiment(
                     params=trial_params,
                     metrics=trial_metrics,
@@ -1248,15 +1255,21 @@ class AutoMLTrainer:
                     model_name=full_trial_name,
                     register=False
                 )
-                logger.info(f"✔ {full_trial_name} registrado com ID: {run_id}")
+                logger.info(f"Run {full_trial_name} registrado com ID: {run_id}")
 
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
-                score = -1.0
-                trial_metrics['error'] = 1.0
+                # Don't set score to -1 here, let it be 0.0 to avoid breaking charts
+                score = 0.0 
+                run_id = "error_run"
 
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
+            
+            # Ensure score is never negative for visualization purposes (unless metric allows)
+            # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
+            if self.task_type in ['classification', 'clustering', 'anomaly_detection']:
+                score = max(0.0, score)
             
             # Enrich trial metrics with parameters for easy access in callbacks
             # Prefix params to distinguish them
@@ -1278,7 +1291,10 @@ class AutoMLTrainer:
                 }
 
             if callback:
-                callback(trial, score, full_trial_name, duration, trial_metrics)
+                try:
+                    callback(trial, score, full_trial_name, duration, trial_metrics)
+                except Exception as cb_err:
+                    logger.error(f"Error in training callback: {cb_err}")
                 
             if score > (best_score_so_far + min_improvement):
                 best_score_so_far = score
@@ -1300,20 +1316,20 @@ class AutoMLTrainer:
         
         if optimization_mode == 'random':
             sampler = optuna.samplers.RandomSampler(seed=sampler_seed)
-            logger.info("🎲 Modo de Otimização: Random Search")
+            logger.info("Modo de Otimizacao: Random Search")
         elif optimization_mode == 'grid':
             # Nota: GridSampler requer espaço de busca definido a priori, o que não temos aqui.
             # Fallback para RandomSampler (que faz busca estocástica, similar a Grid não-exaustivo)
             sampler = optuna.samplers.RandomSampler(seed=sampler_seed)
-            logger.warning("⚠️ Grid Search selecionado, mas usando Random Search devido à definição dinâmica do espaço de busca.")
+            logger.warning("Grid Search selecionado, mas usando Random Search devido a definicao dinamica do espaco de busca.")
         elif optimization_mode == 'hyperband':
             # Hyperband usa TPE + Pruning agressivo
             sampler = optuna.samplers.TPESampler(n_startup_trials=5, seed=sampler_seed)
             pruner = optuna.pruners.HyperbandPruner(min_resource=1, max_resource=n_trials, reduction_factor=3)
-            logger.info("⚡ Modo de Otimização: Hyperband (TPE + HyperbandPruner)")
+            logger.info("Modo de Otimizacao: Hyperband (TPE + HyperbandPruner)")
         else: # bayesian (default) or auto
             sampler = optuna.samplers.TPESampler(n_startup_trials=max(n_trials // 3, 5), seed=sampler_seed)
-            logger.info("🧠 Modo de Otimização: Bayesian Optimization (TPE)")
+            logger.info("Modo de Otimizacao: Bayesian Optimization (TPE)")
         
         study = optuna.create_study(
             direction=direction,
@@ -1335,7 +1351,7 @@ class AutoMLTrainer:
             if time_budget is not None:
                 elapsed_total = time.time() - global_start_time
                 if elapsed_total > time_budget:
-                    logger.warning(f"⏰ Tempo total excedido ({elapsed_total:.2f}s > {time_budget}s). Interrompendo treino de novos modelos.")
+                    logger.warning(f"Tempo total excedido ({elapsed_total:.2f}s > {time_budget}s). Interrompendo treino de novos modelos.")
                     break
                 
                 remaining_budget = time_budget - elapsed_total
@@ -1350,7 +1366,7 @@ class AutoMLTrainer:
                     
                 # Pula se o tempo restante for irrelevante (< 1s)
                 if current_timeout < 1.0:
-                    logger.warning(f"⏰ Tempo restante insuficiente para {m_name}. Pulando.")
+                    logger.warning(f"Tempo restante insuficiente para {m_name}. Pulando.")
                     continue
             else:
                 current_timeout = timeout
@@ -1362,19 +1378,19 @@ class AutoMLTrainer:
                      study.sampler = optuna.samplers.RandomSampler(seed=model_seed)
                 else:
                      study.sampler = optuna.samplers.TPESampler(n_startup_trials=min(n_trials, 10), seed=model_seed)
-                logger.info(f"🎲 Sampler seed atualizado para {model_seed} (Modelo: {m_name})")
+                logger.info(f"Sampler seed atualizado para {model_seed} (Modelo: {m_name})")
             # Se houver parâmetros manuais para este modelo, enfileira uma tentativa com eles
             if manual_params and manual_params.get('model_name') == m_name:
                 p = {'model_name': m_name}
                 p.update({k: v for k, v in manual_params.items() if k != 'model_name'})
                 study.enqueue_trial(p)
-                logger.info(f"💉 Enfileirando tentativa manual para {m_name}")
+                logger.info(f"Enfileirando tentativa manual para {m_name}")
 
             # Se o modelo for estático, rodamos apenas 1 vez
             current_n_trials = 1 if m_name in static_models else n_trials
             
             trials_without_improvement = 0 
-            logger.info(f"🚀 Iniciando otimização para o modelo: {m_name} ({current_n_trials} trials, Timeout: {current_timeout:.2f}s)")
+            logger.info(f"Iniciando otimizacao para o modelo: {m_name} ({current_n_trials} trials, Timeout: {current_timeout:.2f}s)")
             
             try:
                 # O parâmetro timeout aqui garante que o Optuna pare de iniciar novos trials após o tempo limite
@@ -1400,7 +1416,7 @@ class AutoMLTrainer:
                              best_trial_for_model = t
                 
                 if best_trial_for_model:
-                    logger.info(f"🏆 Melhor trial para {m_name}: Trial {best_trial_for_model.number} (Score: {best_score_for_model:.4f})")
+                    logger.info(f"Melhor trial para {m_name}: Trial {best_trial_for_model.number} (Score: {best_score_for_model:.4f})")
                     
                     # 2. Re-instanciar o melhor modelo
                     best_params_model = best_trial_for_model.params.copy()
@@ -1444,7 +1460,7 @@ class AutoMLTrainer:
                     is_high_dim = False
                     if hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[1] > 5000:
                         is_high_dim = True
-                        logger.warning(f"⚠️ High dimensionality detected ({effective_X_plot.shape[1]} features). Skipping full report generation to save memory.")
+                        logger.warning(f"High dimensionality detected ({effective_X_plot.shape[1]} features). Skipping full report generation to save memory.")
                     
                     if validation_strategy == 'time_series_cv' or self.task_type == 'time_series':
                          # Time Series is tricky for 'full' plot. We'll skip complex plot generation here 
@@ -1561,7 +1577,7 @@ class AutoMLTrainer:
                     # Precisamos recuperar o run_id do trial
                     best_run_id = best_trial_for_model.user_attrs.get("run_id")
                     if best_run_id and tracker and not isinstance(tracker, DummyTracker):
-                        logger.info(f"💾 Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+                        logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
                         with mlflow.start_run(run_id=best_run_id):
                             # Log full params just in case
                             mlflow.log_params(best_params_model)
@@ -1596,7 +1612,7 @@ class AutoMLTrainer:
                          callback(best_trial_for_model, best_score_for_model, f"{m_name} - FINAL", 0.0, report_payload)
 
             except Exception as e:
-                logger.error(f"❌ Erro ao gerar relatório final para {m_name}: {e}")
+                logger.error(f"Erro ao gerar relatorio final para {m_name}: {e}")
                 # import traceback
                 # traceback.print_exc()
 
@@ -1604,7 +1620,7 @@ class AutoMLTrainer:
             # O study.stop() define este flag como True
             if hasattr(study, '_stop_flag'):
                 study._stop_flag = False
-            logger.info(f"✅ Otimização para {m_name} finalizada.")
+            logger.info(f"Otimizacao para {m_name} finalizada.")
         
         self.best_params = study.best_params
         self.best_value = study.best_value
@@ -1618,8 +1634,8 @@ class AutoMLTrainer:
         if best_model_name:
             self.best_params['model_name'] = best_model_name
         
-        logger.info(f"🏆 Melhor modelo global encontrado: {best_model_name}")
-        logger.info(f"📊 Melhores parâmetros: {self.best_params}")
+        logger.info(f"Melhor modelo global encontrado: {best_model_name}")
+        logger.info(f"Melhores parametros: {self.best_params}")
         
         if self.task_type == 'time_series':
             self.best_params.update(self.ts_metadata)
@@ -1629,7 +1645,7 @@ class AutoMLTrainer:
         # Reativar probabilidade para o modelo final se for SVM
         if best_model_name == 'svm' and hasattr(self.best_model, 'probability'):
             self.best_model.set_params(probability=True)
-            logger.info("🔮 Ativando estimativa de probabilidade para o modelo SVM final.")
+            logger.info("Ativando estimativa de probabilidade para o modelo SVM final.")
         
         # Garantir a mesma seed no modelo final
         final_model_seed = self.random_state
@@ -1646,9 +1662,9 @@ class AutoMLTrainer:
         if isinstance(self.best_model, TransformersWrapper):
             if X_raw is not None:
                 final_X = X_raw
-                logger.info(f"🤖 Final Fit: Model {best_model_name} is a Transformer. Using RAW TEXT input.")
+                logger.info(f"Final Fit: Model {best_model_name} is a Transformer. Using RAW TEXT input.")
             else:
-                 logger.warning(f"⚠️ Final Fit: Model {best_model_name} is a Transformer but X_raw is missing. Expect failure.")
+                 logger.warning(f"Final Fit: Model {best_model_name} is a Transformer but X_raw is missing. Expect failure.")
 
         if y_train is not None:
             self.best_model.fit(final_X, y_train)
@@ -1658,10 +1674,10 @@ class AutoMLTrainer:
         # Adicionar Feature Importance se disponível
         if hasattr(self.best_model, 'feature_importances_'):
             self.feature_importance = self.best_model.feature_importances_.tolist()
-            logger.info("📈 Feature Importance calculada.")
+            logger.info("Feature Importance calculada.")
         elif hasattr(self.best_model, 'coef_'):
             self.feature_importance = np.abs(self.best_model.coef_).flatten().tolist()
-            logger.info("📈 Feature Importance calculada (baseada em coeficientes).")
+            logger.info("Feature Importance calculada (baseada em coeficientes).")
         else:
             self.feature_importance = None
 

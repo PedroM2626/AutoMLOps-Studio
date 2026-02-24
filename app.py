@@ -62,16 +62,16 @@ def get_cached_registered_models():
 with st.sidebar:
     # Hybrid Rendering Detection
     if os.environ.get('IS_ELECTRON_APP') == 'true':
-        st.markdown("`🖥️ Desktop Mode`")
+        st.markdown("`Desktop Mode`")
         
-    st.title("🛡️ Platform Control")
+    st.title("Platform Control")
     st.divider()
     
     # Quick Stats (Cached)
     all_runs_df = get_cached_all_runs()
     reg_models = get_cached_registered_models()
     
-    st.markdown("### 📈 System Overview")
+    st.markdown("### System Overview")
     col_s1, col_s2 = st.columns(2)
     with col_s1:
         st.metric("Experiments", len(all_runs_df) if not all_runs_df.empty else 0)
@@ -79,7 +79,7 @@ with st.sidebar:
         st.metric("Reg. Models", len(reg_models))
         
     st.divider()
-    st.markdown("### 📁 Active Dataset")
+    st.markdown("### Active Dataset")
     if 'df' in st.session_state:
         st.success(f"Rows: {st.session_state['df'].shape[0]}\nCols: {st.session_state['df'].shape[1]}")
     else:
@@ -88,7 +88,7 @@ with st.sidebar:
     st.divider()
     
     # --- DagsHub Integration ---
-    with st.expander("🔗 DagsHub Integration"):
+    with st.expander("DagsHub Integration"):
         st.caption("Conecte-se ao seu repositório DagsHub para salvar experimentos remotamente.")
         
         # Tentar recuperar configurações do ambiente (.env)
@@ -236,10 +236,10 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
 
 # 📑 TAB NAVIGATION (Corrected Indices)
 tabs = st.tabs([
-    "📊 Data", 
-    "🤖 AutoML & CV", 
-    "🧪 Experiments", 
-    "🗂️ Model Registry & Deploy"
+    "Data", 
+    "AutoML & CV", 
+    "Experiments", 
+    "Model Registry & Deploy"
 ])
 
 # --- TAB 0: DATA & DRIFT ---
@@ -823,7 +823,8 @@ with tabs[1]:
                     if metrics and '__report__' in metrics:
                         report = metrics['__report__']
                         with report_container:
-                            with st.expander(f"📄 Relatório Final: {report['model_name']} (Score: {report['score']:.4f})", expanded=False):
+                            expander_label = f"Relatório Final: {report['model_name']} (Score: {report['score']:.4f})"
+                            with st.expander(expander_label, expanded=False):
                                 col_rep1, col_rep2 = st.columns([1, 2])
                                 with col_rep1:
                                     st.markdown("**Métricas de Validação**")
@@ -831,11 +832,17 @@ with tabs[1]:
                                     st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
                                     st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
                                 with col_rep2:
-                                    if 'plots' in report:
-                                        tab_plots = st.tabs(list(report['plots'].keys()))
-                                        for i, (plot_name, fig_obj) in enumerate(report['plots'].items()):
-                                            with tab_plots[i]:
-                                                st.pyplot(fig_obj)
+                                    if 'plots' in report and report['plots']:
+                                        plot_labels = list(report['plots'].keys())
+                                        if plot_labels:
+                                            tab_plots = st.tabs(plot_labels)
+                                            for i, plot_name in enumerate(plot_labels):
+                                                with tab_plots[i]:
+                                                    st.pyplot(report['plots'][plot_name])
+                                        else:
+                                            st.info("Sem visualizações disponíveis para este modelo.")
+                                    else:
+                                        st.info("Sem visualizações disponíveis para este modelo.")
                         return
 
                     # Extrair nome do algoritmo e o número do trial do modelo
@@ -848,74 +855,51 @@ with tabs[1]:
                         "Trial Modelo": trial_num,
                         "Modelo": algo_name,
                         "Identificador": full_name,
-                        "Score": score,
                         "Duração (s)": dur
                     }
-                    
-                    # Adicionar outras métricas ao dicionário do trial
+
+                    # Definir qual métrica é a "alvo" (eixo Y do gráfico)
+                    target_metric_name = optimization_metric.upper()
+
+                    # Adicionar métricas adicionais se houver
                     if metrics:
-                        for m_name, m_val in metrics.items():
-                            if m_name != 'confusion_matrix' and isinstance(m_val, (int, float, np.number, str, bool)):
-                                # Add params directly or metrics
-                                if m_name.startswith('param_'):
-                                    clean_name = m_name.replace('param_', '')
-                                    trial_info[clean_name] = m_val
-                                else:
-                                    trial_info[m_name.upper()] = m_val
+                        for m_k, m_v in metrics.items():
+                            if m_k != "__report__" and isinstance(m_v, (int, float, np.number)):
+                                col_name = m_k.upper()
+                                trial_info[col_name] = m_v
+                    
+                    # Garantir que a métrica alvo esteja presente no trial_info para o gráfico
+                    if target_metric_name not in trial_info:
+                        trial_info[target_metric_name] = score
 
                     st.session_state['trials_data'].append(trial_info)
                     
                     df_trials = pd.DataFrame(st.session_state['trials_data'])
                     
                     with status_c:
-                        metric_text = f"Score: {score:.4f}"
-                        if metrics:
-                            # Mostrar a métrica principal de forma destacada
-                            main_metric = next(iter(metrics))
-                            metric_text = f"{main_metric.upper()}: {metrics[main_metric]:.4f}"
-                            
-                        st.info(f"✨ {full_name} concluído | {metric_text} | Total: {trial.number + 1}/{total_expected_trials}")
+                        metric_text = f"{target_metric_name}: {score:.4f}"
+                        st.info(f"{full_name} concluido | {metric_text} | Total: {trial.number + 1}/{total_expected_trials}")
                     
                     progress_bar.progress(min((trial.number + 1) / total_expected_trials, 1.0))
                     
                     with chart_c:
                         # Gráfico mostrando o progresso de cada modelo individualmente
-                        # Determinar o nome da métrica principal para o eixo Y
-                        main_metric_name = "Métrica"
-                        if metrics:
-                            main_metric_name = next(iter(metrics)).upper()
-                        
                         # Prepare rich hover data
-                        # Only include columns that actually exist in df_trials
                         available_cols = df_trials.columns.tolist()
-                        hover_data_cols = [c for c in ["Modelo", "Identificador", "Score", "Duração (s)"] if c in available_cols]
+                        hover_data_cols = [c for c in ["Modelo", "Identificador", "Duração (s)"] if c in available_cols]
                         
-                        # Add dynamic metrics/params to hover data if they exist in the dataframe
-                        if metrics:
-                            for m_name in metrics.keys():
-                                # Check how it was added to trial_info
-                                col_name = m_name
-                                if m_name.startswith('param_'):
-                                    col_name = m_name.replace('param_', '')
-                                else:
-                                    col_name = m_name.upper()
-                                
-                                if col_name in available_cols and col_name not in hover_data_cols:
-                                    hover_data_cols.append(col_name)
+                        # Adicionar todas as métricas encontradas ao hover
+                        for col in available_cols:
+                            if col not in hover_data_cols and col not in ["Tentativa Geral", "Trial Modelo"]:
+                                hover_data_cols.append(col)
                         
-                        fig = px.line(df_trials, x="Trial Modelo", y="Score", color="Modelo", 
+                        fig = px.line(df_trials, x="Trial Modelo", y=target_metric_name, color="Modelo", 
                                     markers=True, 
                                     hover_name="Identificador",
                                     hover_data=hover_data_cols,
-                                    title="Progresso da Otimização por Algoritmo")
+                                    title=f"Progresso da Otimizacao: {target_metric_name} por Algoritmo")
                         
-                        # Customize tooltip template safely
-                        # We use default hovertemplate if customdata is complex, or build it dynamically
-                        # But simple way is to let Plotly handle it with hover_data
-                        # fig.update_traces(...) # Removed fixed template to avoid index errors
-
-                        
-                        fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title=f"Score ({main_metric_name})")
+                        fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title=target_metric_name)
                         st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
 
                 with st.spinner("Processando..."):
@@ -975,21 +959,21 @@ with tabs[1]:
                     # Evaluation
                     metrics, y_pred = trainer.evaluate(X_test_proc, y_test_proc) if X_test_proc is not None else (None, None)
                     
-                    st.success("🎉 Processo de AutoML Finalizado com Sucesso!")
+                    st.success("Processo de AutoML Finalizado com Sucesso!")
                     
                     # Mostrar o melhor modelo de forma destacada
                     best_model_name = trainer.best_params.get('model_name', 'Desconhecido')
                     st.balloons()
                     st.markdown(f"""
                         <div style="background-color:#d4edda; padding:20px; border-radius:10px; border-left:8px solid #28a745; margin-bottom:20px;">
-                            <h2 style="color:#155724; margin:0;">🏆 Melhor Modelo Encontrado: {best_model_name}</h2>
+                            <h2 style="color:#155724; margin:0;">Melhor Modelo Encontrado: {best_model_name}</h2>
                             <p style="color:#155724; font-size:1.1em; margin-top:10px;">O sistema otimizou e selecionou o algoritmo acima como o de melhor performance para sua tarefa.</p>
                         </div>
                     """, unsafe_allow_html=True)
 
                     # --- Resumo por Modelo ---
                     if hasattr(trainer, 'model_summaries') and trainer.model_summaries:
-                        st.markdown("### 🏆 Melhores Resultados por Algoritmo")
+                        st.markdown("### Melhores Resultados por Algoritmo")
                         summary_data = []
                         for m_name, info in trainer.model_summaries.items():
                             row = {
@@ -1009,12 +993,18 @@ with tabs[1]:
                         st.table(df_summary)
                         
                         # Também permitir ver todos os trials em uma tabela expansível
-                        with st.expander("📋 Ver Histórico Completo de Todas as Tentativas"):
-                            df_all = pd.DataFrame(st.session_state['trials_data'])
-                            st.dataframe(df_all.sort_values(by="Score", ascending=False), use_container_width=True)
+                        with st.expander("Ver Historico Completo de Todas as Tentativas"):
+                            if st.session_state.get('trials_data'):
+                                df_all = pd.DataFrame(st.session_state['trials_data'])
+                                if not df_all.empty:
+                                    # Drop all-NA columns to avoid deprecation warning
+                                    df_all = df_all.dropna(axis=1, how='all')
+                                    st.dataframe(df_all.sort_values(by=target_metric_name, ascending=False), use_container_width=True)
+                            else:
+                                st.info("Sem dados de tentativas para exibir.")
 
                     if metrics: 
-                        st.markdown("### 📊 Resultados Finais (Melhor Modelo Global)")
+                        st.markdown("### Resultados Finais (Melhor Modelo Global)")
                         cols_m = st.columns(len(metrics))
                         for i, (m_name, m_val) in enumerate(metrics.items()):
                             if m_name != 'confusion_matrix':
@@ -1024,19 +1014,19 @@ with tabs[1]:
                     # --- Visualizações de Resultados ---
                     if X_test_proc is not None:
                         st.divider()
-                        st.subheader("📈 Visualização de Performance")
+                        st.subheader("Visualizacao de Performance")
                         
                         if task == "classification":
                             col_v1, col_v2 = st.columns(2)
                             with col_v1:
                                 if 'confusion_matrix' in metrics:
                                     cm = np.array(metrics['confusion_matrix'])
-                                    fig_cm = px.imshow(cm, text_auto=True, title="Matriz de Confusão",
+                                    fig_cm = px.imshow(cm, text_auto=True, title="Matriz de Confusao",
                                                      labels=dict(x="Predito", y="Real", color="Quantidade"))
                                     st.plotly_chart(fig_cm)
                             with col_v2:
                                 # Feature Importance (SHAP - SHapley Additive exPlanations)
-                                st.markdown("#### 📈 Importância das Features (SHAP)")
+                                st.markdown("#### Importancia das Features (SHAP)")
                                 st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
                                 
                                 import shap
@@ -1058,28 +1048,28 @@ with tabs[1]:
                                         
                                         # Plot Beeswarm (Resumo)
                                         st.markdown("**SHAP Summary Plot**")
-                                        st.caption("Mostra como cada feature impacta a saída do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
+                                        st.caption("Mostra como cada feature impacta a saida do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
                                         fig_shap = explainer.plot_importance(sample_test, plot_type="summary")
                                         st.pyplot(fig_shap)
                                         
                                         # Plot Bar (Importância Global)
                                         st.markdown("**SHAP Feature Importance (Bar)**")
-                                        st.caption("Média absoluta do impacto de cada feature.")
+                                        st.caption("Media absoluta do impacto de cada feature.")
                                         fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
                                         st.pyplot(fig_shap_bar)
                                         shap_success = True
                                 except Exception as e:
-                                    st.warning(f"Não foi possível gerar SHAP plot: {e}")
+                                    st.warning(f"Nao foi possivel gerar SHAP plot: {e}")
 
                                 # Fallback para feature importance manual se SHAP falhar
                                 if not shap_success and hasattr(trainer, 'feature_importance') and trainer.feature_importance:
-                                    st.info("Exibindo importância baseada em coeficientes/árvores (método alternativo).")
+                                    st.info("Exibindo importancia baseada em coeficientes/arvores (metodo alternativo).")
                                     fi_data = pd.DataFrame({
                                         'Feature': processor.get_feature_names(),
-                                        'Importância': trainer.feature_importance
-                                    }).sort_values(by='Importância', ascending=False)
+                                        'Importancia': trainer.feature_importance
+                                    }).sort_values(by='Importancia', ascending=False)
                                     
-                                    fig_fi = px.bar(fi_data.head(15), x='Importância', y='Feature', orientation='h',
+                                    fig_fi = px.bar(fi_data.head(15), x='Importancia', y='Feature', orientation='h',
                                                   title="Top 15 Features mais Importantes")
                                     fig_fi.update_layout(yaxis={'categoryorder':'total ascending'})
                                     st.plotly_chart(fig_fi, use_container_width=True)
@@ -1087,9 +1077,9 @@ with tabs[1]:
                         elif task in ["regression", "time_series"]:
                             df_res = pd.DataFrame({"Real": y_test_proc, "Predito": y_pred})
                             if task == "time_series":
-                                fig_res = px.line(df_res.reset_index(), y=["Real", "Predito"], title="Série Temporal: Real vs Predito")
+                                fig_res = px.line(df_res.reset_index(), y=["Real", "Predito"], title="Serie Temporal: Real vs Predito")
                             else:
-                                fig_res = px.scatter(df_res, x="Real", y="Predito", trendline="ols", title="Regressão: Real vs Predito")
+                                fig_res = px.scatter(df_res, x="Real", y="Predito", trendline="ols", title="Regressao: Real vs Predito")
                             st.plotly_chart(fig_res)
 
                         elif task == "clustering":
@@ -1099,7 +1089,7 @@ with tabs[1]:
                             X_pca = pca.fit_transform(X_test_proc)
                             df_pca = pd.DataFrame(X_pca, columns=['PCA1', 'PCA2'])
                             df_pca['Cluster'] = y_pred.astype(str)
-                            fig_cluster = px.scatter(df_pca, x='PCA1', y='PCA2', color='Cluster', title="Visualização de Clusters (PCA)")
+                            fig_cluster = px.scatter(df_pca, x='PCA1', y='PCA2', color='Cluster', title="Visualizacao de Clusters (PCA)")
                             st.plotly_chart(fig_cluster)
 
                         elif task == "anomaly_detection":
@@ -1111,19 +1101,19 @@ with tabs[1]:
                             df_pca['Status'] = np.where(y_pred == -1, 'Anomalia', 'Normal')
                             fig_anom = px.scatter(df_pca, x='PCA1', y='PCA2', color='Status', 
                                                 color_discrete_map={'Anomalia': 'red', 'Normal': 'blue'},
-                                                title="Detecção de Anomalias (PCA)")
+                                                title="Deteccao de Anomalias (PCA)")
                             st.plotly_chart(fig_anom)
 
 
 
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
-        st.subheader("🖼️ Computer Vision AutoML")
+        st.subheader("Computer Vision AutoML")
         cv_task = st.selectbox("CV Task", ["image_classification", "image_segmentation", "object_detection"], key="cv_task_selector")
         
         col_cv1, col_cv2 = st.columns(2)
         with col_cv1:
-            st.markdown("##### 📁 Dataset Upload")
+            st.markdown("##### Dataset Upload")
             # data_dir input removed in favor of upload
             cv_upload = st.file_uploader("Upload Dataset (ZIP)", type="zip", key="cv_zip_upload", help="Upload a ZIP file containing your images (and labels/masks if applicable). Structure: root/class_name/image.jpg")
             
@@ -1278,8 +1268,8 @@ with tabs[1]:
 
 # --- TAB 3: EXPERIMENTS ---
 with tabs[2]:
-    st.header("🧪 Experiments Explorer")
-    st.markdown("Aqui você encontra o histórico de **todos os treinos**. Escolha os melhores para registrar no catálogo oficial.")
+    st.header("Experiments Explorer")
+    st.markdown("Aqui voce encontra o historico de **todos os treinos**. Escolha os melhores para registrar no catalogo oficial.")
     
     runs = get_cached_all_runs()
     if not runs.empty:
@@ -1297,16 +1287,16 @@ with tabs[2]:
         # Detalhes e Registro
         col_det1, col_det2 = st.columns([1, 1])
         with col_det1:
-            run_id_sel = st.selectbox("🔍 Select Run to Explore", filtered_runs['run_id'].tolist())
+            run_id_sel = st.selectbox("Select Run to Explore", filtered_runs['run_id'].tolist())
             if run_id_sel:
                 run_data = filtered_runs[filtered_runs['run_id'] == run_id_sel].iloc[0]
-                st.markdown("#### 📊 Metrics")
+                st.markdown("#### Metrics")
                 metrics = {k.replace('metrics.', ''): v for k, v in run_data.items() if k.startswith('metrics.') and pd.notna(v)}
                 st.json(metrics)
         
         with col_det2:
             if run_id_sel:
-                st.markdown("#### 🚀 Register as Official Model")
+                st.markdown("#### Register as Official Model")
                 model_reg_name = st.text_input("Registry Name", value=f"model_{run_id_sel[:6]}")
                 if st.button("Confirm Registration"):
                     if register_model_from_run(run_id_sel, model_reg_name):
@@ -1317,12 +1307,12 @@ with tabs[2]:
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
 with tabs[3]:
-    st.header("🗂️ Model Registry, Deployment & Monitoring")
+    st.header("Model Registry, Deployment & Monitoring")
     
     reg_tabs = st.tabs(["Registry & Deploy", "Real-time Monitoring"])
     
     with reg_tabs[0]:
-        st.subheader("🚀 Model Deployment Center")
+        st.subheader("Model Deployment Center")
         
         # 1. Select Model from Registry
         models = get_registered_models()
@@ -1361,7 +1351,7 @@ with tabs[3]:
                     mem_alloc = st.slider("Memory (GB)", 0.5, 16.0, 2.0, step=0.5)
                     max_replicas = st.number_input("Max Replicas", 1, 10, 2)
                 
-                if st.button("🚀 Deploy / Update Service", type="primary"):
+                if st.button("Deploy / Update Service", type="primary"):
                     with st.spinner(f"Deploying {selected_model_name} v{selected_version} to {env}..."):
                         # Mock Deployment Process
                         time.sleep(2)
@@ -1371,14 +1361,14 @@ with tabs[3]:
                             'model': selected_model_name,
                             'version': selected_version,
                             'env': env,
-                            'status': 'Healthy 🟢'
+                            'status': 'Healthy'
                         }
                         st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
             
             st.divider()
             
             # 3. Integrated Testing Interface (Merged from old Test Models tab)
-            st.markdown("#### 3. 🧪 Live Inference Test")
+            st.markdown("#### 3. Live Inference Test")
             
             if 'active_endpoint' in st.session_state:
                 st.success(f"Connected to Active Endpoint: `{st.session_state['active_endpoint']['url']}`")
@@ -1416,10 +1406,10 @@ with tabs[3]:
                                 st.dataframe(df_test)
                                 st.info(f"Processed {len(df_test)} records in 0.42s")
             else:
-                st.info("⚠️ Deploy a model above to enable live testing.")
+                st.info("Deploy a model above to enable live testing.")
 
     with reg_tabs[1]:
-        st.subheader("📡 Model Performance Monitoring")
+        st.subheader("Model Performance Monitoring")
         
         if 'active_endpoint' in st.session_state:
             ep = st.session_state['active_endpoint']
@@ -1432,12 +1422,12 @@ with tabs[3]:
             m3.metric("Error Rate", "0.02%", "0.00%")
             m4.metric("CPU Usage", "45%", "+2%")
             
-            st.markdown("#### 📉 Prediction Drift & Accuracy")
+            st.markdown("#### Prediction Drift & Accuracy")
             # Mock Charts
             chart_data = pd.DataFrame(np.random.randn(50, 2), columns=['latency', 'accuracy'])
             st.line_chart(chart_data)
             
-            st.markdown("#### ⚠️ Alerts & Logs")
+            st.markdown("#### Alerts & Logs")
             st.error("2023-10-27 14:30: High Latency Warning (>200ms) detected on pod-2")
             st.info("2023-10-27 14:00: Autoscaling triggered (replicas 2 -> 3)")
             

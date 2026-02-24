@@ -59,7 +59,13 @@ function createPythonProcess() {
   });
 
   pythonProcess.stderr.on('data', (data) => {
-    console.error(`[Python Error]: ${data}`);
+    const message = data.toString();
+    // Streamlit and some libraries send normal info to stderr
+    if (message.includes('ERROR') || message.includes('Exception') || message.includes('Traceback')) {
+        console.error(`[Python Error]: ${message}`);
+    } else {
+        console.log(`[Python Info]: ${message}`);
+    }
   });
 
   pythonProcess.on('close', (code) => {
