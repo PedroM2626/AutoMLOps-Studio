@@ -12,30 +12,47 @@ const PY_PORT = 8501;
 const UI_URL = `http://localhost:${PY_PORT}`;
 
 function getPythonPath() {
-  // Simple heuristic to find python. 
-  // In a real bundled app, this would point to the bundled executable.
-  if (os.platform() === 'win32') {
-    return 'python'; // Or check for venv/Scripts/python.exe
-  } else {
-    return 'python3'; // Or venv/bin/python
+  // Check for virtual environment first
+  const venvPath = os.platform() === 'win32' 
+    ? path.join(__dirname, 'venv', 'Scripts', 'python.exe')
+    : path.join(__dirname, 'venv', 'bin', 'python');
+
+  if (fs.existsSync(venvPath)) {
+    console.log(`Using virtual environment python: ${venvPath}`);
+    return venvPath;
   }
+
+  // Fallback to system python
+  const pythonCmd = os.platform() === 'win32' ? 'python' : 'python3';
+  console.log(`Using system python: ${pythonCmd}`);
+  return pythonCmd;
 }
 
 function createPythonProcess() {
   const pythonExecutable = getPythonPath();
   const scriptPath = path.join(__dirname, 'app.py');
   
+  // Verify script existence
+  if (!fs.existsSync(scriptPath)) {
+    console.error(`Error: Script not found at ${scriptPath}`);
+    return;
+  }
+
   console.log(`Starting Python process: ${pythonExecutable} -m streamlit run ${scriptPath}`);
 
   // Set environment variable for Hybrid Rendering detection
   const env = { ...process.env, IS_ELECTRON_APP: 'true', PYTHONUNBUFFERED: '1' };
 
+  // Use shell: true on Windows to help resolve commands
   pythonProcess = spawn(pythonExecutable, [
-    '-m', 'streamlit', 'run', scriptPath,
+    '-m', 'streamlit', 'run', `"${scriptPath}"`,
     '--server.port', PY_PORT.toString(),
     '--server.headless', 'true',
-    '--server.address', 'localhost' // Security: only bind to localhost
-  ], { env });
+    '--server.address', 'localhost'
+  ], { 
+    env,
+    shell: os.platform() === 'win32' // Important for command resolution on Windows
+  });
 
   pythonProcess.stdout.on('data', (data) => {
     console.log(`[Python]: ${data}`);

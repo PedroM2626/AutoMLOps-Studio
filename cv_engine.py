@@ -49,6 +49,7 @@ class CVAutoMLTrainer:
     def __init__(self, task_type='image_classification', num_classes=2):
         self.task_type = task_type
         self.num_classes = num_classes
+        self.class_names = [] # Store names
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.best_model = None
         self.history = []
@@ -120,6 +121,7 @@ class CVAutoMLTrainer:
             try:
                 full_dataset = datasets.ImageFolder(data_dir, transform=data_transforms)
                 self.num_classes = len(full_dataset.classes)
+                self.class_names = full_dataset.classes # Save class names
             except Exception as e:
                 logger.error(f"Error loading images: {e}")
                 return None

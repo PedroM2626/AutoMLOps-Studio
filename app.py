@@ -943,6 +943,11 @@ with tabs[1]:
 
                     trainer = AutoMLTrainer(task_type=task, preset=training_preset, ensemble_config=ensemble_config)
                     
+                    # Limpar nome do experimento para evitar erro de codificação no Windows
+                    clean_experiment_name = "".join(c for c in experiment_name if ord(c) < 128)
+                    if not clean_experiment_name:
+                        clean_experiment_name = "AutoML_Experiment"
+
                     best_model = trainer.train(
                         X_train_proc, 
                         y_train_proc, 
@@ -953,7 +958,7 @@ with tabs[1]:
                         selected_models=selected_models, 
                         early_stopping_rounds=early_stopping,
                         manual_params=manual_params,
-                        experiment_name=experiment_name,
+                        experiment_name=clean_experiment_name,
                         random_state=random_seed_config,
                         validation_strategy=validation_strategy,
                         validation_params=validation_params,
@@ -1129,9 +1134,20 @@ with tabs[1]:
                 
                 # Create temp dir for extraction
                 temp_extract_dir = "temp_cv_dataset"
+                
+                def remove_readonly(func, path, excinfo):
+                    """Error handler for shutil.rmtree to handle read-only files on Windows."""
+                    import stat
+                    os.chmod(path, stat.S_IWRITE)
+                    func(path)
+
                 if os.path.exists(temp_extract_dir):
-                    shutil.rmtree(temp_extract_dir)
-                os.makedirs(temp_extract_dir)
+                    try:
+                        shutil.rmtree(temp_extract_dir, onerror=remove_readonly)
+                    except Exception as e:
+                        st.warning(f"Could not fully clear temporary directory: {e}. Attempting to continue...")
+                
+                os.makedirs(temp_extract_dir, exist_ok=True)
                 
                 with zipfile.ZipFile(cv_upload, 'r') as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
@@ -1181,6 +1197,36 @@ with tabs[1]:
                         st.success("Vision Training Complete!")
                         st.session_state['best_cv_model'] = best_model_cv
                         st.session_state['cv_trainer'] = trainer
+                        
+                        # Store class names for inference display
+                        if hasattr(trainer, 'class_names'):
+                            st.session_state['cv_class_names'] = trainer.class_names
+                        
+                        # Log to MLflow
+                        try:
+                            import mlflow
+                            import mlflow.pytorch
+                            
+                            # Use a clean run name without emojis to avoid Windows encoding issues
+                            clean_run_name = f"CV_Task_{cv_task}"
+                            
+                            with mlflow.start_run(run_name=clean_run_name):
+                                mlflow.log_param("task", cv_task)
+                                mlflow.log_param("epochs", epochs)
+                                mlflow.log_param("lr", lr_cv)
+                                if hasattr(trainer, 'class_names'):
+                                    mlflow.log_dict({"class_names": trainer.class_names}, "metadata/classes.json")
+                                
+                                # Log metrics from history
+                                for entry in trainer.history:
+                                    mlflow.log_metric("accuracy", entry['acc'], step=entry['epoch'])
+                                    mlflow.log_metric("loss", entry['loss'], step=entry['epoch'])
+                                
+                                mlflow.pytorch.log_model(best_model_cv, "model")
+                                st.info("Experiment logged to MLflow successfully.")
+                        except Exception as ml_err:
+                            st.warning(f"Failed to log to MLflow: {ml_err}")
+
                     except Exception as e:
                         st.error(f"CV Training Failed: {e}")
                         st.error("Check if your ZIP file structure matches the task requirements (e.g., ImageFolder structure for classification).")
@@ -1219,7 +1265,12 @@ with tabs[1]:
                                 draw.text((box[0], box[1]), f"{score:.2f}", fill="red")
                         st.image(img_draw, caption="Predicted Objects", use_container_width=True)
                     else:
-                        st.metric("Predicted Class ID", prediction)
+                        # Map ID to Class Name if available
+                        class_names = st.session_state.get('cv_class_names')
+                        if class_names and isinstance(prediction, int) and prediction < len(class_names):
+                            st.metric("Predicted Class", class_names[prediction])
+                        else:
+                            st.metric("Predicted Class ID", prediction)
                 
                 try:
                     os.remove(img_path)
