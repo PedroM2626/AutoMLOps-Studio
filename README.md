@@ -2,259 +2,110 @@
 
 ### Exploratory ML & MLOps Learning Engine
 
-![Version](https://img.shields.io/badge/Version-v1.1.0-blue)
-![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)
-![MLflow](https://img.shields.io/badge/MLflow-Integrated-0194E2?style=flat&logo=mlflow&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=flat&logo=streamlit&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=flat&logo=fastapi)
+[![Version](https://img.shields.io/badge/Version-v1.2.0-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
+[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?style=flat&logo=docker&logoColor=white)](https://www.docker.com/)
+[![MLflow](https://img.shields.io/badge/MLflow-Integrated-0194E2?style=flat&logo=mlflow&logoColor=white)](https://mlflow.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io/)
 
-O **AutoMLOps Studio** é um projeto educacional desenvolvido de um **estudante para estudantes**. O objetivo principal é fornecer uma ferramenta prática para quem deseja explorar o mundo do Machine Learning ou criar modelos rapidamente para prototipagem e aprendizado.
+O **AutoMLOps Studio** é uma plataforma educacional "end-to-end" projetada para simplificar o ciclo de vida de Machine Learning. Desenvolvido de um **estudante para estudantes**, o projeto oferece uma interface intuitiva para explorar desde a ingestão de dados até o monitoramento de modelos em produção.
 
-**Este projeto não é uma solução empresarial**, mas sim um laboratório interativo para aprender conceitos de AutoML, MLOps e Visão Computacional na prática, facilitando a experimentação rápida sem a necessidade de escrever centenas de linhas de código de infraestrutura.
-
-Este documento serve como referência central para todas as funcionalidades, opções de configuração e aprendizados técnicos desenvolvidos durante a criação do projeto.
+**🔗 Acesse a Demo ao vivo:** [Hugging Face Spaces - AutoMLOps Studio](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
 
 ---
 
 ## 🎯 Objetivo e Problemática
 
-Muitas vezes, aprender Machine Learning parece fragmentado entre teoria e código complexo. Este projeto resolve isso ao centralizar:
-- **Aprendizado Prático**: Entenda como o pré-processamento, o treinamento e o monitoramento se conectam.
-- **Prototipagem Rápida**: Teste ideias de modelos em segundos com arquivos CSV ou imagens.
-- **Desmistificação de MLOps**: Veja na prática como o versionamento de modelos (MLflow), integração com DagsHub e a detecção de desvios (Drift) funcionam em um fluxo real.
+Aprender MLOps muitas vezes exige lidar com infraestruturas complexas antes mesmo de entender os conceitos. Este projeto resolve isso ao centralizar:
+- **Fluxo de Trabalho Unificado**: Uma jornada clara desde o upload de dados até o deploy.
+- **Experimentação Visual**: Visualize o impacto de hiperparâmetros e arquiteturas em tempo real.
+- **Conceitos de Produção**: Aprenda sobre Data Drift, Model Registry e Performance Monitoring sem precisar configurar servidores complexos.
 
 ## 👥 Público Alvo
 
-- **Estudantes de Ciência de Dados**: Que querem ver a teoria aplicada em uma interface visual.
-- **Curiosos e Entusiastas de ML**: Que buscam uma ferramenta ágil para explorar datasets sem barreiras técnicas.
-- **Desenvolvedores em Aprendizado**: Que desejam entender como integrar modelos de ML em APIs e Dashboards de forma simplificada.
+- **Estudantes de Data Science**: Que buscam consolidar conhecimentos teóricos com prática visual.
+- **Entusiastas de ML**: Que precisam de uma ferramenta rápida para prototipar modelos e testar hipóteses.
+- **Desenvolvedores MLOps Junior**: Que desejam entender a integração entre ferramentas como MLflow, Optuna e APIs de predição.
 
 ---
 
 ## ✨ Funcionalidades e Detalhes Técnicos
 
-### 1. Gestão de Dados (Data Lake) & Drift Analysis
-- **Upload de Dados:** Suporte para arquivos CSV.
-- **Data Lake Local:** Armazenamento versionado de datasets (raw/processed).
-- **Detecção de Drift:** Análise estatística (KS, PSI) e visualização de distribuição de dados integrada na fase de ingestão, permitindo identificar mudanças no perfil dos dados antes mesmo do treinamento.
+### 1. 📊 Gestão de Dados & Drift Analysis (Aba Data)
+- **Ingestão Inteligente**: Upload de CSVs com armazenamento versionado no Data Lake local.
+- **Detecção de Drift Integrada**: Análise estatística (KS Test, PSI) e visualizações temporais para identificar mudanças na distribuição dos dados antes do treinamento.
 
-### 2. Configuração de Treino (AutoML)
-
-#### 2.1. Definição da Tarefa
-O sistema suporta os seguintes tipos de problemas de Machine Learning:
-- **Classification:** Previsão de classes discretas (ex: fraude/não fraude).
-- **Regression:** Previsão de valores contínuos (ex: preço de imóveis).
-- **Clustering:** Agrupamento não supervisionado.
-- **Time Series:** Previsão temporal (ex: vendas futuras).
-- **Anomaly Detection:** Detecção de outliers.
-
-#### 2.2. Fonte do Modelo
-- **AutoML Standard:** Utiliza bibliotecas padrão (Scikit-Learn, XGBoost, Transformers).
-- **Model Registry:** Permite selecionar um modelo previamente treinado e registrado para *fine-tuning* ou re-treino.
-- **Upload Local (.pkl):** Permite carregar um modelo serializado externamente.
-
-#### 2.3. Seleção de Modelos
-- **Automático (Preset):** O sistema escolhe os melhores candidatos.
-- **Manual (Selecionar):** O usuário escolhe especificamente quais algoritmos testar (ex: Random Forest, XGBoost, SVM).
-- **Custom Ensemble Builder:**
-    - **Voting:** Combina predições por voto majoritário (Hard) ou média de probabilidades (Soft). Suporta pesos customizados.
-    - **Stacking:** Treina um "Meta-Modelo" (ex: Regressão Logística) que aprende a combinar as saídas dos modelos base.
-
-#### 2.4. Otimização de Hiperparâmetros (HPO)
-O sistema utiliza **Optuna** como motor de otimização, oferecendo quatro modos selecionáveis manualmente:
-- **Bayesian Optimization (TPE):** (Padrão) Utiliza o estimador *Tree-structured Parzen Estimator* para focar nas áreas promissoras do espaço de busca. Mais eficiente que Random/Grid.
-- **Random Search:** Exploração aleatória do espaço de busca, ideal para benchmarks.
-- **Grid Search:** Busca exaustiva em uma grade pré-definida. (Implementado via amostragem controlada no Optuna para garantir cobertura).
-- **Hyperband:** Técnica avançada que descarta configurações ruins rapidamente (early stopping agressivo), permitindo testar muito mais combinações em menos tempo.
-
-#### 2.5. Presets de Treino (AutoML)
-Para agilidade, o sistema oferece perfis pré-configurados (`automl_engine.py`):
-- **Fast:** ~15 trials. Foca em modelos leves (Logistic Regression, Random Forest) com validação simples. Ideal para testes rápidos.
-- **Medium:** ~40 trials. Inclui modelos de Gradient Boosting (XGBoost, LightGBM) e validação cruzada mais robusta (CV=5).
-
-#### 2.6. Validação Automática Inteligente
-Define como os modelos são avaliados para evitar *overfitting*. O sistema conta com um modo **Automático Inteligente**:
-- **Automático (Recomendado):**
-    - **Séries Temporais:** Detecta automaticamente e aplica `TimeSeriesSplit`.
-    - **Pequenos Datasets (<1000 amostras):** Aplica `Cross-Validation` para garantir robustez.
-    - **Grandes Datasets (>=1000 amostras):** Aplica `Holdout (Train-Test Split)` para eficiência.
-- **Modos Manuais:**
-    - **K-Fold Cross Validation**
-    - **Stratified K-Fold** (Apenas Classificação)
-    - **Holdout**
-    - **Time Series Split**
+### 2. 🤖 Configuração de Treino (AutoML)
+- **Suporte Multi-Tarefa**: Classificação, Regressão, Clustering, Séries Temporais e Detecção de Anomalias.
+- **Otimização Avançada com Optuna**: 
+    - **Bayesian (TPE)**, **Random Search**, **Grid Search** e **Hyperband** (Pruning precoce).
+- **Validação Automática**: Escolha inteligente entre Cross-Validation (dados pequenos) e Holdout (dados grandes), com suporte especial para Séries Temporais.
+- **Ensemble Builder**: Crie modelos robustos usando Voting (Hard/Soft) ou Stacking.
 
 ### 3. 👁️ Visão Computacional (CV Engine)
-O módulo `cv_engine.py` expande as capacidades para Deep Learning e Visão Computacional:
-- **Tarefas Suportadas:**
-    - **Classificação de Imagens:** Identificação de classes (ex: Gato vs Cachorro).
-    - **Segmentação Semântica:** Classificação pixel a pixel (ex: separar fundo e objeto) usando DeepLabV3.
-    - **Detecção de Objetos:** Localização com Bounding Boxes usando Faster R-CNN.
-- **Modelos & Transfer Learning:**
-    - **ResNet18 / ResNet50:** Arquiteturas robustas para classificação geral.
-    - **MobileNetV2:** Otimizado para eficiência e dispositivos móveis.
-    - **Backbones:** Pesos pré-treinados no ImageNet para convergência rápida.
+- **Deep Learning Facilitado**: Classificação de Imagens, Segmentação Semântica (DeepLabV3) e Detecção de Objetos (Faster R-CNN).
+- **Transfer Learning**: Use backbones pré-treinados (ResNet, MobileNet) para acelerar o aprendizado.
 
-### 4. ⚖️ Análise de Estabilidade e Robustez
-A aba de **Estabilidade** permite avaliar a confiabilidade dos modelos gerados através de testes rigorosos:
-- **Robustez a Variação de Dados**: Testa o modelo em múltiplos splits de treino/teste para verificar a consistência das métricas.
-- **Robustez à Inicialização**: Avalia o impacto de diferentes sementes aleatórias (seeds) no treinamento.
-- **Sensibilidade a Hiperparâmetros**: Analisa como a performance varia ao alterar um hiperparâmetro específico.
-- **Análise Geral**: Executa uma bateria completa de testes e gera um relatório unificado de estabilidade.
+### 4. ⚖️ Estabilidade & Robustez
+- **Stress Testing**: Avalie como o modelo se comporta com diferentes seeds, splits de dados e variações de hiperparâmetros para garantir que ele seja confiável, não apenas preciso.
 
-### 5. 🚀 Model Registry & Deployment Unificado
-A nova arquitetura unifica o ciclo de vida pós-treinamento em uma única interface poderosa:
-- **Model Registry Centralizado:** Visualize, versione e gerencie estágios de modelos (Staging, Production, Archived) integrados ao MLflow.
-- **Deployment Simulator:**
-    - Interface para simular deployment em ambientes (Dev, Staging, Prod).
-    - Configuração de recursos (CPU/RAM) e réplicas.
-    - Geração automática de endpoints de API simulados.
-- **Teste de Inferência Real-time:** Valide seus modelos implantados instantaneamente com upload de JSON/CSV e visualize as predições na hora, sem sair da tela de registro.
-- **Monitoramento de Performance:** Dashboard integrado com métricas de latência, erros, e uso de recursos para modelos ativos.
+### 5. 🚀 Model Registry & Deployment (Novo!)
+- **Gestão de Ciclo de Vida**: Integre-se ao MLflow para gerenciar versões e estágios (Staging/Production).
+- **Deployment Simulator**: Simule a implantação em diferentes ambientes com configuração de recursos (CPU/RAM).
+- **Live Inference**: Teste seus modelos implantados instantaneamente com upload de dados e veja predições em tempo real.
+- **Performance Monitoring**: Dashboard de latência, erros e logs de predição integrados.
 
 ---
 
 ## 🧠 Aprendizados e Decisões Técnicas
 
-### 1. Arquitetura Centrada no Ciclo de Vida (Workflow-First)
-Evoluímos a interface de uma abordagem baseada em "ferramentas" (abas isoladas para Drift, Teste, Monitoramento) para uma abordagem baseada em "fluxo de trabalho" (Dados -> Modelo -> Deploy).
-- **Aprendizado:** Agrupar funcionalidades por contexto (ex: Drift junto com Dados, Teste junto com Registro) reduz a carga cognitiva e o "context switching", tornando a ferramenta mais intuitiva para o usuário final.
+### 1. Reorganização Centrada no Usuário
+Aprendemos que separar "Drift" e "Monitoramento" em abas isoladas quebrava o raciocínio. Ao mover o **Drift para a aba de Dados** e o **Monitoramento para o Model Registry**, criamos um fluxo lógico:
+- Primeiro você olha os dados (e o drift).
+- Depois você treina e registra.
+- Por fim, você faz o deploy e monitora.
 
-### 2. Simulação de Infraestrutura (Mocking para Educação)
-Para ensinar conceitos complexos de Deployment sem exigir Kubernetes ou AWS:
-- **Solução:** Criamos um sistema de "Mock Deployment" que usa o estado da sessão (`st.session_state`) para simular endpoints ativos.
-- **Benefício:** O aluno aprende o *conceito* de promover um modelo para Produção e testar um endpoint, sem a barreira de entrada da infraestrutura pesada.
+### 2. Abstração de Infraestrutura
+O uso de **Mock Deployments** permitiu ensinar o conceito de promoção de modelos e endpoints de API sem a necessidade de gerenciar clusters reais, tornando o aprendizado acessível a qualquer computador.
 
-### 3. Flexibilidade com Optuna
-Optamos pelo **Optuna** em vez do `GridSearchCV` do Scikit-Learn devido à sua arquitetura "define-by-run". Isso permitiu:
-- Implementar *Bayesian Optimization* facilmente.
-- Simular *Grid Search* e *Random Search* apenas alterando o `sampler` (TPESampler, RandomSampler, GridSampler).
-- Integrar *Pruning* (Hyperband) para interromper treinos ruins cedo, economizando recursos computacionais.
-
-### 4. Desafios do Grid Search em Espaços Contínuos
-Aprendemos que o *Grid Search* tradicional é incompatível com distribuições contínuas (ex: `loguniform` para learning rate).
-- **Solução:** Quando o usuário seleciona "Grid Search", o sistema restringe o espaço de busca a um conjunto finito de valores discretos ou reverte para *Random Search* com alta contagem de tentativas se o espaço for muito complexo.
-
-### 5. Validação Automática Inteligente
-Implementamos uma lógica de decisão para a validação automática (`validation_strategy='auto'`):
-- **Time Series:** Sempre usa `TimeSeriesSplit`.
-- **Dados Pequenos (< 1000 amostras):** Usa `Cross-Validation` (CV) para maior robustez estatística.
-- **Dados Grandes (>= 1000 amostras):** Usa `Holdout` para eficiência computacional, já que a variância da estimativa de erro diminui com o volume de dados.
-
-### 6. Persistência e Estado na Interface (Streamlit)
-O Streamlit reexecuta o script a cada interação. Para manter conexões (como DagsHub) e configurações:
-- Usamos `st.session_state` para variáveis temporárias.
-- Usamos `os.environ` para credenciais e URIs do MLflow, garantindo que o `automl_engine.py` (que roda em outro processo ou contexto) tenha acesso às configurações definidas na UI.
-
-### 7. Integração Híbrida MLflow (Local vs Remoto)
-- **SQLite (Local):** Ótimo para desenvolvimento rápido e sem internet, mas tem problemas de *locking* com múltiplas threads.
-- **DagsHub (Remoto):** Resolve a colaboração e visualização, mas requer tratamento de erros de rede e autenticação.
-- **Solução:** Criamos um "switch" na interface que altera dinamicamente a `MLFLOW_TRACKING_URI` e recarrega o cliente MLflow sem precisar reiniciar a aplicação.
+### 3. Otimização Inteligente
+A implementação da **Validação Automática** ensina ao usuário que a estratégia de teste (CV vs Holdout) depende fundamentalmente do tamanho e tipo do dataset, uma lição crucial em Ciência de Dados.
 
 ---
 
 ## 📂 Estrutura do Projeto
 
-- `app.py`: Interface principal (Streamlit Dashboard).
-- `automl_engine.py`: Motor de AutoML (Treinamento, Otimização, Validação).
-- `cv_engine.py`: Motor de Visão Computacional.
-- `mlops_utils.py`: Utilitários de MLOps.
-- `api.py`: API de serving (FastAPI).
-- `test_interface_simulation.py`: Script de teste para validação das funcionalidades de otimização e interface.
-- `docker-compose.yml` & `Dockerfile`: Configuração de containers.
+- `app.py`: O coração do projeto - Dashboard Streamlit unificado.
+- `automl_engine.py`: Motor de treinamento e otimização (Optuna/Scikit-Learn).
+- `cv_engine.py`: Motor de Deep Learning para Visão Computacional (PyTorch/Torchvision).
+- `mlops_utils.py`: Integração com MLflow e utilitários de sistema.
+- `stability_engine.py`: Motor de testes de robustez e estabilidade.
+- `api.py`: Backend FastAPI para servir modelos.
+- `electron-main.js`: Wrapper para execução como aplicativo Desktop.
 
 ---
 
-## 🚀 Instalação e Uso
-
-### Pré-requisitos
-- Docker e Docker Compose instalados.
-- (Opcional) Python 3.11+ para execução local.
+## 🚀 Como Executar
 
 ### 🐳 Via Docker (Recomendado)
-
-1. **Clone o repositório**:
-   ```bash
-   git clone <url-do-repositorio>
-   cd automlops-studio
-   ```
-
-2. **Configure as variáveis de ambiente**:
-   Copie o exemplo e ajuste conforme necessário (opcional para rodar localmente):
-   ```bash
-   cp .env.example .env
-   ```
-
-3. **Suba os containers**:
-   ```bash
-   docker-compose up --build
-   ```
-
-4. **Acesse os serviços**:
-   - **Dashboard (Streamlit)**: [http://localhost:8501](http://localhost:8501)
-   - **API (FastAPI)**: [http://localhost:8000](http://localhost:8000)
-   - **MLflow UI**: [http://localhost:5000](http://localhost:5000)
-
-### 🐍 Execução Local (Sem Docker)
-
-1. **Crie um ambiente virtual e instale dependências**:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/Mac
-   venv\Scripts\activate     # Windows
-   pip install -r requirements.txt
-   ```
-
-2. **Execute o Dashboard**:
-   ```bash
-   python -m streamlit run app.py
-   ```
-
-3. **(Opcional) Execute a API**:
-   ```bash
-   python -m uvicorn api:app --reload
-   ```
-
-### 🖥️ Aplicação Desktop (Electron)
-
-Você pode executar o projeto como uma aplicação desktop híbrida (Electron + Python).
-
-1. **Pré-requisitos**: Certifique-se de ter o `Node.js` e `npm` instalados.
-2. **Instale as dependências do Electron**:
-   ```bash
-   npm install
-   ```
-3. **Inicie em modo de desenvolvimento**:
-   ```bash
-   npm start
-   ```
-   Isso iniciará o servidor Python em segundo plano e abrirá a janela do Electron.
-
-4. **Build do Executável**:
-   Para criar um instalador (.exe, .dmg, .AppImage):
-   ```bash
-   npm run dist
-   ```
-
----
-
-## 🧪 Testes e Validação
-
-Para verificar se todas as funcionalidades de otimização (Grid, Random, Bayesian, Hyperband) e validação automática estão funcionando corretamente, execute o script de simulação:
-
 ```bash
-python test_interface_simulation.py
+docker-compose up --build
 ```
-Este script simula o comportamento da interface utilizando os datasets disponíveis no `data_lake`.
+Acesse em `http://localhost:8501`.
 
----
+### 🐍 Localmente (Python)
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
 
-## 🔮 Próximos Passos Sugeridos
-*   **Pipeline de Retreino Automático:** Configurar Jobs agendados para verificar Drift e disparar retreino automático.
-*   **Integração com Kubeflow/Airflow:** Para orquestração de pipelines mais complexos em produção real.
-*   **Suporte a NLP:** Adicionar tarefas de Processamento de Linguagem Natural (ex: Análise de Sentimento).
+### 🖥️ Desktop (Electron)
+```bash
+npm install
+npm start
+```
 
 ---
 

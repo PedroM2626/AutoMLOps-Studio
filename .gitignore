@@ -12,6 +12,8 @@ data/
 data_lake/
 .pytest_cache/
 .streamlit/
+dist/
+*.db
 *.log
 *.flet*/
 node_modules
