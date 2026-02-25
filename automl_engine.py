@@ -1547,6 +1547,7 @@ class AutoMLTrainer:
                             ax_cm.set_title(f'Confusion Matrix - {m_name}')
                             ax_cm.set_ylabel('True Label')
                             ax_cm.set_xlabel('Predicted Label')
+                            plt.tight_layout()
                             plots[f'confusion_matrix_{m_name}'] = fig_cm
                             
                             if y_proba_plot is not None and hasattr(best_model_instance, 'classes_'):
@@ -1571,6 +1572,7 @@ class AutoMLTrainer:
                                 ax_roc.set_ylabel('True Positive Rate')
                                 ax_roc.set_title(f'ROC Curve - {m_name}')
                                 ax_roc.legend(loc="lower right")
+                                plt.tight_layout()
                                 plots[f'roc_curve_{m_name}'] = fig_roc
 
                         elif self.task_type == 'regression':
@@ -1581,6 +1583,7 @@ class AutoMLTrainer:
                             ax_reg.set_xlabel('Actual')
                             ax_reg.set_ylabel('Predicted')
                             ax_reg.set_title(f'Actual vs Predicted - {m_name}')
+                            plt.tight_layout()
                             plots[f'pred_vs_actual_{m_name}'] = fig_reg
 
                         # Feature Importance Plot
@@ -1595,17 +1598,24 @@ class AutoMLTrainer:
                                 # Limit to top 20 features
                                 feat_names = []
                                 if hasattr(effective_X_plot, 'columns'):
-                                    feat_names = effective_X_plot.columns.tolist()
+                                    feat_names = list(effective_X_plot.columns)
                                 else:
                                     feat_names = [f"Feature {i}" for i in range(len(importances))]
                                 
-                                fi_df = pd.DataFrame({'Feature': feat_names, 'Importance': importances})
-                                fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
-                                
-                                fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
-                                sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
-                                ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
-                                plots[f'feature_importance_{m_name}'] = fig_fi
+                                # Sync lengths if possible
+                                min_len = min(len(feat_names), len(importances))
+                                if min_len > 0:
+                                    fi_df = pd.DataFrame({
+                                        'Feature': feat_names[:min_len], 
+                                        'Importance': importances[:min_len]
+                                    })
+                                    fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
+                                    
+                                    fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
+                                    sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
+                                    ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
+                                    plt.tight_layout()
+                                    plots[f'feature_importance_{m_name}'] = fig_fi
                             except Exception as fi_err:
                                 logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
                             # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
@@ -1641,11 +1651,13 @@ class AutoMLTrainer:
                                 fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
                                 analyzer.calculate_stability_metrics(stability_results['general']['raw_seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
                                 ax_seed.set_title(f"Seed Stability Scores - {m_name}")
+                                plt.tight_layout()
                                 plots[f'stability_seed_{m_name}'] = fig_seed
                                 
                                 fig_split, ax_split = plt.subplots(figsize=(6, 4))
                                 analyzer.calculate_stability_metrics(stability_results['general']['raw_split'])['stability_score'].plot(kind='bar', ax=ax_split)
                                 ax_split.set_title(f"Split Stability Scores - {m_name}")
+                                plt.tight_layout()
                                 plots[f'stability_split_{m_name}'] = fig_split
                             
                             if "Robustez à Inicialização" in tests and 'general' not in stability_results:
@@ -1653,6 +1665,7 @@ class AutoMLTrainer:
                                 fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
                                 analyzer.calculate_stability_metrics(stability_results['seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
                                 ax_seed.set_title(f"Seed Stability - {m_name}")
+                                plt.tight_layout()
                                 plots[f'stability_seed_{m_name}'] = fig_seed
 
                             if "Robustez a Variação de Dados" in tests and 'general' not in stability_results:
@@ -1660,6 +1673,7 @@ class AutoMLTrainer:
                                 fig_split, ax_split = plt.subplots(figsize=(6, 4))
                                 analyzer.calculate_stability_metrics(stability_results['split'])['stability_score'].plot(kind='bar', ax=ax_split)
                                 ax_split.set_title(f"Data Split Stability - {m_name}")
+                                plt.tight_layout()
                                 plots[f'stability_split_{m_name}'] = fig_split
                                 
                             if "Sensibilidade a Hiperparâmetros" in tests:
@@ -1673,6 +1687,7 @@ class AutoMLTrainer:
                                         fig_hyp, ax_hyp = plt.subplots(figsize=(6, 4))
                                         stability_results['hyperparam'].set_index('param_value').iloc[:, 0].plot(ax=ax_hyp)
                                         ax_hyp.set_title(f"Sensitivity: {p_name} - {m_name}")
+                                        plt.tight_layout()
                                         plots[f'stability_hyper_{m_name}'] = fig_hyp
 
                         except Exception as stab_err:
@@ -1682,27 +1697,32 @@ class AutoMLTrainer:
                     # Precisamos recuperar o run_id do trial
                     best_run_id = best_trial_for_model.user_attrs.get("run_id")
                     if best_run_id and tracker and not isinstance(tracker, DummyTracker):
-                        logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
-                        with mlflow.start_run(run_id=best_run_id):
-                            # Log full params just in case
-                            mlflow.log_params(best_params_model)
-                            # Log extra metrics
-                            if report_metrics:
-                                mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
-                            
-                            # Log stability results as dict if exists
-                            if stability_results:
-                                # Just log that it was done and some summary
-                                mlflow.log_param("stability_analysis", "done")
-                            
-                            # Log plots
-                            for plot_name, fig_obj in plots.items():
-                                try:
-                                    mlflow.log_figure(fig_obj, f"{plot_name}.png")
-                                    # We keep the figure in the plots dict for the callback, 
-                                    # but we should ensure it's closed eventually.
-                                except Exception as e:
-                                    logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                        try:
+                            logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+                            # Garantir que não há run ativo para evitar conflitos
+                            if mlflow.active_run():
+                                mlflow.end_run()
+                                
+                            with mlflow.start_run(run_id=best_run_id):
+                                # Log full params just in case
+                                mlflow.log_params(best_params_model)
+                                # Log extra metrics
+                                if report_metrics:
+                                    mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                                
+                                # Log stability results as dict if exists
+                                if stability_results:
+                                    # Just log that it was done and some summary
+                                    mlflow.log_param("stability_analysis", "done")
+                                
+                                # Log plots
+                                for plot_name, fig_obj in plots.items():
+                                    try:
+                                        mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                        except Exception as ml_err:
+                            logger.warning(f"MLflow logging failed for report: {ml_err}. Continuing to UI callback.")
                     
                     # 7. Disparar Callback de Relatório Completo
                     if callback:
