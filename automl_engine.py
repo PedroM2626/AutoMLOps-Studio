@@ -1587,6 +1587,18 @@ class AutoMLTrainer:
                             plots[f'pred_vs_actual_{m_name}'] = fig_reg
 
                         # Feature Importance Plot
+                        # Ensure model is fitted for FI (cross_val_predict doesn't leave the model instance fitted)
+                        try:
+                            # Try to check if fitted, if not, fit
+                            from sklearn.utils.validation import check_is_fitted
+                            check_is_fitted(best_model_instance)
+                        except:
+                            try:
+                                logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
+                                best_model_instance.fit(effective_X_plot, y_train)
+                            except Exception as fit_err:
+                                logger.warning(f"Could not fit {m_name} for FI plot: {fit_err}")
+
                         if hasattr(best_model_instance, 'feature_importances_') or hasattr(best_model_instance, 'coef_'):
                             import pandas as pd
                             try:
