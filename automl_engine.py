@@ -69,8 +69,8 @@ import os
 import logging
 import time
 import warnings
-# import matplotlib.pyplot as plt # Moved to local scope
-# import seaborn as sns # Moved to local scope
+import matplotlib.pyplot as plt
+import seaborn as sns
 import mlflow
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_val_predict
@@ -1535,9 +1535,6 @@ class AutoMLTrainer:
                     # 5. Criar objetos de plotagem (Matplotlib Figures)
                     plots = {}
                     if y_true_plot is not None and y_pred_plot is not None:
-                        import matplotlib.pyplot as plt
-                        import seaborn as sns
-                        
                         logger.info(f"Gerando visualizações (gráficos) para {m_name}...")
                         if self.task_type == 'classification':
                             # Confusion Matrix
@@ -1586,21 +1583,29 @@ class AutoMLTrainer:
                             plt.tight_layout()
                             plots[f'pred_vs_actual_{m_name}'] = fig_reg
 
-                        # Feature Importance Plot
                         # Ensure model is fitted for FI (cross_val_predict doesn't leave the model instance fitted)
                         try:
                             # Try to check if fitted, if not, fit
                             from sklearn.utils.validation import check_is_fitted
                             check_is_fitted(best_model_instance)
+                            logger.info(f"Model {m_name} is already fitted.")
                         except:
                             try:
                                 logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
+                                # Use a small sample if it's too large, but for FI we want representative
                                 best_model_instance.fit(effective_X_plot, y_train)
                             except Exception as fit_err:
                                 logger.warning(f"Could not fit {m_name} for FI plot: {fit_err}")
 
-                        if hasattr(best_model_instance, 'feature_importances_') or hasattr(best_model_instance, 'coef_'):
-                            import pandas as pd
+                        # ADDED: Check if model has feature importance or coefficients
+                        has_fi = hasattr(best_model_instance, 'feature_importances_')
+                        has_coef = hasattr(best_model_instance, 'coef_')
+                        
+                        # Special case for ensembles that might not expose FI directly but their estimators do
+                        if not has_fi and not has_coef and (isinstance(best_model_instance, (VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor))):
+                            logger.info(f"Model {m_name} is an ensemble. FI might be unavailable directly.")
+
+                        if has_fi or has_coef:
                             try:
                                 if hasattr(best_model_instance, 'feature_importances_'):
                                     importances = best_model_instance.feature_importances_
@@ -1711,28 +1716,48 @@ class AutoMLTrainer:
                     if best_run_id and tracker and not isinstance(tracker, DummyTracker):
                         try:
                             logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+                            
+                            # Garantir que o experimento correto está selecionado
+                            if hasattr(tracker, 'experiment_name'):
+                                 mlflow.set_experiment(tracker.experiment_name)
+                            
                             # Garantir que não há run ativo para evitar conflitos
                             if mlflow.active_run():
-                                mlflow.end_run()
+                                active_run = mlflow.active_run()
+                                if active_run.info.run_id != best_run_id:
+                                    logger.info(f"Ending active run {active_run.info.run_id} to start {best_run_id}")
+                                    mlflow.end_run()
+                                else:
+                                    # Already in the right run
+                                    pass
                                 
-                            with mlflow.start_run(run_id=best_run_id):
-                                # Log full params just in case
-                                mlflow.log_params(best_params_model)
-                                # Log extra metrics
+                            # If we are already in the right run, don't restart it (might cause nesting issues)
+                            active_run = mlflow.active_run()
+                            if active_run and active_run.info.run_id == best_run_id:
+                                # Just log
                                 if report_metrics:
                                     mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
-                                
-                                # Log stability results as dict if exists
-                                if stability_results:
-                                    # Just log that it was done and some summary
-                                    mlflow.log_param("stability_analysis", "done")
-                                
-                                # Log plots
                                 for plot_name, fig_obj in plots.items():
-                                    try:
-                                        mlflow.log_figure(fig_obj, f"{plot_name}.png")
-                                    except Exception as e:
-                                        logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                                    mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                            else:
+                                with mlflow.start_run(run_id=best_run_id):
+                                    # Log full params just in case
+                                    mlflow.log_params(best_params_model)
+                                    # Log extra metrics
+                                    if report_metrics:
+                                        mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                                    
+                                    # Log stability results as dict if exists
+                                    if stability_results:
+                                        # Just log that it was done and some summary
+                                        mlflow.log_param("stability_analysis", "done")
+                                    
+                                    # Log plots
+                                    for plot_name, fig_obj in plots.items():
+                                        try:
+                                            mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                                        except Exception as e:
+                                            logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
                         except Exception as ml_err:
                             logger.warning(f"MLflow logging failed for report: {ml_err}. Continuing to UI callback.")
                     

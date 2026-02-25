@@ -9,13 +9,13 @@ from mlops_utils import (
     DataLake, register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model
 )
-# import shap # Moved to local scope
+import shap
 import joblib # type: ignore
 import pickle
 import os
 import json
-# import matplotlib.pyplot as plt # Moved to local scope
-# import seaborn as sns # Moved to local scope
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -794,19 +794,23 @@ with tabs[1]:
 
             if st.button("🚀 Iniciar Treinamento", key="btn_start_train"):
                 st.session_state['trials_data'] = []
+                st.session_state['report_data'] = {} # Reset reports on new training
                 start_time_train = time.time()
                 
                 # Nome do experimento baseado no dataset e timestamp
                 exp_tag = selected_configs[0]['name'] if selected_configs else "AutoML"
                 experiment_name = f"{exp_tag}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
 
-                # Containers for feedback
+                # Container for feedback
                 status_c = st.empty()
                 progress_bar = st.progress(0)
                 chart_c = st.empty()
                 
                 # Container for per-model reports (NEW)
                 st.markdown("### 📊 Relatórios por Modelo (Tempo Real)")
+                if 'report_data' not in st.session_state:
+                    st.session_state['report_data'] = {}
+                
                 report_container = st.container()
 
                 # Calcular total real de trials para a barra de progresso
@@ -822,58 +826,65 @@ with tabs[1]:
                     # Check for special report event
                     if metrics and '__report__' in metrics:
                         report = metrics['__report__']
+                        model_name = report['model_name']
+                        
+                        # Store report in session state to survive reruns
+                        st.session_state['report_data'][model_name] = report
+                        
                         with report_container:
-                            expander_label = f"Relatório Final: {report['model_name']} (Score: {report['score']:.4f})"
-                            with st.expander(expander_label, expanded=False):
-                                col_rep1, col_rep2 = st.columns([1, 2])
-                                with col_rep1:
-                                    st.markdown("🎯 **Métricas de Validação**")
-                                    if report['metrics']:
-                                        # Display metrics as a nice table instead of raw JSON
-                                        met_df = pd.DataFrame([report['metrics']]).T.reset_index()
-                                        met_df.columns = ['Métrica', 'Valor']
-                                        st.table(met_df)
-                                    else:
-                                        st.warning("Métricas de validação não disponíveis.")
+                            # Render ALL reports stored in session state
+                            for m_name, rep in st.session_state['report_data'].items():
+                                expander_label = f"Relatório Final: {rep['model_name']} (Score: {rep['score']:.4f})"
+                                with st.expander(expander_label, expanded=True):
+                                    col_rep1, col_rep2 = st.columns([1, 2])
+                                    with col_rep1:
+                                        st.markdown("🎯 **Métricas de Validação**")
+                                        if rep['metrics']:
+                                            # Display metrics as a nice table instead of raw JSON
+                                            met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
+                                            met_df.columns = ['Métrica', 'Valor']
+                                            st.table(met_df)
+                                        else:
+                                            st.warning("Métricas de validação não disponíveis.")
+                                            
+                                        st.markdown(f"📌 **Melhor Trial:** {rep['best_trial_number']}")
+                                        st.markdown(f"🔗 **MLflow Run ID:** `{rep['run_id']}`")
                                         
-                                    st.markdown(f"📌 **Melhor Trial:** {report['best_trial_number']}")
-                                    st.markdown(f"🔗 **MLflow Run ID:** `{report['run_id']}`")
-                                    
-                                    if 'stability' in report and report['stability']:
-                                        st.divider()
-                                        st.markdown("⚖️ **Análise de Estabilidade**")
-                                        for s_type, s_data in report['stability'].items():
-                                            if s_type == 'general':
-                                                st.write("📈 **Resumo Geral de Estabilidade**")
-                                                summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
-                                                # Convert nested dict to flat for table
-                                                flat_summary = []
-                                                for metric, stats in summary.items():
-                                                    if isinstance(stats, dict):
-                                                        row = {'Métrica': metric.upper()}
-                                                        row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
-                                                        flat_summary.append(row)
-                                                
-                                                if flat_summary:
-                                                    st.table(pd.DataFrame(flat_summary))
-                                            elif s_type == 'hyperparam':
-                                                with st.expander(f"Sensibilidade: {s_type}", expanded=False):
-                                                    st.dataframe(s_data, use_container_width=True)
+                                        if 'stability' in rep and rep['stability']:
+                                            st.divider()
+                                            st.markdown("⚖️ **Análise de Estabilidade**")
+                                            for s_type, s_data in rep['stability'].items():
+                                                if s_type == 'general':
+                                                    st.write("📈 **Resumo Geral de Estabilidade**")
+                                                    summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
+                                                    # Convert nested dict to flat for table
+                                                    flat_summary = []
+                                                    for metric, stats in summary.items():
+                                                        if isinstance(stats, dict):
+                                                            row = {'Métrica': metric.upper()}
+                                                            row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
+                                                            flat_summary.append(row)
+                                                    
+                                                    if flat_summary:
+                                                        st.table(pd.DataFrame(flat_summary))
+                                                elif s_type == 'hyperparam':
+                                                    with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+                                                        st.dataframe(s_data, use_container_width=True)
+                                                else:
+                                                    with st.expander(f"Teste: {s_type}", expanded=False):
+                                                        st.dataframe(s_data, use_container_width=True)
+                                    with col_rep2:
+                                        if 'plots' in rep and rep['plots']:
+                                            plot_labels = list(rep['plots'].keys())
+                                            if plot_labels:
+                                                tab_plots = st.tabs(plot_labels)
+                                                for i, plot_name in enumerate(plot_labels):
+                                                    with tab_plots[i]:
+                                                        st.pyplot(rep['plots'][plot_name], clear_figure=True)
                                             else:
-                                                with st.expander(f"Teste: {s_type}", expanded=False):
-                                                    st.dataframe(s_data, use_container_width=True)
-                                with col_rep2:
-                                    if 'plots' in report and report['plots']:
-                                        plot_labels = list(report['plots'].keys())
-                                        if plot_labels:
-                                            tab_plots = st.tabs(plot_labels)
-                                            for i, plot_name in enumerate(plot_labels):
-                                                with tab_plots[i]:
-                                                    st.pyplot(report['plots'][plot_name])
+                                                st.info("Sem visualizações disponíveis para este modelo.")
                                         else:
                                             st.info("Sem visualizações disponíveis para este modelo.")
-                                    else:
-                                        st.info("Sem visualizações disponíveis para este modelo.")
                         return
 
                     # Extrair nome do algoritmo e o número do trial do modelo
@@ -1061,34 +1072,42 @@ with tabs[1]:
                                 st.markdown("#### Importancia das Features (SHAP)")
                                 st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
                                 
-                                import shap
-                                import matplotlib.pyplot as plt
-                                
                                 shap_success = False
                                 try:
-                                    # Usar sample para performance
+                                    # Usar sample para performance em ambientes com poucos recursos
+                                    max_shap_train = 100
+                                    max_shap_test = 50
+                                    
                                     sample_train = X_train_proc
-                                    if len(sample_train) > 200:
-                                        sample_train = shap.utils.sample(sample_train, 200)
+                                    if len(sample_train) > max_shap_train:
+                                        sample_train = shap.utils.sample(sample_train, max_shap_train)
                                         
                                     sample_test = X_test_proc
-                                    if sample_test is not None and len(sample_test) > 100:
-                                        sample_test = shap.utils.sample(sample_test, 100)
+                                    if sample_test is not None and len(sample_test) > max_shap_test:
+                                        sample_test = shap.utils.sample(sample_test, max_shap_test)
 
                                     if sample_test is not None:
+                                        # Use dense representation if sparse to avoid SHAP errors
+                                        if hasattr(sample_train, "toarray"):
+                                            sample_train = sample_train.toarray()
+                                        if hasattr(sample_test, "toarray"):
+                                            sample_test = sample_test.toarray()
+                                            
                                         explainer = ModelExplainer(best_model, sample_train, task_type=task)
                                         
                                         # Plot Beeswarm (Resumo)
                                         st.markdown("**SHAP Summary Plot**")
                                         st.caption("Mostra como cada feature impacta a saida do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
                                         fig_shap = explainer.plot_importance(sample_test, plot_type="summary")
-                                        st.pyplot(fig_shap)
+                                        if fig_shap:
+                                            st.pyplot(fig_shap, clear_figure=True)
                                         
                                         # Plot Bar (Importância Global)
                                         st.markdown("**SHAP Feature Importance (Bar)**")
                                         st.caption("Media absoluta do impacto de cada feature.")
                                         fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
-                                        st.pyplot(fig_shap_bar)
+                                        if fig_shap_bar:
+                                            st.pyplot(fig_shap_bar, clear_figure=True)
                                         shap_success = True
                                 except Exception as e:
                                     st.warning(f"Nao foi possivel gerar SHAP plot: {e}")
