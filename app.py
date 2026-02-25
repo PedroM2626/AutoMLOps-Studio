@@ -831,6 +831,20 @@ with tabs[1]:
                                     st.json(report['metrics'])
                                     st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
                                     st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
+                                    
+                                    if 'stability' in report and report['stability']:
+                                        st.divider()
+                                        st.markdown("⚖️ **Métricas de Estabilidade**")
+                                        for s_type, s_data in report['stability'].items():
+                                            if s_type == 'general':
+                                                st.caption("Resumo Geral:")
+                                                st.json({k: v for k, v in s_data.items() if k != 'raw_seed' and k != 'raw_split'})
+                                            elif s_type == 'hyperparam':
+                                                st.caption(f"Sensibilidade: {s_type}")
+                                                st.dataframe(s_data)
+                                            else:
+                                                st.caption(f"Teste: {s_type}")
+                                                st.dataframe(s_data)
                                 with col_rep2:
                                     if 'plots' in report and report['plots']:
                                         plot_labels = list(report['plots'].keys())
@@ -948,7 +962,8 @@ with tabs[1]:
                         validation_params=validation_params,
                         custom_models=custom_models,
                         optimization_mode=selected_opt_mode,
-                        optimization_metric=optimization_metric
+                        optimization_metric=optimization_metric,
+                        stability_config={'tests': selected_stability_tests, 'n_iterations': 5} if enable_stability else None
                     )
                     best_params = trainer.best_params
                     

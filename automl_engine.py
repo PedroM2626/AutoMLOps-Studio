@@ -74,6 +74,7 @@ import warnings
 import mlflow
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_val_predict
+from stability_engine import StabilityAnalyzer
 
 # Transformers import moved to top of file
 
@@ -952,7 +953,7 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -1573,6 +1574,59 @@ class AutoMLTrainer:
                             # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
                             # Better: Return the Figure object.
                             
+                    # --- Stability Analysis ---
+                    stability_results = {}
+                    if stability_config and stability_config.get('tests'):
+                        try:
+                            logger.info(f"⚖️ Iniciando análise de estabilidade para {m_name}...")
+                            analyzer = StabilityAnalyzer(best_model_instance, effective_X_plot, y_train, task_type=self.task_type, random_state=model_seed)
+                            
+                            tests = stability_config.get('tests', [])
+                            n_iter = stability_config.get('n_iterations', 5) # Default lowered for reporting speed
+                            
+                            if "Análise Geral" in tests:
+                                stability_results['general'] = analyzer.run_general_stability_check(n_iterations=n_iter)
+                                # Adicionar plots da análise geral
+                                fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['general']['raw_seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                ax_seed.set_title(f"Seed Stability Scores - {m_name}")
+                                plots[f'stability_seed_{m_name}'] = fig_seed
+                                
+                                fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['general']['raw_split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                ax_split.set_title(f"Split Stability Scores - {m_name}")
+                                plots[f'stability_split_{m_name}'] = fig_split
+                            
+                            if "Robustez à Inicialização" in tests and 'general' not in stability_results:
+                                stability_results['seed'] = analyzer.run_seed_stability(n_iterations=n_iter)
+                                fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                ax_seed.set_title(f"Seed Stability - {m_name}")
+                                plots[f'stability_seed_{m_name}'] = fig_seed
+
+                            if "Robustez a Variação de Dados" in tests and 'general' not in stability_results:
+                                stability_results['split'] = analyzer.run_split_stability(n_splits=n_iter)
+                                fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                ax_split.set_title(f"Data Split Stability - {m_name}")
+                                plots[f'stability_split_{m_name}'] = fig_split
+                                
+                            if "Sensibilidade a Hiperparâmetros" in tests:
+                                # Varia o parâmetro mais importante do modelo ou o primeiro que encontrarmos
+                                p_name = list(best_params_model.keys())[0] if best_params_model else None
+                                if p_name and p_name != 'model_name':
+                                    p_val = best_params_model[p_name]
+                                    if isinstance(p_val, (int, float)):
+                                        vals = [p_val * 0.5, p_val * 0.8, p_val, p_val * 1.2, p_val * 1.5]
+                                        stability_results['hyperparam'] = analyzer.run_hyperparameter_stability(p_name, vals)
+                                        fig_hyp, ax_hyp = plt.subplots(figsize=(6, 4))
+                                        stability_results['hyperparam'].set_index('param_value').iloc[:, 0].plot(ax=ax_hyp)
+                                        ax_hyp.set_title(f"Sensitivity: {p_name} - {m_name}")
+                                        plots[f'stability_hyper_{m_name}'] = fig_hyp
+
+                        except Exception as stab_err:
+                            logger.error(f"Failed stability analysis for {m_name}: {stab_err}")
+
                     # 6. Salvar no MLflow (sob o run_id do melhor trial)
                     # Precisamos recuperar o run_id do trial
                     best_run_id = best_trial_for_model.user_attrs.get("run_id")
@@ -1584,6 +1638,11 @@ class AutoMLTrainer:
                             # Log extra metrics
                             if report_metrics:
                                 mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                            
+                            # Log stability results as dict if exists
+                            if stability_results:
+                                # Just log that it was done and some summary
+                                mlflow.log_param("stability_analysis", "done")
                             
                             # Log plots
                             for plot_name, fig_obj in plots.items():
@@ -1603,7 +1662,8 @@ class AutoMLTrainer:
                              'params': best_params_model,
                              'metrics': report_metrics,
                              'plots': plots,
-                             'run_id': best_run_id
+                             'run_id': best_run_id,
+                             'stability': stability_results
                          }
                          
                          report_payload = trial_metrics.copy() if 'trial_metrics' in locals() else {}
