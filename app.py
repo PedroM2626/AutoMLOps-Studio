@@ -827,24 +827,41 @@ with tabs[1]:
                             with st.expander(expander_label, expanded=False):
                                 col_rep1, col_rep2 = st.columns([1, 2])
                                 with col_rep1:
-                                    st.markdown("**Métricas de Validação**")
-                                    st.json(report['metrics'])
-                                    st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
-                                    st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
+                                    st.markdown("🎯 **Métricas de Validação**")
+                                    if report['metrics']:
+                                        # Display metrics as a nice table instead of raw JSON
+                                        met_df = pd.DataFrame([report['metrics']]).T.reset_index()
+                                        met_df.columns = ['Métrica', 'Valor']
+                                        st.table(met_df)
+                                    else:
+                                        st.warning("Métricas de validação não disponíveis.")
+                                        
+                                    st.markdown(f"📌 **Melhor Trial:** {report['best_trial_number']}")
+                                    st.markdown(f"🔗 **MLflow Run ID:** `{report['run_id']}`")
                                     
                                     if 'stability' in report and report['stability']:
                                         st.divider()
-                                        st.markdown("⚖️ **Métricas de Estabilidade**")
+                                        st.markdown("⚖️ **Análise de Estabilidade**")
                                         for s_type, s_data in report['stability'].items():
                                             if s_type == 'general':
-                                                st.caption("Resumo Geral:")
-                                                st.json({k: v for k, v in s_data.items() if k != 'raw_seed' and k != 'raw_split'})
+                                                st.write("📈 **Resumo Geral de Estabilidade**")
+                                                summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
+                                                # Convert nested dict to flat for table
+                                                flat_summary = []
+                                                for metric, stats in summary.items():
+                                                    if isinstance(stats, dict):
+                                                        row = {'Métrica': metric.upper()}
+                                                        row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
+                                                        flat_summary.append(row)
+                                                
+                                                if flat_summary:
+                                                    st.table(pd.DataFrame(flat_summary))
                                             elif s_type == 'hyperparam':
-                                                st.caption(f"Sensibilidade: {s_type}")
-                                                st.dataframe(s_data)
+                                                with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+                                                    st.dataframe(s_data, use_container_width=True)
                                             else:
-                                                st.caption(f"Teste: {s_type}")
-                                                st.dataframe(s_data)
+                                                with st.expander(f"Teste: {s_type}", expanded=False):
+                                                    st.dataframe(s_data, use_container_width=True)
                                 with col_rep2:
                                     if 'plots' in report and report['plots']:
                                         plot_labels = list(report['plots'].keys())

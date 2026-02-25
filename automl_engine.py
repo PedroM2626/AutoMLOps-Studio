@@ -1267,6 +1267,10 @@ class AutoMLTrainer:
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
             
+            # Sincronizar o score final com a métrica de otimização escolhida para garantir exibição correta na UI
+            if optimization_metric in trial_metrics:
+                score = trial_metrics[optimization_metric]
+            
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
             if self.task_type in ['classification', 'clustering', 'anomaly_detection']:
@@ -1467,36 +1471,34 @@ class AutoMLTrainer:
                          # Time Series is tricky for 'full' plot. We'll skip complex plot generation here 
                          # or just do a simple validation split at end
                          pass 
-                    elif hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[0] < 50:
-                         # Too small for CV plotting, skip
-                         pass
-                    elif not hasattr(effective_X_plot, 'shape') and len(effective_X_plot) < 50:
-                         pass
-                    elif is_high_dim:
-                         # Skip detailed plotting for high dim data
-                         pass
                     else:
                         # Use 3-fold CV to get clean predictions for the whole training set
                         # This gives us a confusion matrix for the whole dataset based on OOF predictions
                         try:
-                            # IMPORTANT: Ensure X is numeric/processed before CV
-                            if isinstance(effective_X_plot, pd.DataFrame):
-                                # If DataFrame, check dtypes. If object, might fail if model not pipeline.
-                                # But best_model_instance SHOULD handle it if it was trained on it.
-                                pass
-                                
-                            logger.info(f"📊 Gerando previsões via CV (3-fold) para relatório do modelo {m_name}...")
-                            method = 'predict'
-                            y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
-                            y_true_plot = y_train
+                            logger.info(f"📊 Gerando previsões para relatório do modelo {m_name}...")
                             
-                            if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
-                                try:
-                                    y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
-                                except:
-                                    pass
+                            # Fallback para datasets pequenos ou Time Series
+                            if (hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[0] < 50) or \
+                               (not hasattr(effective_X_plot, 'shape') and len(effective_X_plot) < 50):
+                                
+                                logger.info("Dataset pequeno: Usando split simples para relatório.")
+                                best_model_instance.fit(effective_X_plot, y_train)
+                                y_pred_plot = best_model_instance.predict(effective_X_plot)
+                                y_true_plot = y_train
+                                if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                    y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
+                            else:
+                                # Use 3-fold CV
+                                y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
+                                y_true_plot = y_train
+                                
+                                if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                    try:
+                                        y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
+                                    except:
+                                        pass
                         except Exception as cv_err:
-                            logger.warning(f"Failed to generate CV predictions for report: {cv_err}")
+                            logger.warning(f"Failed to generate predictions for report: {cv_err}")
                             # Fallback: Simple predict on X_train (Overfit warning)
                             logger.info("Falling back to training set predictions (Warning: Metrics may be optimistic)")
                             best_model_instance.fit(effective_X_plot, y_train)
@@ -1571,6 +1573,32 @@ class AutoMLTrainer:
                             ax_reg.set_ylabel('Predicted')
                             ax_reg.set_title(f'Actual vs Predicted - {m_name}')
                             plots[f'pred_vs_actual_{m_name}'] = fig_reg
+
+                        # Feature Importance Plot
+                        if hasattr(best_model_instance, 'feature_importances_') or hasattr(best_model_instance, 'coef_'):
+                            import pandas as pd
+                            try:
+                                if hasattr(best_model_instance, 'feature_importances_'):
+                                    importances = best_model_instance.feature_importances_
+                                else:
+                                    importances = np.abs(best_model_instance.coef_).flatten()
+                                
+                                # Limit to top 20 features
+                                feat_names = []
+                                if hasattr(effective_X_plot, 'columns'):
+                                    feat_names = effective_X_plot.columns.tolist()
+                                else:
+                                    feat_names = [f"Feature {i}" for i in range(len(importances))]
+                                
+                                fi_df = pd.DataFrame({'Feature': feat_names, 'Importance': importances})
+                                fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
+                                
+                                fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
+                                sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
+                                ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
+                                plots[f'feature_importance_{m_name}'] = fig_fi
+                            except Exception as fi_err:
+                                logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
                             # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
                             # Better: Return the Figure object.
                             
