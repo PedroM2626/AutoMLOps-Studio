@@ -1434,6 +1434,11 @@ class AutoMLTrainer:
                     
                     best_model_instance = self._instantiate_model(m_name, best_params_model)
                     
+                    # Force n_jobs=1 for reporting and stability to avoid hangs/contention in containers
+                    if hasattr(best_model_instance, 'n_jobs'):
+                         try: best_model_instance.set_params(n_jobs=1)
+                         except: pass
+                    
                     # Set seed
                     if hasattr(best_model_instance, 'random_state'):
                         best_model_instance.set_params(random_state=model_seed)
@@ -1488,19 +1493,21 @@ class AutoMLTrainer:
                                 if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
                                     y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
                             else:
-                                # Use 3-fold CV
-                                y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
+                                # Use 3-fold CV with limited n_jobs for stability in containers
+                                logger.info(f"Gerando previsões de validação via CV (3-fold) para {m_name}...")
+                                y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=1)
                                 y_true_plot = y_train
                                 
                                 if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
                                     try:
-                                        y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
+                                        logger.info(f"Gerando probabilidades via CV para {m_name}...")
+                                        y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=1, method='predict_proba')
                                     except:
                                         pass
                         except Exception as cv_err:
                             logger.warning(f"Failed to generate predictions for report: {cv_err}")
                             # Fallback: Simple predict on X_train (Overfit warning)
-                            logger.info("Falling back to training set predictions (Warning: Metrics may be optimistic)")
+                            logger.info(f"Falling back to training set predictions for {m_name} (Warning: Metrics may be optimistic)")
                             best_model_instance.fit(effective_X_plot, y_train)
                             y_pred_plot = best_model_instance.predict(effective_X_plot)
                             y_true_plot = y_train
@@ -1510,6 +1517,7 @@ class AutoMLTrainer:
                     # 4. Calcular métricas detalhadas
                     report_metrics = {}
                     if y_true_plot is not None and y_pred_plot is not None:
+                        logger.info(f"Calculando métricas detalhadas para {m_name}...")
                         if self.task_type == 'classification':
                             report_metrics['accuracy'] = accuracy_score(y_true_plot, y_pred_plot)
                             report_metrics['f1'] = f1_score(y_true_plot, y_pred_plot, average='weighted')
@@ -1530,6 +1538,7 @@ class AutoMLTrainer:
                         import matplotlib.pyplot as plt
                         import seaborn as sns
                         
+                        logger.info(f"Gerando visualizações (gráficos) para {m_name}...")
                         if self.task_type == 'classification':
                             # Confusion Matrix
                             cm = confusion_matrix(y_true_plot, y_pred_plot)
@@ -1607,7 +1616,21 @@ class AutoMLTrainer:
                     if stability_config and stability_config.get('tests'):
                         try:
                             logger.info(f"⚖️ Iniciando análise de estabilidade para {m_name}...")
-                            analyzer = StabilityAnalyzer(best_model_instance, effective_X_plot, y_train, task_type=self.task_type, random_state=model_seed)
+                            
+                            # Use a subset for stability analysis to speed up per-model reporting
+                            X_stab = effective_X_plot
+                            y_stab = y_train
+                            if hasattr(X_stab, 'shape') and X_stab.shape[0] > 500:
+                                 logger.info("Sampling data for stability analysis (N=500)...")
+                                 idx = np.random.choice(X_stab.shape[0], 500, replace=False)
+                                 if isinstance(X_stab, pd.DataFrame):
+                                      X_stab = X_stab.iloc[idx]
+                                      y_stab = y_stab.iloc[idx]
+                                 else:
+                                      X_stab = X_stab[idx]
+                                      y_stab = y_stab[idx]
+                                      
+                            analyzer = StabilityAnalyzer(best_model_instance, X_stab, y_stab, task_type=self.task_type, random_state=model_seed)
                             
                             tests = stability_config.get('tests', [])
                             n_iter = stability_config.get('n_iterations', 5) # Default lowered for reporting speed
@@ -1676,7 +1699,8 @@ class AutoMLTrainer:
                             for plot_name, fig_obj in plots.items():
                                 try:
                                     mlflow.log_figure(fig_obj, f"{plot_name}.png")
-                                    # plt.close(fig_obj) # DO NOT CLOSE if we want to show in Streamlit
+                                    # We keep the figure in the plots dict for the callback, 
+                                    # but we should ensure it's closed eventually.
                                 except Exception as e:
                                     logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
                     
@@ -1698,7 +1722,12 @@ class AutoMLTrainer:
                          report_payload['__report__'] = full_report
                          
                          callback(best_trial_for_model, best_score_for_model, f"{m_name} - FINAL", 0.0, report_payload)
-
+                         
+                    # Explicitly close all figures generated for this model to free memory
+                    for fig in plots.values():
+                         try: plt.close(fig)
+                         except: pass
+                         
             except Exception as e:
                 logger.error(f"Erro ao gerar relatorio final para {m_name}: {e}")
                 # import traceback

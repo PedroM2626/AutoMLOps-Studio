@@ -980,7 +980,7 @@ with tabs[1]:
                         custom_models=custom_models,
                         optimization_mode=selected_opt_mode,
                         optimization_metric=optimization_metric,
-                        stability_config={'tests': selected_stability_tests, 'n_iterations': 5} if enable_stability else None
+                        stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None
                     )
                     best_params = trainer.best_params
                     
