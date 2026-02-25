@@ -1,0 +1,274 @@
+﻿diff --cc app.py
+index 4be4df5,0025f31..0000000
+--- a/app.py
++++ b/app.py
+@@@ -826,65 -822,41 +826,98 @@@ with tabs[1]
+                      # Check for special report event
+                      if metrics and '__report__' in metrics:
+                          report = metrics['__report__']
+ +                        model_name = report['model_name']
+ +                        
+ +                        # Store report in session state to survive reruns
+ +                        st.session_state['report_data'][model_name] = report
+ +                        
+                          with report_container:
+++<<<<<<< HEAD
+ +                            # Render ALL reports stored in session state
+ +                            for m_name, rep in st.session_state['report_data'].items():
+ +                                expander_label = f"Relat├│rio Final: {rep['model_name']} (Score: {rep['score']:.4f})"
+ +                                with st.expander(expander_label, expanded=True):
+ +                                    col_rep1, col_rep2 = st.columns([1, 2])
+ +                                    with col_rep1:
+ +                                        st.markdown("­ƒÄ» **M├®tricas de Valida├º├úo**")
+ +                                        if rep['metrics']:
+ +                                            # Display metrics as a nice table instead of raw JSON
+ +                                            met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
+ +                                            met_df.columns = ['M├®trica', 'Valor']
+ +                                            st.table(met_df)
+ +                                        else:
+ +                                            st.warning("M├®tricas de valida├º├úo n├úo dispon├¡veis.")
+ +                                            
+ +                                        st.markdown(f"­ƒôî **Melhor Trial:** {rep['best_trial_number']}")
+ +                                        st.markdown(f"­ƒöù **MLflow Run ID:** `{rep['run_id']}`")
+ +                                        
+ +                                        if 'stability' in rep and rep['stability']:
+ +                                            st.divider()
+ +                                            st.markdown("ÔÜû´©Å **An├ílise de Estabilidade**")
+ +                                            for s_type, s_data in rep['stability'].items():
+ +                                                if s_type == 'general':
+ +                                                    st.write("­ƒôê **Resumo Geral de Estabilidade**")
+ +                                                    summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
+ +                                                    # Convert nested dict to flat for table
+ +                                                    flat_summary = []
+ +                                                    for metric, stats in summary.items():
+ +                                                        if isinstance(stats, dict):
+ +                                                            row = {'M├®trica': metric.upper()}
+ +                                                            row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
+ +                                                            flat_summary.append(row)
+ +                                                    
+ +                                                    if flat_summary:
+ +                                                        st.table(pd.DataFrame(flat_summary))
+ +                                                elif s_type == 'hyperparam':
+ +                                                    with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+ +                                                        st.dataframe(s_data, use_container_width=True)
+ +                                                else:
+ +                                                    with st.expander(f"Teste: {s_type}", expanded=False):
+ +                                                        st.dataframe(s_data, use_container_width=True)
+ +                                    with col_rep2:
+ +                                        if 'plots' in rep and rep['plots']:
+ +                                            plot_labels = list(rep['plots'].keys())
+ +                                            if plot_labels:
+ +                                                tab_plots = st.tabs(plot_labels)
+ +                                                for i, plot_name in enumerate(plot_labels):
+ +                                                    with tab_plots[i]:
+ +                                                        st.pyplot(rep['plots'][plot_name], clear_figure=True)
+ +                                            else:
+ +                                                st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+++=======
++                             expander_label = f"Relat├│rio Final: {report['model_name']} (Score: {report['score']:.4f})"
++                             with st.expander(expander_label, expanded=False):
++                                 col_rep1, col_rep2 = st.columns([1, 2])
++                                 with col_rep1:
++                                     st.markdown("**M├®tricas de Valida├º├úo**")
++                                     st.json(report['metrics'])
++                                     st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
++                                     st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
++                                     
++                                     if 'stability' in report and report['stability']:
++                                         st.divider()
++                                         st.markdown("ÔÜû´©Å **M├®tricas de Estabilidade**")
++                                         for s_type, s_data in report['stability'].items():
++                                             if s_type == 'general':
++                                                 st.caption("Resumo Geral:")
++                                                 st.json({k: v for k, v in s_data.items() if k != 'raw_seed' and k != 'raw_split'})
++                                             elif s_type == 'hyperparam':
++                                                 st.caption(f"Sensibilidade: {s_type}")
++                                                 st.dataframe(s_data)
++                                             else:
++                                                 st.caption(f"Teste: {s_type}")
++                                                 st.dataframe(s_data)
++                                 with col_rep2:
++                                     if 'plots' in report and report['plots']:
++                                         plot_labels = list(report['plots'].keys())
++                                         if plot_labels:
++                                             tab_plots = st.tabs(plot_labels)
++                                             for i, plot_name in enumerate(plot_labels):
++                                                 with tab_plots[i]:
++                                                     st.pyplot(report['plots'][plot_name])
+++>>>>>>> 8c627d0 (feat-stability)
+                                          else:
+                                              st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+ -                                    else:
+ -                                        st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+                          return
+  
+                      # Extrair nome do algoritmo e o n├║mero do trial do modelo
+@@@ -991,7 -963,7 +1024,11 @@@
+                          custom_models=custom_models,
+                          optimization_mode=selected_opt_mode,
+                          optimization_metric=optimization_metric,
+++<<<<<<< HEAD
+ +                        stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None
+++=======
++                         stability_config={'tests': selected_stability_tests, 'n_iterations': 5} if enable_stability else None
+++>>>>>>> 8c627d0 (feat-stability)
+                      )
+                      best_params = trainer.best_params
+                      
+diff --cc automl_engine.py
+index 384caa8,65aed00..0000000
+--- a/automl_engine.py
++++ b/automl_engine.py
+@@@ -1643,21 -1579,7 +1643,25 @@@ class AutoMLTrainer
+                      if stability_config and stability_config.get('tests'):
+                          try:
+                              logger.info(f"ÔÜû´©Å Iniciando an├ílise de estabilidade para {m_name}...")
+++<<<<<<< HEAD
+ +                            
+ +                            # Use a subset for stability analysis to speed up per-model reporting
+ +                            X_stab = effective_X_plot
+ +                            y_stab = y_train
+ +                            if hasattr(X_stab, 'shape') and X_stab.shape[0] > 500:
+ +                                 logger.info("Sampling data for stability analysis (N=500)...")
+ +                                 idx = np.random.choice(X_stab.shape[0], 500, replace=False)
+ +                                 if isinstance(X_stab, pd.DataFrame):
+ +                                      X_stab = X_stab.iloc[idx]
+ +                                      y_stab = y_stab.iloc[idx]
+ +                                 else:
+ +                                      X_stab = X_stab[idx]
+ +                                      y_stab = y_stab[idx]
+ +                                      
+ +                            analyzer = StabilityAnalyzer(best_model_instance, X_stab, y_stab, task_type=self.task_type, random_state=model_seed)
+++=======
++                             analyzer = StabilityAnalyzer(best_model_instance, effective_X_plot, y_train, task_type=self.task_type, random_state=model_seed)
+++>>>>>>> 8c627d0 (feat-stability)
+                              
+                              tests = stability_config.get('tests', [])
+                              n_iter = stability_config.get('n_iterations', 5) # Default lowered for reporting speed
+@@@ -1668,13 -1590,11 +1672,19 @@@
+                                  fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                  analyzer.calculate_stability_metrics(stability_results['general']['raw_seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                  ax_seed.set_title(f"Seed Stability Scores - {m_name}")
+++<<<<<<< HEAD
+ +                                plt.tight_layout()
+++=======
+++>>>>>>> 8c627d0 (feat-stability)
+                                  plots[f'stability_seed_{m_name}'] = fig_seed
+                                  
+                                  fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                  analyzer.calculate_stability_metrics(stability_results['general']['raw_split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                  ax_split.set_title(f"Split Stability Scores - {m_name}")
+++<<<<<<< HEAD
+ +                                plt.tight_layout()
+++=======
+++>>>>>>> 8c627d0 (feat-stability)
+                                  plots[f'stability_split_{m_name}'] = fig_split
+                              
+                              if "Robustez ├á Inicializa├º├úo" in tests and 'general' not in stability_results:
+@@@ -1682,7 -1602,6 +1692,10 @@@
+                                  fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                  analyzer.calculate_stability_metrics(stability_results['seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                  ax_seed.set_title(f"Seed Stability - {m_name}")
+++<<<<<<< HEAD
+ +                                plt.tight_layout()
+++=======
+++>>>>>>> 8c627d0 (feat-stability)
+                                  plots[f'stability_seed_{m_name}'] = fig_seed
+  
+                              if "Robustez a Varia├º├úo de Dados" in tests and 'general' not in stability_results:
+@@@ -1690,7 -1609,6 +1703,10 @@@
+                                  fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                  analyzer.calculate_stability_metrics(stability_results['split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                  ax_split.set_title(f"Data Split Stability - {m_name}")
+++<<<<<<< HEAD
+ +                                plt.tight_layout()
+++=======
+++>>>>>>> 8c627d0 (feat-stability)
+                                  plots[f'stability_split_{m_name}'] = fig_split
+                                  
+                              if "Sensibilidade a Hiperpar├ómetros" in tests:
+@@@ -1704,7 -1622,6 +1720,10 @@@
+                                          fig_hyp, ax_hyp = plt.subplots(figsize=(6, 4))
+                                          stability_results['hyperparam'].set_index('param_value').iloc[:, 0].plot(ax=ax_hyp)
+                                          ax_hyp.set_title(f"Sensitivity: {p_name} - {m_name}")
+++<<<<<<< HEAD
+ +                                        plt.tight_layout()
+++=======
+++>>>>>>> 8c627d0 (feat-stability)
+                                          plots[f'stability_hyper_{m_name}'] = fig_hyp
+  
+                          except Exception as stab_err:
+@@@ -1714,52 -1631,26 +1733,63 @@@
+                      # Precisamos recuperar o run_id do trial
+                      best_run_id = best_trial_for_model.user_attrs.get("run_id")
+                      if best_run_id and tracker and not isinstance(tracker, DummyTracker):
+ -                        logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+ -                        with mlflow.start_run(run_id=best_run_id):
+ -                            # Log full params just in case
+ -                            mlflow.log_params(best_params_model)
+ -                            # Log extra metrics
+ -                            if report_metrics:
+ -                                mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+ +                        try:
+ +                            logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
+                              
+++<<<<<<< HEAD
+ +                            # Garantir que o experimento correto est├í selecionado
+ +                            if hasattr(tracker, 'experiment_name'):
+ +                                 mlflow.set_experiment(tracker.experiment_name)
+ +                            
+ +                            # Garantir que n├úo h├í run ativo para evitar conflitos
+ +                            if mlflow.active_run():
+ +                                active_run = mlflow.active_run()
+ +                                if active_run.info.run_id != best_run_id:
+ +                                    logger.info(f"Ending active run {active_run.info.run_id} to start {best_run_id}")
+ +                                    mlflow.end_run()
+ +                                else:
+ +                                    # Already in the right run
+ +                                    pass
+ +                                
+ +                            # If we are already in the right run, don't restart it (might cause nesting issues)
+ +                            active_run = mlflow.active_run()
+ +                            if active_run and active_run.info.run_id == best_run_id:
+ +                                # Just log
+ +                                if report_metrics:
+ +                                    mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+ +                                for plot_name, fig_obj in plots.items():
+++=======
++                             # Log stability results as dict if exists
++                             if stability_results:
++                                 # Just log that it was done and some summary
++                                 mlflow.log_param("stability_analysis", "done")
++                             
++                             # Log plots
++                             for plot_name, fig_obj in plots.items():
++                                 try:
+++>>>>>>> 8c627d0 (feat-stability)
+                                      mlflow.log_figure(fig_obj, f"{plot_name}.png")
+ -                                    # plt.close(fig_obj) # DO NOT CLOSE if we want to show in Streamlit
+ -                                except Exception as e:
+ -                                    logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+ +                            else:
+ +                                with mlflow.start_run(run_id=best_run_id):
+ +                                    # Log full params just in case
+ +                                    mlflow.log_params(best_params_model)
+ +                                    # Log extra metrics
+ +                                    if report_metrics:
+ +                                        mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+ +                                    
+ +                                    # Log stability results as dict if exists
+ +                                    if stability_results:
+ +                                        # Just log that it was done and some summary
+ +                                        mlflow.log_param("stability_analysis", "done")
+ +                                    
+ +                                    # Log plots
+ +                                    for plot_name, fig_obj in plots.items():
+ +                                        try:
+ +                                            mlflow.log_figure(fig_obj, f"{plot_name}.png")
+ +                                        except Exception as e:
+ +                                            logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+ +                        except Exception as ml_err:
+ +                            logger.warning(f"MLflow logging failed for report: {ml_err}. Continuing to UI callback.")
+                      
+                      # 7. Disparar Callback de Relat├│rio Completo
+                      if callback:

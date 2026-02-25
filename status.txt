@@ -1,0 +1,50 @@
+﻿On branch main
+Your branch is ahead of 'origin/main' by 6 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add/rm <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	deleted:    .dockerignore
+	deleted:    .env.example
+	deleted:    Dockerfile
+	deleted:    README.md
+	deleted:    api.py
+	deleted:    cv_engine.py
+	deleted:    docker-compose.yml
+	deleted:    electron-main.js
+	deleted:    electron-preload.js
+	deleted:    error_loading.html
+	deleted:    mlflow.db
+	deleted:    mlops_utils.py
+	deleted:    package-lock.json
+	deleted:    package.json
+	deleted:    requirements.txt
+	deleted:    stability_engine.py
+	deleted:    test_interface_simulation.py
+	deleted:    test_mlflow_switch.py
+	deleted:    test_stability_integration.py
+	deleted:    tests/__init__.py
+	deleted:    tests/debug_test.py
+	deleted:    tests/debug_train.py
+	deleted:    tests/run_tests.py
+	deleted:    tests/simulate_interface.py
+	deleted:    tests/test_automl_tab.py
+	deleted:    tests/test_automl_transformers.py
+	deleted:    tests/test_ensemble_crash.py
+	deleted:    tests/test_imports.py
+	deleted:    tests/test_interface_simulation_custom_opt.py
+	deleted:    tests/test_interface_simulation_unified.py
+	deleted:    tests/test_mlflow_integration.py
+	deleted:    tests/test_reconstruction.py
+	deleted:    tests/test_reproducibility.py
+	deleted:    tests/test_sentiment.py
+	deleted:    tests/test_stability_tab.py
+	deleted:    tests/test_transformers_interface.py
+	deleted:    tests/tests.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	status.txt
+
+no changes added to commit (use "git add" and/or "git commit -a")

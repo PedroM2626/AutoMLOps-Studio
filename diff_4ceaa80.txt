@@ -1,0 +1,229 @@
+﻿diff --cc app.py
+index 4be4df5,4df91b9..0000000
+--- a/app.py
++++ b/app.py
+@@@ -826,65 -822,58 +826,115 @@@ with tabs[1]
+                      # Check for special report event
+                      if metrics and '__report__' in metrics:
+                          report = metrics['__report__']
+ +                        model_name = report['model_name']
+ +                        
+ +                        # Store report in session state to survive reruns
+ +                        st.session_state['report_data'][model_name] = report
+ +                        
+                          with report_container:
+++<<<<<<< HEAD
+ +                            # Render ALL reports stored in session state
+ +                            for m_name, rep in st.session_state['report_data'].items():
+ +                                expander_label = f"Relat├│rio Final: {rep['model_name']} (Score: {rep['score']:.4f})"
+ +                                with st.expander(expander_label, expanded=True):
+ +                                    col_rep1, col_rep2 = st.columns([1, 2])
+ +                                    with col_rep1:
+ +                                        st.markdown("­ƒÄ» **M├®tricas de Valida├º├úo**")
+ +                                        if rep['metrics']:
+ +                                            # Display metrics as a nice table instead of raw JSON
+ +                                            met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
+ +                                            met_df.columns = ['M├®trica', 'Valor']
+ +                                            st.table(met_df)
+ +                                        else:
+ +                                            st.warning("M├®tricas de valida├º├úo n├úo dispon├¡veis.")
+ +                                            
+ +                                        st.markdown(f"­ƒôî **Melhor Trial:** {rep['best_trial_number']}")
+ +                                        st.markdown(f"­ƒöù **MLflow Run ID:** `{rep['run_id']}`")
+ +                                        
+ +                                        if 'stability' in rep and rep['stability']:
+ +                                            st.divider()
+ +                                            st.markdown("ÔÜû´©Å **An├ílise de Estabilidade**")
+ +                                            for s_type, s_data in rep['stability'].items():
+ +                                                if s_type == 'general':
+ +                                                    st.write("­ƒôê **Resumo Geral de Estabilidade**")
+ +                                                    summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
+ +                                                    # Convert nested dict to flat for table
+ +                                                    flat_summary = []
+ +                                                    for metric, stats in summary.items():
+ +                                                        if isinstance(stats, dict):
+ +                                                            row = {'M├®trica': metric.upper()}
+ +                                                            row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
+ +                                                            flat_summary.append(row)
+ +                                                    
+ +                                                    if flat_summary:
+ +                                                        st.table(pd.DataFrame(flat_summary))
+ +                                                elif s_type == 'hyperparam':
+ +                                                    with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+ +                                                        st.dataframe(s_data, use_container_width=True)
+ +                                                else:
+ +                                                    with st.expander(f"Teste: {s_type}", expanded=False):
+ +                                                        st.dataframe(s_data, use_container_width=True)
+ +                                    with col_rep2:
+ +                                        if 'plots' in rep and rep['plots']:
+ +                                            plot_labels = list(rep['plots'].keys())
+ +                                            if plot_labels:
+ +                                                tab_plots = st.tabs(plot_labels)
+ +                                                for i, plot_name in enumerate(plot_labels):
+ +                                                    with tab_plots[i]:
+ +                                                        st.pyplot(rep['plots'][plot_name], clear_figure=True)
+ +                                            else:
+ +                                                st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+++=======
++                             expander_label = f"Relat├│rio Final: {report['model_name']} (Score: {report['score']:.4f})"
++                             with st.expander(expander_label, expanded=False):
++                                 col_rep1, col_rep2 = st.columns([1, 2])
++                                 with col_rep1:
++                                     st.markdown("­ƒÄ» **M├®tricas de Valida├º├úo**")
++                                     if report['metrics']:
++                                         # Display metrics as a nice table instead of raw JSON
++                                         met_df = pd.DataFrame([report['metrics']]).T.reset_index()
++                                         met_df.columns = ['M├®trica', 'Valor']
++                                         st.table(met_df)
++                                     else:
++                                         st.warning("M├®tricas de valida├º├úo n├úo dispon├¡veis.")
++                                         
++                                     st.markdown(f"­ƒôî **Melhor Trial:** {report['best_trial_number']}")
++                                     st.markdown(f"­ƒöù **MLflow Run ID:** `{report['run_id']}`")
++                                     
++                                     if 'stability' in report and report['stability']:
++                                         st.divider()
++                                         st.markdown("ÔÜû´©Å **An├ílise de Estabilidade**")
++                                         for s_type, s_data in report['stability'].items():
++                                             if s_type == 'general':
++                                                 st.write("­ƒôê **Resumo Geral de Estabilidade**")
++                                                 summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
++                                                 # Convert nested dict to flat for table
++                                                 flat_summary = []
++                                                 for metric, stats in summary.items():
++                                                     if isinstance(stats, dict):
++                                                         row = {'M├®trica': metric.upper()}
++                                                         row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
++                                                         flat_summary.append(row)
++                                                 
++                                                 if flat_summary:
++                                                     st.table(pd.DataFrame(flat_summary))
++                                             elif s_type == 'hyperparam':
++                                                 with st.expander(f"Sensibilidade: {s_type}", expanded=False):
++                                                     st.dataframe(s_data, use_container_width=True)
++                                             else:
++                                                 with st.expander(f"Teste: {s_type}", expanded=False):
++                                                     st.dataframe(s_data, use_container_width=True)
++                                 with col_rep2:
++                                     if 'plots' in report and report['plots']:
++                                         plot_labels = list(report['plots'].keys())
++                                         if plot_labels:
++                                             tab_plots = st.tabs(plot_labels)
++                                             for i, plot_name in enumerate(plot_labels):
++                                                 with tab_plots[i]:
++                                                     st.pyplot(report['plots'][plot_name])
+++>>>>>>> 4ceaa80 (fix-ui-metrics)
+                                          else:
+                                              st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+ -                                    else:
+ -                                        st.info("Sem visualiza├º├Áes dispon├¡veis para este modelo.")
+                          return
+  
+                      # Extrair nome do algoritmo e o n├║mero do trial do modelo
+diff --cc automl_engine.py
+index 384caa8,d311c2e..0000000
+--- a/automl_engine.py
++++ b/automl_engine.py
+@@@ -1493,15 -1488,13 +1493,24 @@@ class AutoMLTrainer
+                                  if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                      y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
+                              else:
+++<<<<<<< HEAD
+ +                                # Use 3-fold CV with limited n_jobs for stability in containers
+ +                                logger.info(f"Gerando previs├Áes de valida├º├úo via CV (3-fold) para {m_name}...")
+ +                                y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=1)
+++=======
++                                 # Use 3-fold CV
++                                 y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
+++>>>>>>> 4ceaa80 (fix-ui-metrics)
+                                  y_true_plot = y_train
+                                  
+                                  if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                      try:
+++<<<<<<< HEAD
+ +                                        logger.info(f"Gerando probabilidades via CV para {m_name}...")
+ +                                        y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=1, method='predict_proba')
+++=======
++                                         y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
+++>>>>>>> 4ceaa80 (fix-ui-metrics)
+                                      except:
+                                          pass
+                          except Exception as cv_err:
+@@@ -1580,32 -1572,11 +1589,38 @@@
+                              ax_reg.set_xlabel('Actual')
+                              ax_reg.set_ylabel('Predicted')
+                              ax_reg.set_title(f'Actual vs Predicted - {m_name}')
+ +                            plt.tight_layout()
+                              plots[f'pred_vs_actual_{m_name}'] = fig_reg
+  
+++<<<<<<< HEAD
+ +                        # Ensure model is fitted for FI (cross_val_predict doesn't leave the model instance fitted)
+ +                        try:
+ +                            # Try to check if fitted, if not, fit
+ +                            from sklearn.utils.validation import check_is_fitted
+ +                            check_is_fitted(best_model_instance)
+ +                            logger.info(f"Model {m_name} is already fitted.")
+ +                        except:
+ +                            try:
+ +                                logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
+ +                                # Use a small sample if it's too large, but for FI we want representative
+ +                                best_model_instance.fit(effective_X_plot, y_train)
+ +                            except Exception as fit_err:
+ +                                logger.warning(f"Could not fit {m_name} for FI plot: {fit_err}")
+ +
+ +                        # ADDED: Check if model has feature importance or coefficients
+ +                        has_fi = hasattr(best_model_instance, 'feature_importances_')
+ +                        has_coef = hasattr(best_model_instance, 'coef_')
+ +                        
+ +                        # Special case for ensembles that might not expose FI directly but their estimators do
+ +                        if not has_fi and not has_coef and (isinstance(best_model_instance, (VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor))):
+ +                            logger.info(f"Model {m_name} is an ensemble. FI might be unavailable directly.")
+ +
+ +                        if has_fi or has_coef:
+++=======
++                         # Feature Importance Plot
++                         if hasattr(best_model_instance, 'feature_importances_') or hasattr(best_model_instance, 'coef_'):
++                             import pandas as pd
+++>>>>>>> 4ceaa80 (fix-ui-metrics)
+                              try:
+                                  if hasattr(best_model_instance, 'feature_importances_'):
+                                      importances = best_model_instance.feature_importances_
+@@@ -1615,24 -1586,17 +1630,38 @@@
+                                  # Limit to top 20 features
+                                  feat_names = []
+                                  if hasattr(effective_X_plot, 'columns'):
+++<<<<<<< HEAD
+ +                                    feat_names = list(effective_X_plot.columns)
+ +                                else:
+ +                                    feat_names = [f"Feature {i}" for i in range(len(importances))]
+ +                                
+ +                                # Sync lengths if possible
+ +                                min_len = min(len(feat_names), len(importances))
+ +                                if min_len > 0:
+ +                                    fi_df = pd.DataFrame({
+ +                                        'Feature': feat_names[:min_len], 
+ +                                        'Importance': importances[:min_len]
+ +                                    })
+ +                                    fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
+ +                                    
+ +                                    fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
+ +                                    sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
+ +                                    ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
+ +                                    plt.tight_layout()
+ +                                    plots[f'feature_importance_{m_name}'] = fig_fi
+++=======
++                                     feat_names = effective_X_plot.columns.tolist()
++                                 else:
++                                     feat_names = [f"Feature {i}" for i in range(len(importances))]
++                                 
++                                 fi_df = pd.DataFrame({'Feature': feat_names, 'Importance': importances})
++                                 fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
++                                 
++                                 fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
++                                 sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
++                                 ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
++                                 plots[f'feature_importance_{m_name}'] = fig_fi
+++>>>>>>> 4ceaa80 (fix-ui-metrics)
+                              except Exception as fi_err:
+                                  logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
+                              # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
