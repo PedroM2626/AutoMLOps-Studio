@@ -69,13 +69,24 @@ import os
 import logging
 import time
 import warnings
-# import matplotlib.pyplot as plt # Moved to local scope
-# import seaborn as sns # Moved to local scope
+import matplotlib.pyplot as plt
+import seaborn as sns
 import mlflow
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_val_predict
+from stability_engine import StabilityAnalyzer
+import io
+from PIL import Image
 
-# Transformers import moved to top of file
+# Lazy load for optional libraries
+def get_deepchecks_suite(task_type):
+    try:
+        from deepchecks.tabular.suites import data_integrity
+        return data_integrity()
+    except ImportError:
+        return None
+
+class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
 
 # Silenciar avisos de convergência e outros avisos repetitivos
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -269,6 +280,28 @@ class AutoMLDataProcessor:
     def fit_transform(self, df, nlp_cols=None):
         self.nlp_cols = nlp_cols if nlp_cols else []
         
+        # --- Data Quality Check (Deepchecks) ---
+        self.quality_report_html = None
+        try:
+            from deepchecks.tabular import Dataset as DeepDataset
+            from deepchecks.tabular.suites import data_integrity
+            
+            # Identify label for deepchecks
+            label = self.target_column if self.target_column in df.columns else None
+            
+            # Simple check if data is large enough
+            if len(df) > 10:
+                logger.info("Running Data Integrity check with Deepchecks...")
+                ds = DeepDataset(df, label=label, cat_features=df.select_dtypes(include=['object', 'category']).columns.tolist())
+                integ_suite = data_integrity()
+                suite_result = integ_suite.run(ds)
+                
+                # Save report as HTML string for UI
+                self.quality_report_html = suite_result.save_as_html(render_static=True)
+                logger.info("Data Integrity check completed.")
+        except Exception as e:
+            logger.warning(f"Deepchecks failed: {e}")
+
         # NLP Cleaning first
         if self.nlp_cols:
             for col in self.nlp_cols:
@@ -358,7 +391,34 @@ class AutoMLDataProcessor:
             stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
             
             for col in nlp_features:
-                if vectorizer_type == 'count':
+                if vectorizer_type == 'embeddings':
+                    # Support for Sentence-Transformers
+                    try:
+                        from sentence_transformers import SentenceTransformer
+                        from sklearn.base import BaseEstimator, TransformerMixin
+                        
+                        class STTransformer(BaseEstimator, TransformerMixin):
+                            def __init__(self, model_name='all-MiniLM-L6-v2'):
+                                self.model_name = model_name
+                                self.model = None
+                            def fit(self, X, y=None):
+                                if self.model is None:
+                                    self.model = SentenceTransformer(self.model_name)
+                                return self
+                            def transform(self, X):
+                                # Ensure X is list of strings
+                                texts = [str(t) for t in X]
+                                return self.model.encode(texts, show_progress_bar=False)
+                            def get_feature_names_out(self, input_features=None):
+                                # Dummy feature names for embeddings (usually 384 for MiniLM)
+                                return [f"ST_emb_{i}" for i in range(384)]
+                        
+                        vectorizer = STTransformer(model_name=self.nlp_config.get('embedding_model', 'all-MiniLM-L6-v2'))
+                    except ImportError:
+                        logger.warning("sentence-transformers not installed. Falling back to TF-IDF.")
+                        vectorizer = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range, stop_words=stop_words)
+                
+                elif vectorizer_type == 'count':
                     vectorizer = CountVectorizer(
                         max_features=max_features,
                         ngram_range=ngram_range,
@@ -727,12 +787,14 @@ class AutoMLTrainer:
                     n_jobs=-1
                 ),
                 'mlp': lambda t: MLPClassifier(
-                    hidden_layer_sizes=eval(t.suggest_categorical('mlp_layers', ["(50,)", "(100,)", "(100, 50)", "(100, 100)", "(50, 50, 50)", "(256, 128, 64)"])),
+                    hidden_layer_sizes=t.suggest_categorical('mlp_layers', [(50,), (100,), (100, 50), (100, 100), (50, 50, 50), (256, 128, 64)]),
                     activation=t.suggest_categorical('mlp_activation', ['relu', 'tanh', 'logistic']),
+                    solver=t.suggest_categorical('mlp_solver', ['adam', 'sgd']),
                     alpha=t.suggest_float('mlp_alpha', 1e-6, 1e-1, log=True),
                     learning_rate_init=t.suggest_float('mlp_lr', 1e-5, 1e-1, log=True),
-                    max_iter=1000,
+                    max_iter=500, # Reduzido de 1000 para 500 para evitar hangs, early_stopping já ajuda
                     early_stopping=True,
+                    n_iter_no_change=10,
                     random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostClassifier(
@@ -833,12 +895,15 @@ class AutoMLTrainer:
                 ),
                 'sgd_regressor': lambda t: SGDRegressor(max_iter=1000, random_state=random_state),
                 'mlp': lambda t: MLPRegressor(
-                    hidden_layer_sizes=t.suggest_categorical('mlp_hidden', [(50,), (100,), (50, 50)]),
+                    hidden_layer_sizes=t.suggest_categorical('mlp_hidden', [(50,), (100,), (100, 50), (100, 100), (50, 50, 50)]),
                     activation=t.suggest_categorical('mlp_activation', ['relu', 'tanh']),
-                    alpha=t.suggest_float('mlp_alpha', 1e-4, 1e-1, log=True),
-                    max_iter=t.suggest_categorical('max_iter', [200, 500]) if not t.user_attrs.get("max_iter") else t.user_attrs.get("max_iter"),
+                    solver=t.suggest_categorical('mlp_solver', ['adam', 'sgd']),
+                    alpha=t.suggest_float('mlp_alpha', 1e-6, 1e-1, log=True),
+                    learning_rate_init=t.suggest_float('mlp_lr', 1e-5, 1e-1, log=True),
+                    max_iter=500,
                     random_state=random_state,
-                    early_stopping=True # Force early stopping for speed
+                    early_stopping=True,
+                    n_iter_no_change=10
                 ),
                 'catboost': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
@@ -952,7 +1017,7 @@ class AutoMLTrainer:
         """Returns a list of available model names for the current task type."""
         return self._get_models()
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', **kwargs):
+    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         # Usar configurações do preset se n_trials/timeout não forem fornecidos
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -960,6 +1025,8 @@ class AutoMLTrainer:
         
         # Armazenar modelos customizados (uploaded ou registrados)
         self.custom_models = custom_models if custom_models else {}
+        self.feature_names = feature_names
+        self.class_names = class_names
         
         # Se selected_models não for fornecido, usa a lista do preset
         if selected_models is None:
@@ -1266,6 +1333,10 @@ class AutoMLTrainer:
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
             
+            # Sincronizar o score final com a métrica de otimização escolhida para garantir exibição correta na UI
+            if optimization_metric in trial_metrics:
+                score = trial_metrics[optimization_metric]
+            
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
             if self.task_type in ['classification', 'clustering', 'anomaly_detection']:
@@ -1429,6 +1500,11 @@ class AutoMLTrainer:
                     
                     best_model_instance = self._instantiate_model(m_name, best_params_model)
                     
+                    # Force n_jobs=1 for reporting and stability to avoid hangs/contention in containers
+                    if hasattr(best_model_instance, 'n_jobs'):
+                         try: best_model_instance.set_params(n_jobs=1)
+                         except: pass
+                    
                     # Set seed
                     if hasattr(best_model_instance, 'random_state'):
                         best_model_instance.set_params(random_state=model_seed)
@@ -1466,38 +1542,53 @@ class AutoMLTrainer:
                          # Time Series is tricky for 'full' plot. We'll skip complex plot generation here 
                          # or just do a simple validation split at end
                          pass 
-                    elif hasattr(effective_X_plot, 'shape') and effective_X_plot.shape[0] < 50:
-                         # Too small for CV plotting, skip
-                         pass
-                    elif not hasattr(effective_X_plot, 'shape') and len(effective_X_plot) < 50:
-                         pass
-                    elif is_high_dim:
-                         # Skip detailed plotting for high dim data
-                         pass
                     else:
-                        # Use 3-fold CV to get clean predictions for the whole training set
-                        # This gives us a confusion matrix for the whole dataset based on OOF predictions
+                        # OPTIMIZED: Use a single holdout split for report plots instead of 3-fold CV
+                        # This is much faster, especially for Random Forest
                         try:
-                            # IMPORTANT: Ensure X is numeric/processed before CV
-                            if isinstance(effective_X_plot, pd.DataFrame):
-                                # If DataFrame, check dtypes. If object, might fail if model not pipeline.
-                                # But best_model_instance SHOULD handle it if it was trained on it.
-                                pass
-                                
-                            logger.info(f"📊 Gerando previsões via CV (3-fold) para relatório do modelo {m_name}...")
-                            method = 'predict'
-                            y_pred_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1)
-                            y_true_plot = y_train
+                            logger.info(f"📊 Gerando previsões para relatório do modelo {m_name} (Modo Rápido)...")
+                            
+                            # Sample data if too large to speed up report generation
+                            X_rep_data = effective_X_plot
+                            y_rep_data = y_train
+                            
+                            max_rep_samples = 2000 # Enough for good plots, fast enough for RF
+                            if hasattr(X_rep_data, 'shape') and X_rep_data.shape[0] > max_rep_samples:
+                                logger.info(f"Amostrando {max_rep_samples} instâncias para o relatório de {m_name}")
+                                idx_rep = np.random.choice(X_rep_data.shape[0], max_rep_samples, replace=False)
+                                if isinstance(X_rep_data, pd.DataFrame):
+                                    X_rep_data = X_rep_data.iloc[idx_rep]
+                                    y_rep_data = y_rep_data.iloc[idx_rep]
+                                else:
+                                    X_rep_data = X_rep_data[idx_rep]
+                                    y_rep_data = y_rep_data[idx_rep]
+
+                            # Simple 80/20 split for report metrics/plots
+                            X_r_tr, X_r_val, y_r_tr, y_r_val = train_test_split(
+                                X_rep_data, y_rep_data, test_size=0.2, random_state=model_seed
+                            )
+                            
+                            # Re-fit on the 80% to get "clean" predictions on the 20%
+                            # For RF, we can also limit n_estimators slightly for the report if it's still slow
+                            if m_name == 'random_forest' and hasattr(best_model_instance, 'n_estimators'):
+                                 orig_estimators = best_model_instance.n_estimators
+                                 if orig_estimators > 100:
+                                      best_model_instance.set_params(n_estimators=100)
+                            
+                            best_model_instance.fit(X_r_tr, y_r_tr)
+                            y_pred_plot = best_model_instance.predict(X_r_val)
+                            y_true_plot = y_r_val
                             
                             if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
-                                try:
-                                    y_proba_plot = cross_val_predict(best_model_instance, effective_X_plot, y_train, cv=3, n_jobs=-1, method='predict_proba')
-                                except:
-                                    pass
+                                y_proba_plot = best_model_instance.predict_proba(X_r_val)
+                                
+                            # Restore original estimators if changed
+                            if m_name == 'random_forest' and 'orig_estimators' in locals():
+                                 best_model_instance.set_params(n_estimators=orig_estimators)
+                                 
                         except Exception as cv_err:
-                            logger.warning(f"Failed to generate CV predictions for report: {cv_err}")
+                            logger.warning(f"Failed to generate fast predictions for report: {cv_err}")
                             # Fallback: Simple predict on X_train (Overfit warning)
-                            logger.info("Falling back to training set predictions (Warning: Metrics may be optimistic)")
                             best_model_instance.fit(effective_X_plot, y_train)
                             y_pred_plot = best_model_instance.predict(effective_X_plot)
                             y_true_plot = y_train
@@ -1507,6 +1598,7 @@ class AutoMLTrainer:
                     # 4. Calcular métricas detalhadas
                     report_metrics = {}
                     if y_true_plot is not None and y_pred_plot is not None:
+                        logger.info(f"Calculando métricas detalhadas para {m_name}...")
                         if self.task_type == 'classification':
                             report_metrics['accuracy'] = accuracy_score(y_true_plot, y_pred_plot)
                             report_metrics['f1'] = f1_score(y_true_plot, y_pred_plot, average='weighted')
@@ -1524,17 +1616,21 @@ class AutoMLTrainer:
                     # 5. Criar objetos de plotagem (Matplotlib Figures)
                     plots = {}
                     if y_true_plot is not None and y_pred_plot is not None:
-                        import matplotlib.pyplot as plt
-                        import seaborn as sns
-                        
+                        logger.info(f"Gerando visualizações (gráficos) para {m_name}...")
                         if self.task_type == 'classification':
                             # Confusion Matrix
                             cm = confusion_matrix(y_true_plot, y_pred_plot)
                             fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
-                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm)
+                            
+                            # Use class names for labels if available
+                            labels = self.class_names if self.class_names else None
+                            
+                            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm,
+                                        xticklabels=labels, yticklabels=labels)
                             ax_cm.set_title(f'Confusion Matrix - {m_name}')
                             ax_cm.set_ylabel('True Label')
                             ax_cm.set_xlabel('Predicted Label')
+                            plt.tight_layout()
                             plots[f'confusion_matrix_{m_name}'] = fig_cm
                             
                             if y_proba_plot is not None and hasattr(best_model_instance, 'classes_'):
@@ -1559,6 +1655,7 @@ class AutoMLTrainer:
                                 ax_roc.set_ylabel('True Positive Rate')
                                 ax_roc.set_title(f'ROC Curve - {m_name}')
                                 ax_roc.legend(loc="lower right")
+                                plt.tight_layout()
                                 plots[f'roc_curve_{m_name}'] = fig_roc
 
                         elif self.task_type == 'regression':
@@ -1569,32 +1666,213 @@ class AutoMLTrainer:
                             ax_reg.set_xlabel('Actual')
                             ax_reg.set_ylabel('Predicted')
                             ax_reg.set_title(f'Actual vs Predicted - {m_name}')
+                            plt.tight_layout()
                             plots[f'pred_vs_actual_{m_name}'] = fig_reg
+
+                        # Ensure model is fitted for FI (cross_val_predict doesn't leave the model instance fitted)
+                        try:
+                            # Try to check if fitted, if not, fit
+                            from sklearn.utils.validation import check_is_fitted
+                            check_is_fitted(best_model_instance)
+                            logger.info(f"Model {m_name} is already fitted.")
+                        except:
+                            try:
+                                logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
+                                # Use a small sample if it's too large, but for FI we want representative
+                                best_model_instance.fit(effective_X_plot, y_train)
+                            except Exception as fit_err:
+                                logger.warning(f"Could not fit {m_name} for FI plot: {fit_err}")
+
+                        # ADDED: Check if model has feature importance or coefficients
+                        has_fi = hasattr(best_model_instance, 'feature_importances_')
+                        has_coef = hasattr(best_model_instance, 'coef_')
+                        
+                        # Special case for ensembles that might not expose FI directly but their estimators do
+                        if not has_fi and not has_coef and (isinstance(best_model_instance, (VotingClassifier, VotingRegressor, StackingClassifier, StackingRegressor))):
+                            logger.info(f"Model {m_name} is an ensemble. FI might be unavailable directly.")
+
+                        if has_fi or has_coef:
+                            try:
+                                if hasattr(best_model_instance, 'feature_importances_'):
+                                    importances = best_model_instance.feature_importances_
+                                else:
+                                    importances = np.abs(best_model_instance.coef_).flatten()
+                                
+                                # Limit to top 20 features
+                                feat_names = []
+                                if self.feature_names:
+                                    feat_names = list(self.feature_names)
+                                elif hasattr(effective_X_plot, 'columns'):
+                                    feat_names = list(effective_X_plot.columns)
+                                else:
+                                    feat_names = [f"Feature {i}" for i in range(len(importances))]
+                                
+                                # Sync lengths if possible
+                                min_len = min(len(feat_names), len(importances))
+                                if min_len > 0:
+                                    fi_df = pd.DataFrame({
+                                        'Feature': feat_names[:min_len], 
+                                        'Importance': importances[:min_len]
+                                    })
+                                    fi_df = fi_df.sort_values(by='Importance', ascending=False).head(20)
+                                    
+                                    fig_fi, ax_fi = plt.subplots(figsize=(8, 6))
+                                    sns.barplot(x='Importance', y='Feature', data=fi_df, ax=ax_fi, palette='viridis')
+                                    ax_fi.set_title(f'Top 20 Feature Importance - {m_name}')
+                                    plt.tight_layout()
+                                    plots[f'feature_importance_{m_name}'] = fig_fi
+                            except Exception as fi_err:
+                                logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
                             # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
                             # Better: Return the Figure object.
                             
+                    # --- Stability Analysis ---
+                    stability_results = {}
+                    if stability_config and stability_config.get('tests'):
+                        try:
+                            logger.info(f"⚖️ Iniciando análise de estabilidade para {m_name}...")
+                            
+                            # Use a subset for stability analysis to speed up per-model reporting
+                            X_stab = effective_X_plot
+                            y_stab = y_train
+                            if hasattr(X_stab, 'shape') and X_stab.shape[0] > 500:
+                                 logger.info("Sampling data for stability analysis (N=500)...")
+                                 idx = np.random.choice(X_stab.shape[0], 500, replace=False)
+                                 if isinstance(X_stab, pd.DataFrame):
+                                      X_stab = X_stab.iloc[idx]
+                                      y_stab = y_stab.iloc[idx]
+                                 else:
+                                      X_stab = X_stab[idx]
+                                      y_stab = y_stab[idx]
+                                      
+                            analyzer = StabilityAnalyzer(best_model_instance, X_stab, y_stab, task_type=self.task_type, random_state=model_seed)
+                            
+                            tests = stability_config.get('tests', [])
+                            n_iter = stability_config.get('n_iterations', 5) # Default lowered for reporting speed
+                            
+                            if "Análise Geral" in tests:
+                                stability_results['general'] = analyzer.run_general_stability_check(n_iterations=n_iter)
+                                # Adicionar plots da análise geral
+                                fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['general']['raw_seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                ax_seed.set_title(f"Seed Stability Scores - {m_name}")
+                                plt.tight_layout()
+                                plots[f'stability_seed_{m_name}'] = fig_seed
+                                
+                                fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['general']['raw_split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                ax_split.set_title(f"Split Stability Scores - {m_name}")
+                                plt.tight_layout()
+                                plots[f'stability_split_{m_name}'] = fig_split
+                            
+                            if "Robustez à Inicialização" in tests and 'general' not in stability_results:
+                                stability_results['seed'] = analyzer.run_seed_stability(n_iterations=n_iter)
+                                fig_seed, ax_seed = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['seed'])['stability_score'].plot(kind='bar', ax=ax_seed)
+                                ax_seed.set_title(f"Seed Stability - {m_name}")
+                                plt.tight_layout()
+                                plots[f'stability_seed_{m_name}'] = fig_seed
+
+                            if "Robustez a Variação de Dados" in tests and 'general' not in stability_results:
+                                stability_results['split'] = analyzer.run_split_stability(n_splits=n_iter)
+                                fig_split, ax_split = plt.subplots(figsize=(6, 4))
+                                analyzer.calculate_stability_metrics(stability_results['split'])['stability_score'].plot(kind='bar', ax=ax_split)
+                                ax_split.set_title(f"Data Split Stability - {m_name}")
+                                plt.tight_layout()
+                                plots[f'stability_split_{m_name}'] = fig_split
+                                
+                            if "Sensibilidade a Hiperparâmetros" in tests:
+                                # Varia o parâmetro mais importante do modelo ou o primeiro que encontrarmos
+                                p_name = list(best_params_model.keys())[0] if best_params_model else None
+                                if p_name and p_name != 'model_name':
+                                    p_val = best_params_model[p_name]
+                                    if isinstance(p_val, (int, float)):
+                                        vals = [p_val * 0.5, p_val * 0.8, p_val, p_val * 1.2, p_val * 1.5]
+                                        stability_results['hyperparam'] = analyzer.run_hyperparameter_stability(p_name, vals)
+                                        fig_hyp, ax_hyp = plt.subplots(figsize=(6, 4))
+                                        stability_results['hyperparam'].set_index('param_value').iloc[:, 0].plot(ax=ax_hyp)
+                                        ax_hyp.set_title(f"Sensitivity: {p_name} - {m_name}")
+                                        plt.tight_layout()
+                                        plots[f'stability_hyper_{m_name}'] = fig_hyp
+
+                        except Exception as stab_err:
+                            logger.error(f"Failed stability analysis for {m_name}: {stab_err}")
+
                     # 6. Salvar no MLflow (sob o run_id do melhor trial)
                     # Precisamos recuperar o run_id do trial
                     best_run_id = best_trial_for_model.user_attrs.get("run_id")
                     if best_run_id and tracker and not isinstance(tracker, DummyTracker):
-                        logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
-                        with mlflow.start_run(run_id=best_run_id):
-                            # Log full params just in case
-                            mlflow.log_params(best_params_model)
-                            # Log extra metrics
-                            if report_metrics:
-                                mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                        try:
+                            logger.info(f"Salvando plots adicionais no MLflow Run ID: {best_run_id}")
                             
-                            # Log plots
-                            for plot_name, fig_obj in plots.items():
-                                try:
-                                    mlflow.log_figure(fig_obj, f"{plot_name}.png")
-                                    # plt.close(fig_obj) # DO NOT CLOSE if we want to show in Streamlit
-                                except Exception as e:
-                                    logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                            # Limpar variáveis de ambiente que podem causar conflito de Run ID
+                            if "MLFLOW_RUN_ID" in os.environ:
+                                del os.environ["MLFLOW_RUN_ID"]
+                            if "MLFLOW_EXPERIMENT_ID" in os.environ:
+                                del os.environ["MLFLOW_EXPERIMENT_ID"]
+                            
+                            # Garantir que o experimento correto está selecionado
+                            if hasattr(tracker, 'experiment_name'):
+                                 mlflow.set_experiment(tracker.experiment_name)
+                            
+                            # Garantir que não há run ativo para evitar conflitos
+                            if mlflow.active_run():
+                                active_run = mlflow.active_run()
+                                if active_run.info.run_id != best_run_id:
+                                    logger.info(f"Ending active run {active_run.info.run_id} to start {best_run_id}")
+                                    mlflow.end_run()
+                                else:
+                                    # Already in the right run
+                                    pass
+                                
+                            # If we are already in the right run, don't restart it (might cause nesting issues)
+                            active_run = mlflow.active_run()
+                            if active_run and active_run.info.run_id == best_run_id:
+                                # Just log
+                                if report_metrics:
+                                    mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                                for plot_name, fig_obj in plots.items():
+                                    try:
+                                        mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                                    except: pass
+                            else:
+                                with mlflow.start_run(run_id=best_run_id):
+                                    # Log full params just in case
+                                    mlflow.log_params(best_params_model)
+                                    # Log extra metrics
+                                    if report_metrics:
+                                        mlflow.log_metrics({f"val_{k}": v for k, v in report_metrics.items()})
+                                    
+                                    # Log stability results as dict if exists
+                                    if stability_results:
+                                        # Just log that it was done and some summary
+                                        mlflow.log_param("stability_analysis", "done")
+                                    
+                                    # Log plots
+                                    for plot_name, fig_obj in plots.items():
+                                        try:
+                                            mlflow.log_figure(fig_obj, f"{plot_name}.png")
+                                        except Exception as e:
+                                            logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                        except Exception as ml_err:
+                            logger.warning(f"MLflow logging failed for report: {ml_err}. Continuing to UI callback.")
                     
                     # 7. Disparar Callback de Relatório Completo
                     if callback:
+                         # Convert Matplotlib figures to PIL images to avoid closing/memory issues in Streamlit
+                         pil_plots = {}
+                         for plot_name, fig_obj in plots.items():
+                             try:
+                                 import io
+                                 from PIL import Image
+                                 buf = io.BytesIO()
+                                 fig_obj.savefig(buf, format='png', bbox_inches='tight')
+                                 buf.seek(0)
+                                 pil_plots[plot_name] = Image.open(buf)
+                             except Exception as e:
+                                 logger.warning(f"Could not convert plot {plot_name} to image: {e}")
+                                 pil_plots[plot_name] = fig_obj # Fallback to original
+
                          # Prepare rich report object
                          full_report = {
                              'model_name': m_name,
@@ -1602,15 +1880,21 @@ class AutoMLTrainer:
                              'score': best_score_for_model,
                              'params': best_params_model,
                              'metrics': report_metrics,
-                             'plots': plots,
-                             'run_id': best_run_id
+                             'plots': pil_plots, # Use PIL images
+                             'run_id': best_run_id,
+                             'stability': stability_results
                          }
                          
                          report_payload = trial_metrics.copy() if 'trial_metrics' in locals() else {}
                          report_payload['__report__'] = full_report
                          
                          callback(best_trial_for_model, best_score_for_model, f"{m_name} - FINAL", 0.0, report_payload)
-
+                         
+                    # Now we can safely close the Matplotlib figures
+                    for fig in plots.values():
+                         try: plt.close(fig)
+                         except: pass
+                         
             except Exception as e:
                 logger.error(f"Erro ao gerar relatorio final para {m_name}: {e}")
                 # import traceback

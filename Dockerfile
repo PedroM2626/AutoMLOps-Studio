@@ -8,7 +8,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     libgomp1 \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     curl \
     && rm -rf /var/lib/apt/lists/*
@@ -23,12 +23,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar o restante do código do projeto
 COPY . .
 
-# Criar diretórios para persistência
-RUN mkdir -p mlruns data_lake models
+# Criar diretórios para persistência e ajustar permissões para o usuário do Hugging Face (1000)
+RUN mkdir -p mlruns data_lake models && chmod -R 777 mlruns data_lake models
 
-# Expor as portas necessárias
-# 8000: FastAPI, 8501: Streamlit
-EXPOSE 8000 8501
+# Hugging Face Spaces usa a porta 7860 por padrão
+EXPOSE 7860
 
-# O comando padrão será sobrescrito pelo Docker Compose
-CMD ["python", "-m", "streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+# O comando padrão para rodar o Streamlit na porta correta do Hugging Face
+CMD ["python", "-m", "streamlit", "run", "app.py", "--server.port=7860", "--server.address=0.0.0.0"]

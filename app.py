@@ -9,13 +9,13 @@ from mlops_utils import (
     DataLake, register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model
 )
-# import shap # Moved to local scope
+import shap
 import joblib # type: ignore
 import pickle
 import os
 import json
-# import matplotlib.pyplot as plt # Moved to local scope
-# import seaborn as sns # Moved to local scope
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
@@ -582,6 +582,7 @@ with tabs[1]:
         
         target_metric_options = metric_options.get(task, ['accuracy'])
         optimization_metric = st.selectbox("Métrica Alvo (Otimização)", target_metric_options, index=0, help="Métrica que o AutoML tentará maximizar (ou minimizar, dependendo da métrica).")
+        target_metric_name = optimization_metric.upper()
 
         st.divider()
         st.subheader("🌱 Configuração de Reprodutibilidade (Seed)")
@@ -713,19 +714,26 @@ with tabs[1]:
                 if selected_nlp_cols:
                     col_nlp1, col_nlp2 = st.columns(2)
                     with col_nlp1:
-                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count"], key="automl_vect")
-                        ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
+                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count", "embeddings"], key="automl_vect")
+                        if vectorizer_automl == "embeddings":
+                            embedding_model = st.selectbox("Modelo de Embedding", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], index=0)
+                        else:
+                            ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
                     with col_nlp2:
-                        remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
-                        lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
-                        max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 5000+) para capturar mais vocabulário. Otimizado automaticamente.")
+                        if vectorizer_automl != "embeddings":
+                            remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
+                            lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
+                            max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 5000+) para capturar mais vocabulário. Otimizado automaticamente.")
+                        else:
+                            st.info("💡 Embeddings geram vetores densos fixos (ex: 384 dimensões).")
 
                     nlp_config_automl = {
                         "vectorizer": vectorizer_automl,
-                        "ngram_range": (ngram_min_automl, ngram_max_automl),
-                        "stop_words": remove_stopwords_automl,
-                        "max_features": max_features_automl,
-                        "lemmatization": lematization_automl
+                        "embedding_model": embedding_model if vectorizer_automl == "embeddings" else None,
+                        "ngram_range": (ngram_min_automl, ngram_max_automl) if vectorizer_automl != "embeddings" else (1, 1),
+                        "stop_words": remove_stopwords_automl if vectorizer_automl != "embeddings" else False,
+                        "max_features": max_features_automl if vectorizer_automl != "embeddings" else 5000,
+                        "lemmatization": lematization_automl if vectorizer_automl != "embeddings" else False
                     }
             else:
                 if selected_ds_list:
@@ -794,20 +802,25 @@ with tabs[1]:
 
             if st.button("🚀 Iniciar Treinamento", key="btn_start_train"):
                 st.session_state['trials_data'] = []
+                st.session_state['report_data'] = {} # Reset reports on new training
                 start_time_train = time.time()
                 
                 # Nome do experimento baseado no dataset e timestamp
                 exp_tag = selected_configs[0]['name'] if selected_configs else "AutoML"
                 experiment_name = f"{exp_tag}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
 
-                # Containers for feedback
+                # Container for feedback
                 status_c = st.empty()
                 progress_bar = st.progress(0)
                 chart_c = st.empty()
                 
                 # Container for per-model reports (NEW)
                 st.markdown("### 📊 Relatórios por Modelo (Tempo Real)")
-                report_container = st.container()
+                if 'report_data' not in st.session_state:
+                    st.session_state['report_data'] = {}
+                
+                # Use st.empty() as a fixed placeholder for the entire report section
+                report_section_placeholder = st.empty()
 
                 # Calcular total real de trials para a barra de progresso
                 # Instancia o trainer com o preset para pegar as configs
@@ -822,27 +835,71 @@ with tabs[1]:
                     # Check for special report event
                     if metrics and '__report__' in metrics:
                         report = metrics['__report__']
-                        with report_container:
-                            expander_label = f"Relatório Final: {report['model_name']} (Score: {report['score']:.4f})"
-                            with st.expander(expander_label, expanded=False):
-                                col_rep1, col_rep2 = st.columns([1, 2])
-                                with col_rep1:
-                                    st.markdown("**Métricas de Validação**")
-                                    st.json(report['metrics'])
-                                    st.markdown(f"**Melhor Trial:** {report['best_trial_number']}")
-                                    st.markdown(f"**MLflow Run ID:** `{report['run_id']}`")
-                                with col_rep2:
-                                    if 'plots' in report and report['plots']:
-                                        plot_labels = list(report['plots'].keys())
-                                        if plot_labels:
-                                            tab_plots = st.tabs(plot_labels)
-                                            for i, plot_name in enumerate(plot_labels):
-                                                with tab_plots[i]:
-                                                    st.pyplot(report['plots'][plot_name])
+                        model_name = report['model_name']
+                        
+                        # Store report in session state to survive reruns
+                        st.session_state['report_data'][model_name] = report
+                        
+                        # Atomic render: replace the entire content of the placeholder
+                        with report_section_placeholder.container():
+                            # Render ALL reports stored in session state
+                            for m_name, rep in st.session_state['report_data'].items():
+                                expander_label = f"Relatório Final: {rep['model_name']} (Score: {rep['score']:.4f})"
+                                with st.expander(expander_label, expanded=True):
+                                    col_rep1, col_rep2 = st.columns([1, 2])
+                                    with col_rep1:
+                                        st.markdown("🎯 **Métricas de Validação**")
+                                        if rep['metrics']:
+                                            # Display metrics as a nice table instead of raw JSON
+                                            met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
+                                            met_df.columns = ['Métrica', 'Valor']
+                                            st.table(met_df)
+                                        else:
+                                            st.warning("Métricas de validação não disponíveis.")
+                                            
+                                        st.markdown(f"📌 **Melhor Trial:** {rep['best_trial_number']}")
+                                        st.markdown(f"🔗 **MLflow Run ID:** `{rep['run_id']}`")
+                                        
+                                        if 'stability' in rep and rep['stability']:
+                                            st.divider()
+                                            st.markdown("⚖️ **Análise de Estabilidade**")
+                                            for s_type, s_data in rep['stability'].items():
+                                                if s_type == 'general':
+                                                    st.write("📈 **Resumo Geral de Estabilidade**")
+                                                    summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
+                                                    # Convert nested dict to flat for table
+                                                    flat_summary = []
+                                                    for metric, stats in summary.items():
+                                                        if isinstance(stats, dict):
+                                                            row = {'Métrica': metric.upper()}
+                                                            row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
+                                                            flat_summary.append(row)
+                                                    
+                                                    if flat_summary:
+                                                        st.table(pd.DataFrame(flat_summary))
+                                                elif s_type == 'hyperparam':
+                                                    with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+                                                        st.dataframe(s_data, use_container_width=True)
+                                                else:
+                                                    with st.expander(f"Teste: {s_type}", expanded=False):
+                                                        st.dataframe(s_data, use_container_width=True)
+                                    with col_rep2:
+                                        if 'plots' in rep and rep['plots']:
+                                            plot_labels = list(rep['plots'].keys())
+                                            if plot_labels:
+                                                tab_plots = st.tabs(plot_labels)
+                                                for i, plot_name in enumerate(plot_labels):
+                                                    with tab_plots[i]:
+                                                        # Handle both Matplotlib Figures and PIL Images
+                                                        plot_obj = rep['plots'][plot_name]
+                                                        if isinstance(plot_obj, Image.Image):
+                                                            st.image(plot_obj, use_container_width=True)
+                                                        else:
+                                                            st.pyplot(plot_obj, clear_figure=True)
+                                            else:
+                                                st.info("Sem visualizações disponíveis para este modelo.")
                                         else:
                                             st.info("Sem visualizações disponíveis para este modelo.")
-                                    else:
-                                        st.info("Sem visualizações disponíveis para este modelo.")
                         return
 
                     # Extrair nome do algoritmo e o número do trial do modelo
@@ -857,9 +914,6 @@ with tabs[1]:
                         "Identificador": full_name,
                         "Duração (s)": dur
                     }
-
-                    # Definir qual métrica é a "alvo" (eixo Y do gráfico)
-                    target_metric_name = optimization_metric.upper()
 
                     # Adicionar métricas adicionais se houver
                     if metrics:
@@ -905,6 +959,14 @@ with tabs[1]:
                 with st.spinner("Processando..."):
                     processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon, nlp_config=nlp_config_automl)
                     X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
+                    
+                    # Exibir relatório de qualidade Deepchecks se disponível
+                    if hasattr(processor, 'quality_report_html') and processor.quality_report_html:
+                        with st.expander("📊 Relatório de Qualidade de Dados (Deepchecks)", expanded=False):
+                            import streamlit.components.v1 as components
+                            # Limitar altura para não quebrar a UI
+                            components.html(processor.quality_report_html, height=800, scrolling=True)
+                    
                     X_test_proc, y_test_proc = processor.transform(test_df) if test_df is not None else (None, None)
                     
                     # Preparar modelos customizados (Upload/Registry)
@@ -932,6 +994,12 @@ with tabs[1]:
                     if not clean_experiment_name:
                         clean_experiment_name = "AutoML_Experiment"
 
+                    # Get feature and class names for better reporting
+                    feature_names = processor.get_feature_names()
+                    class_names = None
+                    if hasattr(processor, 'label_encoder') and processor.label_encoder:
+                        class_names = processor.label_encoder.classes_.tolist()
+
                     best_model = trainer.train(
                         X_train_proc, 
                         y_train_proc, 
@@ -948,7 +1016,10 @@ with tabs[1]:
                         validation_params=validation_params,
                         custom_models=custom_models,
                         optimization_mode=selected_opt_mode,
-                        optimization_metric=optimization_metric
+                        optimization_metric=optimization_metric,
+                        stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
+                        feature_names=feature_names,
+                        class_names=class_names
                     )
                     best_params = trainer.best_params
                     
@@ -1021,42 +1092,55 @@ with tabs[1]:
                             with col_v1:
                                 if 'confusion_matrix' in metrics:
                                     cm = np.array(metrics['confusion_matrix'])
+                                    
+                                    # Use class names for Plotly labels if available
+                                    labels_plotly = class_names if class_names else None
+                                    
                                     fig_cm = px.imshow(cm, text_auto=True, title="Matriz de Confusao",
-                                                     labels=dict(x="Predito", y="Real", color="Quantidade"))
+                                                     labels=dict(x="Predito", y="Real", color="Quantidade"),
+                                                     x=labels_plotly, y=labels_plotly)
                                     st.plotly_chart(fig_cm)
                             with col_v2:
                                 # Feature Importance (SHAP - SHapley Additive exPlanations)
                                 st.markdown("#### Importancia das Features (SHAP)")
                                 st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
                                 
-                                import shap
-                                import matplotlib.pyplot as plt
-                                
                                 shap_success = False
                                 try:
-                                    # Usar sample para performance
+                                    # Usar sample para performance em ambientes com poucos recursos
+                                    max_shap_train = 100
+                                    max_shap_test = 50
+                                    
                                     sample_train = X_train_proc
-                                    if len(sample_train) > 200:
-                                        sample_train = shap.utils.sample(sample_train, 200)
+                                    if len(sample_train) > max_shap_train:
+                                        sample_train = shap.utils.sample(sample_train, max_shap_train)
                                         
                                     sample_test = X_test_proc
-                                    if sample_test is not None and len(sample_test) > 100:
-                                        sample_test = shap.utils.sample(sample_test, 100)
+                                    if sample_test is not None and len(sample_test) > max_shap_test:
+                                        sample_test = shap.utils.sample(sample_test, max_shap_test)
 
                                     if sample_test is not None:
+                                        # Use dense representation if sparse to avoid SHAP errors
+                                        if hasattr(sample_train, "toarray"):
+                                            sample_train = sample_train.toarray()
+                                        if hasattr(sample_test, "toarray"):
+                                            sample_test = sample_test.toarray()
+                                            
                                         explainer = ModelExplainer(best_model, sample_train, task_type=task)
                                         
                                         # Plot Beeswarm (Resumo)
                                         st.markdown("**SHAP Summary Plot**")
                                         st.caption("Mostra como cada feature impacta a saida do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
                                         fig_shap = explainer.plot_importance(sample_test, plot_type="summary")
-                                        st.pyplot(fig_shap)
+                                        if fig_shap:
+                                            st.pyplot(fig_shap, clear_figure=True)
                                         
                                         # Plot Bar (Importância Global)
                                         st.markdown("**SHAP Feature Importance (Bar)**")
                                         st.caption("Media absoluta do impacto de cada feature.")
                                         fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
-                                        st.pyplot(fig_shap_bar)
+                                        if fig_shap_bar:
+                                            st.pyplot(fig_shap_bar, clear_figure=True)
                                         shap_success = True
                                 except Exception as e:
                                     st.warning(f"Nao foi possivel gerar SHAP plot: {e}")
