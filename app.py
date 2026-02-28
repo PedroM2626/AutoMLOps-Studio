@@ -1,5 +1,4 @@
-from automl_engine import AutoMLDataProcessor, AutoMLTrainer, save_pipeline, get_technical_explanation
-from stability_engine import StabilityAnalyzer
+from automl_engine import AutoMLDataProcessor, AutoMLTrainer
 # from cv_engine import CVAutoMLTrainer, get_cv_explanation # Moved to local scope
 import streamlit as st
 import pandas as pd
@@ -11,17 +10,19 @@ from mlops_utils import (
 )
 import shap
 import joblib # type: ignore
-import pickle
 import os
-import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.decomposition import PCA
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import io
+from PIL import Image
+import uuid
+import yaml
+import json
 import time
 import plotly.express as px
-from PIL import Image
 import mlflow
 import logging
 
@@ -117,14 +118,14 @@ with st.sidebar:
     
     # --- DagsHub Integration ---
     with st.expander("DagsHub Integration"):
-        st.caption("Conecte-se ao seu repositório DagsHub para salvar experimentos remotamente.")
+        st.caption("Connect to your DagsHub repository to save experiments remotely.")
         
-        # Tentar recuperar configurações do ambiente (.env)
+        # Try to retrieve settings from environment (.env)
         env_user = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
         env_pass = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
         env_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
         
-        # Tentar extrair o nome do repositório da URI se for DagsHub
+        # Try to extract the repository name from the URI if it is DagsHub
         default_repo = ""
         if "dagshub.com" in env_uri:
             try:
@@ -144,62 +145,61 @@ with st.sidebar:
         col_dh1, col_dh2 = st.columns(2)
         
         with col_dh1:
-            if st.button("Conectar ao DagsHub"):
+            if st.button("Connect to DagsHub"):
                 if dh_user and dh_repo and dh_token:
                     try:
-                        # Configurar variáveis de ambiente para autenticação MLflow
+                        # Configure environment variables for MLflow authentication
                         os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
                         os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
                         
-                        # Configurar URI de Tracking
+                        # Configure Tracking URI
                         remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
-                        os.environ["MLFLOW_TRACKING_URI"] = remote_uri # Atualizar env para persistência na sessão
+                        os.environ["MLFLOW_TRACKING_URI"] = remote_uri # Update env for session persistence
                         mlflow.set_tracking_uri(remote_uri)
                         
-                        # Tentar listar experimentos para validar conexão
+                        # Try to list experiments to validate connection
                         try:
-                            # Teste simples de conexão
+                            # Simple connection test
                             mlflow.search_experiments(max_results=1)
-                            #st.success(f"✅ Conectado: {dh_user}/{dh_repo}")
+                            #st.success(f"✅ Connected: {dh_user}/{dh_repo}")
                             st.session_state['dagshub_connected'] = True
                             st.session_state['mlflow_uri'] = remote_uri
                         except Exception as e:
-                            st.error(f"❌ Falha na conexão: {e}")
-                            # Reverter para local em caso de erro
+                            st.error(f"❌ Connection failed: {e}")
+                            # Revert to local in case of error
                             local_uri = "sqlite:///mlflow.db"
                             mlflow.set_tracking_uri(local_uri)
                             os.environ["MLFLOW_TRACKING_URI"] = local_uri
                     except Exception as e:
-                        st.error(f"Erro ao configurar: {e}")
+                        st.error(f"Error configuring: {e}")
                 else:
-                    st.warning("Preencha todos os campos.")
+                    st.warning("Fill in all fields.")
         
         with col_dh2:
-            # Botão de desconectar apenas se estiver conectado (ou se a URI apontar para DagsHub)
+            # Disconnect button only if connected (or if URI points to DagsHub)
             is_dagshub = "dagshub.com" in mlflow.get_tracking_uri()
-            if st.button("Desconectar (Voltar ao Local)", disabled=not is_dagshub):
+            if st.button("Disconnect (Revert to Local)", disabled=not is_dagshub):
                 local_uri = "sqlite:///mlflow.db"
                 mlflow.set_tracking_uri(local_uri)
                 os.environ["MLFLOW_TRACKING_URI"] = local_uri
                 
-                # Opcional: Limpar credenciais da sessão (mas manter no env se vieram de lá?)
-                # Por segurança, limpamos do os.environ para garantir desconexão real
+                # For security, we clear from os.environ to ensure real disconnection
                 if "MLFLOW_TRACKING_USERNAME" in os.environ:
                     del os.environ["MLFLOW_TRACKING_USERNAME"]
                 if "MLFLOW_TRACKING_PASSWORD" in os.environ:
                     del os.environ["MLFLOW_TRACKING_PASSWORD"]
                     
                 st.session_state['dagshub_connected'] = False
-                st.info("🔌 Desconectado. Usando MLflow local.")
+                st.info("🔌 Disconnected. Using local MLflow.")
                 st.rerun()
 
         # Mostrar status atual
         current_uri = mlflow.get_tracking_uri()
         if "dagshub.com" in current_uri:
-            st.success(f"🟢 Conectado ao DagsHub")
+            st.success(f"🟢 Connected to DagsHub")
             st.caption(f"URI: {current_uri}")
         else:
-            st.info("⚪ Usando MLflow Local (SQLite)")
+            st.info("⚪ Using Local MLflow (SQLite)")
     
     # Exibir URI atual
     current_uri = mlflow.get_tracking_uri()
@@ -360,35 +360,35 @@ with tabs[1]:
     
     # --- SUB-TAB 1.1: CLASSICAL ML ---
     with automl_tabs[0]:
-        st.subheader("📋 Configuração do Treino (Tabular)")
+        st.subheader("📋 Training Configuration (Tabular)")
         
         # 1. Definição da Tarefa
         col_t0, col_t1, col_t2 = st.columns([1, 1, 1])
         with col_t0:
-            learning_type = st.radio("Tipo de Aprendizado", ["Supervisionado", "Não Supervisionado"], key="learning_type_selector")
+            learning_type = st.radio("Learning Type", ["Supervised", "Unsupervised"], key="learning_type_selector")
 
         with col_t1:
-            if learning_type == "Supervisionado":
+            if learning_type == "Supervised":
                 task_options = ["classification", "regression", "time_series"]
             else:
                 task_options = ["clustering", "anomaly_detection", "dimensionality_reduction"]
                 
-            task = st.selectbox("Tipo de Tarefa", task_options, key="task_selector_train")
+            task = st.selectbox("Task Type", task_options, key="task_selector_train")
         
         with col_t2:
-            training_strategy = st.radio("Configuração de Hiperparâmetros", ["Automático", "Manual"], 
-                                         help="Automático: O sistema busca os melhores parâmetros. Manual: Você define tudo.")
+            training_strategy = st.radio("Hyperparameter Configuration", ["Automatic", "Manual"], 
+                                         help="Automatic: System finds best parameters. Manual: You explicitly define them.")
 
         st.divider()
 
         # 2. Configuração de Modelos e Parâmetros
-        st.subheader("🎯 Seleção do Modelo")
+        st.subheader("🎯 Model Selection")
         
         # Seletor de Fonte do Modelo (Migrado de Fine-Tune)
-        model_source = st.radio("Fonte do Modelo", 
-                               ["AutoML Standard (Scikit-Learn/XGBoost/Transformers)", 
-                                "Model Registry (Registrados)", 
-                                "Upload Local (.pkl)"],
+        model_source = st.radio("Model Source", 
+                               ["Standard AutoML (Scikit-Learn/XGBoost/Transformers)", 
+                                "Model Registry (Registered)", 
+                                "Local Upload (.pkl)"],
                                horizontal=True)
 
         trainer_temp = AutoMLTrainer(task_type=task)
@@ -400,53 +400,53 @@ with tabs[1]:
         # Lógica de Seleção Baseada na Fonte
         ensemble_config = {} # Initialize empty ensemble config
 
-        if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
-            mode_selection = st.radio("Seleção de Modelos", ["Automático (Preset)", "Manual (Selecionar)", "Custom Ensemble Builder"], horizontal=True)
+        if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
+            mode_selection = st.radio("Model Selection", ["Automatic (Preset)", "Manual (Select)", "Custom Ensemble Builder"], horizontal=True)
             
-            if mode_selection == "Manual (Selecionar)":
-                selected_models = st.multiselect("Escolha os Modelos", available_models, default=available_models[:2] if available_models else None)
+            if mode_selection == "Manual (Select)":
+                selected_models = st.multiselect("Choose Models", available_models, default=available_models[:2] if available_models else None)
                 
             elif mode_selection == "Custom Ensemble Builder":
-                st.markdown("##### 🏗️ Construção de Ensemble Customizado")
-                st.info("Crie um ensemble combinando múltiplos modelos base. O sistema treinará o ensemble final.")
+                st.markdown("##### 🏗️ Custom Ensemble Builder")
+                st.info("Create an ensemble by combining multiple base models. The system will train the final ensemble.")
                 
-                ensemble_type = st.selectbox("Tipo de Ensemble", ["Voting (Votação)", "Stacking (Empilhamento)"])
+                ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"])
                 
                 # Filter base models (exclude other ensembles/custom models to avoid recursion for now)
                 base_candidates = [m for m in available_models if 'ensemble' not in m and 'custom' not in m]
                 
-                st.markdown("**1. Selecione os Estimadores Base**")
+                st.markdown("**1. Select Base Estimators**")
                 selected_base_models = st.multiselect(
-                    "Estimadores Base (Componentes)", 
+                    "Base Estimators (Components)", 
                     base_candidates, 
                     default=base_candidates[:3] if len(base_candidates) > 3 else base_candidates
                 )
                 
                 if len(selected_base_models) < 2:
-                    st.warning("⚠️ Selecione pelo menos 2 modelos para formar um ensemble robusto.")
+                    st.warning("⚠️ Select at least 2 models to form a robust ensemble.")
                 
-                if ensemble_type == "Voting (Votação)":
-                    st.markdown("**2. Configuração do Voting**")
+                if ensemble_type == "Voting":
+                    st.markdown("**2. Voting Configuration**")
                     if task == "classification":
-                        voting_type = st.selectbox("Tipo de Votação", ["soft", "hard"], help="Soft: Média das probabilidades. Hard: Votação majoritária das classes.")
+                        voting_type = st.selectbox("Voting Type", ["soft", "hard"], help="Soft: Average probabilities. Hard: Majority class voting.")
                     else:
                         voting_type = 'soft' # Not used in regressor but safe to keep
-                        st.caption("Regressão usa média das predições.")
+                        st.caption("Regression always uses averaged predictions.")
                     
-                    use_weights = st.checkbox("Definir Pesos (Weighted Voting)", help="Permite atribuir pesos diferentes para cada modelo na votação.")
+                    use_weights = st.checkbox("Define Weights (Weighted Voting)", help="Allows assigning different weights for each model in voting.")
                     voting_weights = None
 
                 
                 if use_weights:
-                    st.caption("Insira os pesos separados por vírgula na mesma ordem dos modelos selecionados.")
-                    weights_input = st.text_input("Pesos (ex: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)))
+                    st.caption("Enter weights separated by comma in the same order as selected models.")
+                    weights_input = st.text_input("Weights (e.g.: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)))
                     try:
                         voting_weights = [float(w.strip()) for w in weights_input.split(',')]
                         if len(voting_weights) != len(selected_base_models):
-                            st.error(f"⚠️ Número de pesos ({len(voting_weights)}) diferente do número de modelos ({len(selected_base_models)}). Usando pesos iguais.")
+                            st.error(f"⚠️ Number of weights ({len(voting_weights)}) differs from number of models ({len(selected_base_models)}). Using equal weights.")
                             voting_weights = None
                     except:
-                        st.error("⚠️ Formato inválido. Use números separados por vírgula.")
+                        st.error("⚠️ Invalid format. Use comma separated numbers.")
                         voting_weights = None
 
                 ensemble_config = {
@@ -456,9 +456,9 @@ with tabs[1]:
                 }
                 selected_models = ['custom_voting']
                 
-                if ensemble_type == "Stacking (Empilhamento)":
-                    st.markdown("**2. Configuração do Stacking**")
-                    st.info("Stacking treina um 'Meta-Modelo' para aprender a melhor combinação dos modelos base.")
+                if ensemble_type == "Stacking":
+                    st.markdown("**2. Stacking Configuration**")
+                    st.info("Stacking trains a 'Meta-Model' to learn the best combination of base models.")
                     
                     # Final estimator selection
                     meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'linear_regression', 'ridge']
@@ -470,7 +470,6 @@ with tabs[1]:
                         meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'logistic_regression']
                         if not meta_candidates: meta_candidates = ['linear_regression']
 
-                    final_est_name = st.selectbox("Meta-Modelo (Final Estimator)", meta_candidates)
                     
                     st.caption(f"Meta-Modelo selecionado: {final_est_name}")
                     
@@ -480,72 +479,72 @@ with tabs[1]:
                     }
                     selected_models = ['custom_stacking']
 
-        elif model_source == "Model Registry (Registrados)":
+        elif model_source == "Model Registry (Registered)":
             reg_models = get_registered_models()
             if reg_models:
-                base_model_name = st.selectbox("Selecione o Modelo Registrado", [m.name for m in reg_models], key="reg_sel_train")
+                base_model_name = st.selectbox("Select Registered Model", [m.name for m in reg_models], key="reg_sel_train")
                 selected_models = [base_model_name]
-                st.info(f"O modelo '{base_model_name}' será usado como base para retreino/fine-tune.")
+                st.info(f"The model '{base_model_name}' will be used as a base for retraining/fine-tuning.")
             else:
-                st.warning("Nenhum modelo registrado encontrado.")
+                st.warning("No registered models found.")
 
-        elif model_source == "Upload Local (.pkl)":
-            uploaded_pkl = st.file_uploader("Upload do arquivo .pkl base", type="pkl", key="pkl_upload_train")
+        elif model_source == "Local Upload (.pkl)":
+            uploaded_pkl = st.file_uploader("Upload base .pkl file", type="pkl", key="pkl_upload_train")
             if uploaded_pkl:
-                selected_models = ["Uploaded_Model"] # Placeholder, precisaria de lógica customizada no backend
-                st.info("Modelo carregado para retreino.")
+                selected_models = ["Uploaded_Model"] # Placeholder, needs custom backend logic
+                st.info("Model loaded for retraining.")
 
-        st.subheader("🎯 Configuração da Otimização")
+        st.subheader("🎯 Optimization Configuration")
         col_opt1, col_opt2 = st.columns(2)
         with col_opt1:
-            # Seletor de Modo de Otimização (Novo)
+            # Hyperparameter Optimization Mode Selector
             optimization_mode = st.selectbox(
-                "Modo de Otimização de Hiperparâmetros",
-                ["Bayesian Optimization (Padrão)", "Random Search", "Grid Search", "Hyperband"],
+                "Hyperparameter Optimization Mode",
+                ["Bayesian Optimization (Default)", "Random Search", "Grid Search", "Hyperband"],
                 index=0,
-                help="Bayesian: Mais eficiente. Random: Exploratório. Grid: Exaustivo (lento). Hyperband: Rápido para muitos dados."
+                help="Bayesian: More efficient. Random: Exploratory. Grid: Exhaustive (slow). Hyperband: Fast for many data."
             )
             
-            # Mapeamento para o backend
+            # Mapping to backend
             opt_mode_map = {
-                "Bayesian Optimization (Padrão)": "bayesian",
+                "Bayesian Optimization (Default)": "bayesian",
                 "Random Search": "random",
                 "Grid Search": "grid",
                 "Hyperband": "hyperband"
             }
             selected_opt_mode = opt_mode_map[optimization_mode]
 
-            # Seletor unificado de preset (incluindo 'custom' e 'test')
-            if model_source == "AutoML Standard (Scikit-Learn/XGBoost/Transformers)":
+            # Unified preset selector (including 'custom' and 'test')
+            if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
                 training_preset = st.select_slider(
-                    "Modo de Treinamento (Preset)",
-                    options=["test", "fast", "medium", "best_quality", "custom"],
+                    "Training Mode (Preset)",
+                    options=["test", "fast", "medium", "high", "custom"],
                     value="medium",
-                    help="test: Teste rápido (1 trial). fast: Rápido. medium: Equilibrado. best_quality: Exaustivo. custom: Defina suas regras."
+                    help="test: Fast test (1 trial). fast: Fast. medium: Balanced. high: Exhaustive. custom: Define your rules."
                 )
             else:
-                # Para outros modos, permitimos customizar mas iniciamos com medium
-                st.info(f"Modo base adaptado para {model_source}")
-                # Aqui podemos permitir customizar n_trials também
-                use_custom_tuning = st.checkbox("Customizar Otimização (Trials/Timeout)", value=False)
+                # For other modes, we allow customization but start with medium
+                st.info(f"Base mode adapted for {model_source}")
+                # Here we can also allow custom n_trials
+                use_custom_tuning = st.checkbox("Customize Optimization (Trials/Timeout)", value=False)
                 training_preset = "custom" if use_custom_tuning else "medium"
 
-            # Inputs condicionais para modo custom
+            # Conditional inputs for custom mode
             if training_preset == "custom":
-                st.markdown("##### 🛠️ Configuração Customizada")
-                n_trials = st.number_input("Número de Tentativas (por modelo)", 1, 1000, 20, key="cust_trials")
-                timeout_per_model = st.number_input("Timeout por modelo (segundos)", 10, 7200, 600, key="cust_timeout")
-                total_time_budget = st.number_input("Tempo Máximo Total (segundos)", 60, 86400, 3600, key="cust_total_time", help="Tempo máximo para executar TODO o experimento. Se excedido, o treino para após o modelo atual.")
+                st.markdown("##### 🛠️ Custom Configuration")
+                n_trials = st.number_input("Number of Trials (per model)", 1, 1000, 20, key="cust_trials")
+                timeout_per_model = st.number_input("Timeout per model (seconds)", 10, 7200, 600, key="cust_timeout")
+                total_time_budget = st.number_input("Max Total Time (seconds)", 60, 86400, 3600, key="cust_total_time", help="Max time to run the ENTIRE experiment. If exceeded, training stops after the current model.")
                 early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7, key="cust_es")
                 
-                st.markdown("##### ⚡ Parâmetros Avançados")
-                custom_max_iter = st.number_input("Máximo de Iterações (max_iter)", 100, 100000, 1000, help="Limite de iterações para solvers (LogisticRegression, SVM, MLP). Valores muito altos podem causar lentidão.")
+                st.markdown("##### ⚡ Advanced Parameters")
+                custom_max_iter = st.number_input("Max Iterations (max_iter)", 100, 100000, 1000, help="Iteration limit for solvers (LogisticRegression, SVM, MLP). Very high values can slow down training.")
                 
                 manual_params = {
                     'max_iter': custom_max_iter
                 }
             elif training_preset == "test":
-                 st.warning("⚠️ MODO TESTE: Executando com apenas 1 trial e timeout curto para validação de pipeline.")
+                 st.warning("⚠️ TEST MODE: Running with only 1 trial and short timeout for pipeline validation.")
                  n_trials = 1
                  timeout_per_model = 30
                  total_time_budget = 60
@@ -560,52 +559,52 @@ with tabs[1]:
 
         
         with col_opt2:
-            st.markdown("##### 🛡️ Estratégia de Validação")
-            validation_options = ["Automático (Recomendado)", "K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Treino/Teste)", "Auto-Split (Otimizado)", "Time Series Split"]
+            st.markdown("##### 🛡️ Validation Strategy")
+            validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"]
             
-            # Filtrar opções baseadas na tarefa
+            # Filter options based on task
             if task == "time_series":
                 val_strategy_ui = "Time Series Split"
-                st.info("Séries temporais usam divisão temporal obrigatoriamente.")
+                st.info("Time series must use temporal splitting.")
                 validation_strategy = 'time_series_cv'
             elif task == "classification":
-                val_strategy_ui = st.selectbox("Método de Validação", validation_options, index=0)
+                val_strategy_ui = st.selectbox("Validation Method", validation_options, index=0)
             else: # regression, clustering, anomaly
-                # Stratified só faz sentido para classificação
+                # Stratified only makes sense for classification
                 opts = [o for o in validation_options if o != "Stratified K-Fold"]
-                val_strategy_ui = st.selectbox("Método de Validação", opts, index=0)
+                val_strategy_ui = st.selectbox("Validation Method", opts, index=0)
             
             validation_params = {}
-            if val_strategy_ui == "Automático (Recomendado)":
+            if val_strategy_ui == "Automatic (Recommended)":
                 validation_strategy = 'auto'
-                st.info("O sistema escolherá a melhor estratégia baseada no tamanho dos dados.")
+                st.info("System will choose the best strategy based on data size.")
             elif val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
-                n_folds = st.number_input("Número de Folds", 2, 20, 5, key="val_folds")
+                n_folds = st.number_input("Number of Folds", 2, 20, 5, key="val_folds")
                 validation_params['folds'] = n_folds
                 validation_strategy = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
-            elif val_strategy_ui == "Holdout (Treino/Teste)":
-                test_size = st.slider("Tamanho do Teste (%)", 10, 50, 20, key="val_holdout", help="Porcentagem do dataset de Treino reservada para Validação Interna durante a otimização (não confundir com o Teste Final).") / 100.0
+            elif val_strategy_ui == "Holdout (Train/Test)":
+                test_size = st.slider("Test Size (%)", 10, 50, 20, key="val_holdout", help="Percentage of training dataset reserved for Internal Validation during optimization (do not confuse with Final Test).") / 100.0
                 validation_params['test_size'] = test_size
                 validation_strategy = 'holdout'
-            elif val_strategy_ui == "Auto-Split (Otimizado)":
-                st.info("O sistema decidirá o melhor split durante a otimização.")
+            elif val_strategy_ui == "Auto-Split (Optimized)":
+                st.info("System will decide the best split during optimization.")
                 validation_strategy = 'auto_split'
             elif val_strategy_ui == "Time Series Split":
-                n_splits = st.number_input("Número de Splits Temporais", 2, 20, 5, key="val_ts_splits")
+                n_splits = st.number_input("Number of Temporal Splits", 2, 20, 5, key="val_ts_splits")
                 validation_params['folds'] = n_splits
                 validation_strategy = 'time_series_cv'
             
-            # Seleção de colunas NLP
-            st.markdown("##### 🔤 Configuração de NLP")
+            # NLP columns selection
+            st.markdown("##### 🔤 NLP Configuration")
             
-            # Configurações Avançadas de NLP
-            # Usamos um container para renderizar as opções de NLP mais tarde,
-            # assim que tivermos acesso ao sample_df (preview dos dados).
+            # Advanced NLP Configurations
+            # We use a container to render NLP options later,
+            # once we have access to the sample_df (data preview).
             nlp_container = st.container()
             nlp_config_automl = {} 
 
             if task == "time_series":
-                st.info("💡 Split temporal obrigatório para séries temporais.")
+                st.info("💡 Temporal split is mandatory for time series.")
 
         # Novo Seletor de Métrica Alvo (Optimization Metric)
         metric_options = {
@@ -618,32 +617,32 @@ with tabs[1]:
         }
         
         target_metric_options = metric_options.get(task, ['accuracy'])
-        optimization_metric = st.selectbox("Métrica Alvo (Otimização)", target_metric_options, index=0, help="Métrica que o AutoML tentará maximizar (ou minimizar, dependendo da métrica).")
+        optimization_metric = st.selectbox("Target Metric (Optimization)", target_metric_options, index=0, help="Metric that AutoML will try to maximize (or minimize, depending on the metric).")
         target_metric_name = optimization_metric.upper()
 
         st.divider()
-        st.subheader("🌱 Configuração de Reprodutibilidade (Seed)")
-        seed_mode = st.radio("Modo de Seed", 
-                             ["Automático (Diferente por modelo)", 
-                              "Automático (Mesma para todos)", 
-                              "Manual (Mesma para todos)", 
-                              "Manual (Diferente por modelo)"], 
+        st.subheader("🌱 Reproducibility Configuration (Seed)")
+        seed_mode = st.radio("Seed Mode", 
+                             ["Automatic (Different per model)", 
+                              "Automatic (Same for all)", 
+                              "Manual (Same for all)", 
+                              "Manual (Different per model)"], 
                              horizontal=True)
         
         random_seed_config = 42 # Default
         
         effective_models = selected_models if selected_models else available_models
         
-        if seed_mode == "Automático (Diferente por modelo)":
+        if seed_mode == "Automatic (Different per model)":
             random_seed_config = {m: np.random.randint(0, 999999) for m in effective_models}
-            st.info("🎲 Seeds aleatórias serão geradas para cada modelo.")
-        elif seed_mode == "Automático (Mesma para todos)":
+            st.info("🎲 Random seeds will be generated for each model.")
+        elif seed_mode == "Automatic (Same for all)":
             random_seed_config = np.random.randint(0, 999999)
-            st.info(f"🎲 Uma única seed aleatória será usada para todos: {random_seed_config}")
-        elif seed_mode == "Manual (Mesma para todos)":
-            random_seed_config = st.number_input("🌱 Digite a Seed Global", 0, 999999, 42)
-        elif seed_mode == "Manual (Diferente por modelo)":
-            st.markdown("##### Digite a Seed para cada modelo:")
+            st.info(f"🎲 A single random seed will be used for all: {random_seed_config}")
+        elif seed_mode == "Manual (Same for all)":
+            random_seed_config = st.number_input("🌱 Enter Global Seed", 0, 999999, 42)
+        elif seed_mode == "Manual (Different per model)":
+            st.markdown("##### Enter the Seed for each model:")
             random_seed_config = {}
             cols_seed = st.columns(min(len(effective_models), 3))
             for i, m in enumerate(effective_models):
@@ -653,11 +652,11 @@ with tabs[1]:
         # Hiperparâmetros Manuais integrados nas opções de tuning
         if training_strategy == "Manual":
             st.divider()
-            st.subheader("⚙️ Configuração de Hiperparâmetros Manuais")
-            st.info("Nota: No modo Manual, você define os parâmetros que serão usados como ponto de partida (enqueue) para os modelos selecionados.")
+            st.subheader("⚙️ Manual Hyperparameter Configuration")
+            st.info("Note: In Manual mode, you define the parameters used as a starting point (enqueue) for the selected models.")
             
             # Se múltiplos modelos estiverem selecionados, o usuário pode configurar um por um ou um modelo de referência
-            ref_model = st.selectbox("Modelo para Configurar", selected_models or available_models)
+            ref_model = st.selectbox("Model to Configure", selected_models or available_models)
             
             # Merge existing manual_params with new manual config
             current_manual_params = manual_params.copy()
@@ -666,7 +665,7 @@ with tabs[1]:
             schema = trainer_temp.get_model_params_schema(ref_model)
 
             if schema:
-                st.markdown(f"**Parâmetros para {ref_model}**")
+                st.markdown(f"**Parameters for {ref_model}**")
                 cols_p = st.columns(3)
                 for i, (p_name, p_config) in enumerate(schema.items()):
                     with cols_p[i % 3]:
@@ -683,9 +682,9 @@ with tabs[1]:
         st.divider()
 
         # 3. Seleção de Dados
-        st.subheader("📂 Seleção de Dados")
+        st.subheader("📂 Data Selection")
         available_datasets = datalake.list_datasets()
-        selected_ds_list = st.multiselect("Escolha os Datasets", available_datasets, key="ds_train_multi")
+        selected_ds_list = st.multiselect("Choose Datasets", available_datasets, key="ds_train_multi")
         
         target_pre = None
         date_col_pre = None
@@ -702,12 +701,12 @@ with tabs[1]:
                     col_sel1, col_sel2 = st.columns(2)
                     with col_sel1:
                         if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                            target_pre = st.selectbox("🎯 Target (Variável Alvo)", sample_df.columns, key="target_selector_pre")
+                            target_pre = st.selectbox("🎯 Target Variable", sample_df.columns, key="target_selector_pre")
                     
                     with col_sel2:
                         if task == "time_series":
-                            date_col_pre = st.selectbox("📅 Coluna de Data (OBRIGATÓRIO)", sample_df.columns, key="ts_date_selector")
-            except Exception as e: st.error(f"Erro ao carregar amostra: {e}")
+                            date_col_pre = st.selectbox("📅 Date Column (REQUIRED)", sample_df.columns, key="ts_date_selector")
+            except Exception as e: st.error(f"Error loading sample: {e}")
 
         selected_configs = []
         if selected_ds_list:
@@ -716,23 +715,23 @@ with tabs[1]:
                 with cols_ds[i]:
                     st.markdown(f"**{ds_name}**")
                     versions = datalake.list_versions(ds_name)
-                    ver = st.selectbox(f"Versão", versions, key=f"ver_{ds_name}")
+                    ver = st.selectbox(f"Version", versions, key=f"ver_{ds_name}")
                     
                     # Configuração de Papel do Dataset (Granularidade Solicitada)
                     if validation_strategy == 'holdout':
-                        st.caption("Defina como usar este dataset:")
-                        role = st.radio("Papel", ["Treino + Teste (Split)", "Apenas Treino (100%)", "Apenas Teste (100%)"], key=f"role_{ds_name}", help="Define o destino final dos dados. 'Apenas Teste' reserva os dados para avaliação final (não visto no treino). 'Treino' entra no pool de treinamento.")
+                        st.caption("Define dataset role:")
+                        role = st.radio("Role", ["Train + Test (Split)", "Train Only (100%)", "Test Only (100%)"], key=f"role_{ds_name}", help="Final destination of data. 'Test Only' reserves data for final evaluation. 'Train' goes to the training pool.")
                         
                         split = 100
-                        if role == "Treino + Teste (Split)":
-                            split = st.slider(f"% Treino", 10, 95, 80, key=f"split_{ds_name}", help="Porcentagem deste dataset que vai para o pool de Treino. O restante vai para o Teste Final.")
-                        elif role == "Apenas Teste (100%)":
+                        if role == "Train + Test (Split)":
+                            split = st.slider(f"% Train", 10, 95, 80, key=f"split_{ds_name}", help="Percentage of this dataset going to the Training pool. The rest goes to Final Test.")
+                        elif role == "Test Only (100%)":
                             split = 0
                     else:
                         # Para estratégias como K-Fold ou Auto-Split, usamos o dataset integralmente no processo (split=100)
                         # O sistema de validação cuidará da divisão interna.
                         split = 100
-                        st.info(f"Dataset usado integralmente para {validation_strategy}")
+                        st.info(f"Dataset used entirely for {validation_strategy}")
                     
                     selected_configs.append({'name': ds_name, 'version': ver, 'split': split})
 
@@ -746,23 +745,23 @@ with tabs[1]:
                 potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
             
             if potential_nlp_cols:
-                selected_nlp_cols = st.multiselect("Colunas de Texto (NLP)", potential_nlp_cols, help="Selecione as colunas que contêm texto para processamento NLP otimizado.")
+                selected_nlp_cols = st.multiselect("Text Columns (NLP)", potential_nlp_cols, help="Select the columns containing text for optimized NLP processing.")
                 
                 if selected_nlp_cols:
                     col_nlp1, col_nlp2 = st.columns(2)
                     with col_nlp1:
-                        vectorizer_automl = st.selectbox("Vetorização", ["tfidf", "count", "embeddings"], key="automl_vect")
+                        vectorizer_automl = st.selectbox("Vectorization", ["tfidf", "count", "embeddings"], key="automl_vect")
                         if vectorizer_automl == "embeddings":
-                            embedding_model = st.selectbox("Modelo de Embedding", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], index=0)
+                            embedding_model = st.selectbox("Embedding Model", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], index=0)
                         else:
                             ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
                     with col_nlp2:
                         if vectorizer_automl != "embeddings":
-                            remove_stopwords_automl = st.checkbox("Remover Stopwords (English)", value=True, key="automl_stop")
-                            lematization_automl = st.checkbox("Lematização (WordNet - requer NLTK)", value=False, key="automl_lemma")
-                            max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Deixe alto (ex: 5000+) para capturar mais vocabulário. Otimizado automaticamente.")
+                            remove_stopwords_automl = st.checkbox("Remove Stopwords (English)", value=True, key="automl_stop")
+                            lematization_automl = st.checkbox("Lemmatization (WordNet - requires NLTK)", value=False, key="automl_lemma")
+                            max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Leave high (e.g., 5000+) to capture more vocabulary. Automatically optimized.")
                         else:
-                            st.info("💡 Embeddings geram vetores densos fixos (ex: 384 dimensões).")
+                            st.info("💡 Embeddings generate dense fixed vectors (e.g., 384 dimensions).")
 
                     nlp_config_automl = {
                         "vectorizer": vectorizer_automl,
@@ -774,12 +773,12 @@ with tabs[1]:
                     }
             else:
                 if selected_ds_list:
-                    st.info("Nenhuma coluna de texto identificada na amostra.")
+                    st.info("No text column identified in the sample.")
                 else:
-                    st.info("Selecione um dataset abaixo para configurar NLP.")
+                    st.info("Select a dataset below to configure NLP.")
 
         if selected_configs:
-            if st.button("📥 Carregar e Preparar Dados", key="btn_load_train"):
+            if st.button("📥 Load and Prepare Data", key="btn_load_train"):
                 # Usar configurações individuais de split (global_split=None)
                 train_df, test_df = prepare_multi_dataset(selected_configs, global_split=None, task_type=task, date_col=date_col_pre, target_col=target_pre)
                 
@@ -790,54 +789,54 @@ with tabs[1]:
                 st.session_state['target_active'] = target_pre # Salvar target selecionado
                 st.session_state['n_trials_active'] = n_trials
                 st.session_state['early_stopping_active'] = early_stopping
-                st.success("Dados carregados!")
+                st.success("Data loaded!")
 
         if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
             train_df = st.session_state['train_df']
             test_df = st.session_state['test_df']
             
             st.divider()
-            st.subheader("⚙️ Configuração Final")
+            st.subheader("⚙️ Final Configuration")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
                 if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
                     # Se já foi selecionado no pré-carregamento, apenas exibir e travar
                     if st.session_state.get('target_active') and st.session_state['target_active'] in train_df.columns:
                         target = st.session_state['target_active']
-                        st.info(f"🎯 Target Definido: **{target}** (Para alterar, recarregue os dados)")
+                        st.info(f"🎯 Target Defined: **{target}** (To change, reload data)")
                     else:
-                        target = st.selectbox("🎯 Selecione o Target", train_df.columns)
+                        target = st.selectbox("🎯 Select Target", train_df.columns)
                 else:
                     target = None
             
             with col_f2:
                 if task == "time_series":
-                    freq = st.selectbox("⏱️ Intervalo", ["Minutos", "Horas", "Dias", "Semanas", "Meses", "Anos"])
-                    forecast_horizon = st.number_input("🔮 Horizonte", 1, 100, 7)
+                    freq = st.selectbox("⏱️ Interval", ["Minutes", "Hours", "Days", "Weeks", "Months", "Years"])
+                    forecast_horizon = st.number_input("🔮 Horizon", 1, 100, 7)
                 else: forecast_horizon, freq = 1, "D"
 
             # --- Stability Analysis Integration in AutoML Flow ---
             st.divider()
             st.subheader("⚖️ Stability & Robustness Analysis (Optional)")
-            enable_stability = st.checkbox("Run Post-Training Stability Analysis", help="Executa testes adicionais de robustez após o término do AutoML.")
+            enable_stability = st.checkbox("Run Post-Training Stability Analysis", help="Executes additional robustness tests after AutoML finishes.")
             
             selected_stability_tests = []
             if enable_stability:
                 stability_options = [
-                    "Robustez a Variação de Dados", 
-                    "Robustez à Inicialização", 
-                    "Sensibilidade a Hiperparâmetros", 
-                    "Análise Geral"
+                    "Data Variation Robustness", 
+                    "Initialization Robustness", 
+                    "Hyperparameter Sensitivity", 
+                    "General Analysis"
                 ]
                 selected_stability_tests = st.multiselect(
                     "Select Stability Tests", 
                     stability_options,
-                    default=["Análise Geral"],
-                    help="Selecione quais análises executar automaticamente no melhor modelo encontrado."
+                    default=["General Analysis"],
+                    help="Select which analyses to run automatically on the best found model."
                 )
-                st.info("📊 Os resultados serão salvos no MLflow e um relatório PDF será gerado.")
+                st.info("📊 Results will be saved to MLflow and a PDF report will be generated.")
 
-            if st.button("🚀 Iniciar Treinamento", key="btn_start_train"):
+            if st.button("🚀 Start Training", key="btn_start_train"):
                 st.session_state['trials_data'] = []
                 st.session_state['report_data'] = {} # Reset reports on new training
                 start_time_train = time.time()
@@ -852,8 +851,8 @@ with tabs[1]:
                 chart_c = st.empty()
                 
                 # Container for real-time logs
-                st.markdown("### 🖥️ Logs de Execução (Tempo Real)")
-                log_expander = st.expander("Ver Logs do AutoML Engine e Optuna", expanded=True)
+                st.markdown("### 🖥️ Execution Logs (Real-time)")
+                log_expander = st.expander("View AutoML Engine and Optuna Logs", expanded=True)
                 log_placeholder = log_expander.empty()
                 
                 # Setup Streamlit Logging Handler
@@ -877,7 +876,7 @@ with tabs[1]:
                 optuna_logger.setLevel(logging.INFO)
                 
                 # Container for per-model reports (NEW)
-                st.markdown("### 📊 Relatórios por Modelo (Tempo Real)")
+                st.markdown("### 📊 Per-Model Reports (Real-time)")
                 if 'report_data' not in st.session_state:
                     st.session_state['report_data'] = {}
                 
@@ -906,44 +905,44 @@ with tabs[1]:
                         with report_section_placeholder.container():
                             # Render ALL reports stored in session state
                             for m_name, rep in st.session_state['report_data'].items():
-                                expander_label = f"Relatório Final: {rep['model_name']} (Score: {rep['score']:.4f})"
+                                expander_label = f"Final Report: {rep['model_name']} (Score: {rep['score']:.4f})"
                                 with st.expander(expander_label, expanded=True):
                                     col_rep1, col_rep2 = st.columns([1, 2])
                                     with col_rep1:
-                                        st.markdown("🎯 **Métricas de Validação**")
+                                        st.markdown("🎯 **Validation Metrics**")
                                         if rep['metrics']:
                                             # Display metrics as a nice table instead of raw JSON
                                             met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
-                                            met_df.columns = ['Métrica', 'Valor']
+                                            met_df.columns = ['Metric', 'Value']
                                             st.table(met_df)
                                         else:
-                                            st.warning("Métricas de validação não disponíveis.")
+                                            st.warning("Validation metrics not available.")
                                             
-                                        st.markdown(f"📌 **Melhor Trial:** {rep['best_trial_number']}")
+                                        st.markdown(f"📌 **Best Trial:** {rep['best_trial_number']}")
                                         st.markdown(f"🔗 **MLflow Run ID:** `{rep['run_id']}`")
                                         
                                         if 'stability' in rep and rep['stability']:
                                             st.divider()
-                                            st.markdown("⚖️ **Análise de Estabilidade**")
+                                            st.markdown("⚖️ **Stability Analysis**")
                                             for s_type, s_data in rep['stability'].items():
                                                 if s_type == 'general':
-                                                    st.write("📈 **Resumo Geral de Estabilidade**")
+                                                    st.write("📈 **General Stability Summary**")
                                                     summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
                                                     # Convert nested dict to flat for table
                                                     flat_summary = []
                                                     for metric, stats in summary.items():
                                                         if isinstance(stats, dict):
-                                                            row = {'Métrica': metric.upper()}
+                                                            row = {'Metric': metric.upper()}
                                                             row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
                                                             flat_summary.append(row)
                                                     
                                                     if flat_summary:
                                                         st.table(pd.DataFrame(flat_summary))
                                                 elif s_type == 'hyperparam':
-                                                    with st.expander(f"Sensibilidade: {s_type}", expanded=False):
+                                                    with st.expander(f"Sensitivity: {s_type}", expanded=False):
                                                         st.dataframe(s_data, use_container_width=True)
                                                 else:
-                                                    with st.expander(f"Teste: {s_type}", expanded=False):
+                                                    with st.expander(f"Test: {s_type}", expanded=False):
                                                         st.dataframe(s_data, use_container_width=True)
                                     with col_rep2:
                                         if 'plots' in rep and rep['plots']:
@@ -959,9 +958,9 @@ with tabs[1]:
                                                         else:
                                                             st.pyplot(plot_obj, clear_figure=True)
                                             else:
-                                                st.info("Sem visualizações disponíveis para este modelo.")
+                                                st.info("No visualizations available for this model.")
                                         else:
-                                            st.info("Sem visualizações disponíveis para este modelo.")
+                                            st.info("No visualizations available for this model.")
                         return
 
                     # Extrair nome do algoritmo e o número do trial do modelo
@@ -970,11 +969,11 @@ with tabs[1]:
                     trial_num = int(trial_label.replace("Trial ", ""))
 
                     trial_info = {
-                        "Tentativa Geral": trial.number + 1,
-                        "Trial Modelo": trial_num,
-                        "Modelo": algo_name,
-                        "Identificador": full_name,
-                        "Duração (s)": dur
+                        "Global Trial": trial.number + 1,
+                        "Model Trial": trial_num,
+                        "Model": algo_name,
+                        "Identifier": full_name,
+                        "Duration (s)": dur
                     }
 
                     # Adicionar métricas adicionais se houver
@@ -994,7 +993,7 @@ with tabs[1]:
                     
                     with status_c:
                         metric_text = f"{target_metric_name}: {score:.4f}"
-                        st.info(f"{full_name} concluido | {metric_text} | Total: {trial.number + 1}/{total_expected_trials}")
+                        st.info(f"{full_name} completed | {metric_text} | Total: {trial.number + 1}/{total_expected_trials}")
                     
                     progress_bar.progress(min((trial.number + 1) / total_expected_trials, 1.0))
                     
@@ -1002,29 +1001,29 @@ with tabs[1]:
                         # Gráfico mostrando o progresso de cada modelo individualmente
                         # Prepare rich hover data
                         available_cols = df_trials.columns.tolist()
-                        hover_data_cols = [c for c in ["Modelo", "Identificador", "Duração (s)"] if c in available_cols]
+                        hover_data_cols = [c for c in ["Model", "Identifier", "Duration (s)"] if c in available_cols]
                         
                         # Adicionar todas as métricas encontradas ao hover
                         for col in available_cols:
-                            if col not in hover_data_cols and col not in ["Tentativa Geral", "Trial Modelo"]:
+                            if col not in hover_data_cols and col not in ["Global Trial", "Model Trial"]:
                                 hover_data_cols.append(col)
                         
-                        fig = px.line(df_trials, x="Trial Modelo", y=target_metric_name, color="Modelo", 
+                        fig = px.line(df_trials, x="Model Trial", y=target_metric_name, color="Model", 
                                     markers=True, 
-                                    hover_name="Identificador",
+                                    hover_name="Identifier",
                                     hover_data=hover_data_cols,
-                                    title=f"Progresso da Otimizacao: {target_metric_name} por Algoritmo")
+                                    title=f"Optimization Progress: {target_metric_name} by Algorithm")
                         
-                        fig.update_layout(xaxis_title="Nº da Tentativa do Modelo", yaxis_title=target_metric_name)
+                        fig.update_layout(xaxis_title="Model Trial No.", yaxis_title=target_metric_name)
                         st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
 
-                with st.spinner("Processando..."):
+                with st.spinner("Processing..."):
                     processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon, nlp_config=nlp_config_automl)
                     X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
                     
                     # Exibir relatório de qualidade Deepchecks se disponível
                     if hasattr(processor, 'quality_report_html') and processor.quality_report_html:
-                        with st.expander("📊 Relatório de Qualidade de Dados (Deepchecks)", expanded=False):
+                        with st.expander("📊 Data Quality Report (Deepchecks)", expanded=False):
                             import streamlit.components.v1 as components
                             # Limitar altura para não quebrar a UI
                             components.html(processor.quality_report_html, height=800, scrolling=True)
@@ -1033,20 +1032,20 @@ with tabs[1]:
                     
                     # Preparar modelos customizados (Upload/Registry)
                     custom_models = {}
-                    if model_source == "Upload Local (.pkl)" and 'uploaded_pkl' in locals() and uploaded_pkl:
+                    if model_source == "Local Upload (.pkl)" and 'uploaded_pkl' in locals() and uploaded_pkl:
                          try:
                              loaded_model = joblib.load(uploaded_pkl)
                              custom_models["Uploaded_Model"] = loaded_model
                          except Exception as e:
-                             st.error(f"Erro ao carregar .pkl: {e}")
+                             st.error(f"Error loading .pkl: {e}")
                              st.stop()
-                    elif model_source == "Model Registry (Registrados)" and selected_models:
+                    elif model_source == "Model Registry (Registered)" and selected_models:
                          model_name = selected_models[0]
                          try:
                              loaded_model = load_registered_model(model_name)
                              custom_models[model_name] = loaded_model
                          except Exception as e:
-                             st.error(f"Erro ao carregar do registry: {e}")
+                             st.error(f"Error loading from registry: {e}")
                              st.stop()
 
                     trainer = AutoMLTrainer(task_type=task, preset=training_preset, ensemble_config=ensemble_config)
@@ -1093,7 +1092,7 @@ with tabs[1]:
                         # Evaluation
                         metrics, y_pred = trainer.evaluate(X_test_proc, y_test_proc) if X_test_proc is not None else (None, None)
                         
-                        st.success("Processo de AutoML Finalizado com Sucesso!")
+                        st.success("AutoML Process Finished Successfully!")
                     finally:
                         # Ensure the Streamlit handler is removed after process finishes or fails
                         try:
@@ -1105,25 +1104,25 @@ with tabs[1]:
                             pass
                     
                     # Mostrar o melhor modelo de forma destacada
-                    best_model_name = trainer.best_params.get('model_name', 'Desconhecido')
+                    best_model_name = trainer.best_params.get('model_name', 'Unknown')
                     st.balloons()
                     st.markdown(f"""
                         <div style="background-color:#d4edda; padding:20px; border-radius:10px; border-left:8px solid #28a745; margin-bottom:20px;">
-                            <h2 style="color:#155724; margin:0;">Melhor Modelo Encontrado: {best_model_name}</h2>
-                            <p style="color:#155724; font-size:1.1em; margin-top:10px;">O sistema otimizou e selecionou o algoritmo acima como o de melhor performance para sua tarefa.</p>
+                            <h2 style="color:#155724; margin:0;">Best Model Found: {best_model_name}</h2>
+                            <p style="color:#155724; font-size:1.1em; margin-top:10px;">The system optimized and selected the algorithm above as the best performing for your task.</p>
                         </div>
                     """, unsafe_allow_html=True)
 
                     # --- Resumo por Modelo ---
                     if hasattr(trainer, 'model_summaries') and trainer.model_summaries:
-                        st.markdown("### Melhores Resultados por Algoritmo")
+                        st.markdown("### Best Results by Algorithm")
                         summary_data = []
                         for m_name, info in trainer.model_summaries.items():
                             row = {
-                                "Algoritmo": m_name,
-                                "Melhor Score": f"{info['score']:.4f}",
+                                "Algorithm": m_name,
+                                "Best Score": f"{info['score']:.4f}",
                                 "Trial": info['trial_name'],
-                                "Duração (s)": f"{info['duration']:.2f}"
+                                "Duration (s)": f"{info['duration']:.2f}"
                             }
                             # Adicionar métricas adicionais se disponíveis
                             if 'metrics' in info:
@@ -1136,7 +1135,7 @@ with tabs[1]:
                         st.table(df_summary)
                         
                         # Também permitir ver todos os trials em uma tabela expansível
-                        with st.expander("Ver Historico Completo de Todas as Tentativas"):
+                        with st.expander("View Full History of All Trials"):
                             if st.session_state.get('trials_data'):
                                 df_all = pd.DataFrame(st.session_state['trials_data'])
                                 if not df_all.empty:
@@ -1144,10 +1143,10 @@ with tabs[1]:
                                     df_all = df_all.dropna(axis=1, how='all')
                                     st.dataframe(df_all.sort_values(by=target_metric_name, ascending=False), use_container_width=True)
                             else:
-                                st.info("Sem dados de tentativas para exibir.")
+                                st.info("No trial data to display.")
 
                     if metrics: 
-                        st.markdown("### Resultados Finais (Melhor Modelo Global)")
+                        st.markdown("### Final Results (Global Best Model)")
                         cols_m = st.columns(len(metrics))
                         for i, (m_name, m_val) in enumerate(metrics.items()):
                             if m_name != 'confusion_matrix':
@@ -1157,7 +1156,7 @@ with tabs[1]:
                     # --- Visualizações de Resultados ---
                     if X_test_proc is not None:
                         st.divider()
-                        st.subheader("Visualizacao de Performance")
+                        st.subheader("Performance Visualization")
                         
                         if task == "classification":
                             col_v1, col_v2 = st.columns(2)
@@ -1168,14 +1167,14 @@ with tabs[1]:
                                     # Use class names for Plotly labels if available
                                     labels_plotly = class_names if class_names else None
                                     
-                                    fig_cm = px.imshow(cm, text_auto=True, title="Matriz de Confusao",
-                                                     labels=dict(x="Predito", y="Real", color="Quantidade"),
+                                    fig_cm = px.imshow(cm, text_auto=True, title="Confusion Matrix",
+                                                     labels=dict(x="Predicted", y="Actual", color="Quantity"),
                                                      x=labels_plotly, y=labels_plotly)
                                     st.plotly_chart(fig_cm)
                             with col_v2:
                                 # Feature Importance (SHAP - SHapley Additive exPlanations)
-                                st.markdown("#### Importancia das Features (SHAP)")
-                                st.info("Calculando explicabilidade via SHAP (pode levar alguns segundos)...")
+                                st.markdown("#### Feature Importance (SHAP)")
+                                st.info("Calculating Explainability via SHAP (may take a few seconds)...")
                                 
                                 shap_success = False
                                 try:
@@ -1207,35 +1206,35 @@ with tabs[1]:
                                         if fig_shap:
                                             st.pyplot(fig_shap, clear_figure=True)
                                         
-                                        # Plot Bar (Importância Global)
+                                        # Plot Bar (Global Importance)
                                         st.markdown("**SHAP Feature Importance (Bar)**")
-                                        st.caption("Media absoluta do impacto de cada feature.")
+                                        st.caption("Absolute mean of the impact of each feature.")
                                         fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
                                         if fig_shap_bar:
                                             st.pyplot(fig_shap_bar, clear_figure=True)
                                         shap_success = True
                                 except Exception as e:
-                                    st.warning(f"Nao foi possivel gerar SHAP plot: {e}")
+                                    st.warning(f"Could not generate SHAP plot: {e}")
 
-                                # Fallback para feature importance manual se SHAP falhar
+                                # Fallback to manual feature importance if SHAP fails
                                 if not shap_success and hasattr(trainer, 'feature_importance') and trainer.feature_importance:
-                                    st.info("Exibindo importancia baseada em coeficientes/arvores (metodo alternativo).")
+                                    st.info("Displaying importance based on coefficients/trees (alternative method).")
                                     fi_data = pd.DataFrame({
                                         'Feature': processor.get_feature_names(),
-                                        'Importancia': trainer.feature_importance
-                                    }).sort_values(by='Importancia', ascending=False)
+                                        'Importance': trainer.feature_importance
+                                    }).sort_values(by='Importance', ascending=False)
                                     
-                                    fig_fi = px.bar(fi_data.head(15), x='Importancia', y='Feature', orientation='h',
-                                                  title="Top 15 Features mais Importantes")
+                                    fig_fi = px.bar(fi_data.head(15), x='Importance', y='Feature', orientation='h',
+                                                  title="Top 15 Most Important Features")
                                     fig_fi.update_layout(yaxis={'categoryorder':'total ascending'})
                                     st.plotly_chart(fig_fi, use_container_width=True)
 
                         elif task in ["regression", "time_series"]:
-                            df_res = pd.DataFrame({"Real": y_test_proc, "Predito": y_pred})
+                            df_res = pd.DataFrame({"Actual": y_test_proc, "Predicted": y_pred})
                             if task == "time_series":
-                                fig_res = px.line(df_res.reset_index(), y=["Real", "Predito"], title="Serie Temporal: Real vs Predito")
+                                fig_res = px.line(df_res.reset_index(), y=["Actual", "Predicted"], title="Time Series: Actual vs Predicted")
                             else:
-                                fig_res = px.scatter(df_res, x="Real", y="Predito", trendline="ols", title="Regressao: Real vs Predito")
+                                fig_res = px.scatter(df_res, x="Actual", y="Predicted", trendline="ols", title="Regression: Actual vs Predicted")
                             st.plotly_chart(fig_res)
 
                         elif task == "clustering":
@@ -1245,7 +1244,7 @@ with tabs[1]:
                             X_pca = pca.fit_transform(X_test_proc)
                             df_pca = pd.DataFrame(X_pca, columns=['PCA1', 'PCA2'])
                             df_pca['Cluster'] = y_pred.astype(str)
-                            fig_cluster = px.scatter(df_pca, x='PCA1', y='PCA2', color='Cluster', title="Visualizacao de Clusters (PCA)")
+                            fig_cluster = px.scatter(df_pca, x='PCA1', y='PCA2', color='Cluster', title="Cluster Visualization (PCA)")
                             st.plotly_chart(fig_cluster)
 
                         elif task == "anomaly_detection":
@@ -1254,10 +1253,10 @@ with tabs[1]:
                             X_pca = pca.fit_transform(X_test_proc)
                             df_pca = pd.DataFrame(X_pca, columns=['PCA1', 'PCA2'])
                             # y_pred: -1 for anomaly, 1 for normal
-                            df_pca['Status'] = np.where(y_pred == -1, 'Anomalia', 'Normal')
+                            df_pca['Status'] = np.where(y_pred == -1, 'Anomaly', 'Normal')
                             fig_anom = px.scatter(df_pca, x='PCA1', y='PCA2', color='Status', 
-                                                color_discrete_map={'Anomalia': 'red', 'Normal': 'blue'},
-                                                title="Deteccao de Anomalias (PCA)")
+                                                color_discrete_map={'Anomaly': 'red', 'Normal': 'blue'},
+                                                title="Anomaly Detection (PCA)")
                             st.plotly_chart(fig_anom)
 
 
@@ -1340,8 +1339,8 @@ with tabs[1]:
                 with st.spinner("Training vision model..."):
                     try:
                         # Container for real-time logs in CV
-                        st.markdown("### 🖥️ Logs de Execução CV (Tempo Real)")
-                        cv_log_expander = st.expander("Ver Logs de Treinamento", expanded=True)
+                        st.markdown("### 🖥️ CV Execution Logs (Real-time)")
+                        cv_log_expander = st.expander("View Training Logs", expanded=True)
                         cv_log_placeholder = cv_log_expander.empty()
                         cv_st_handler = StreamlitLogHandler(cv_log_placeholder)
                         cv_st_handler.setLevel(logging.INFO)
@@ -1446,7 +1445,7 @@ with tabs[1]:
 # --- TAB 3: EXPERIMENTS ---
 with tabs[2]:
     st.header("Experiments Explorer")
-    st.markdown("Aqui voce encontra o historico de **todos os treinos**. Escolha os melhores para registrar no catalogo oficial.")
+    st.markdown("Here you can find the history of **all training runs**. Choose the best ones to register in the official catalog.")
     
     runs = get_cached_all_runs()
     if not runs.empty:
@@ -1480,7 +1479,7 @@ with tabs[2]:
                         st.success(f"Model {model_reg_name} is now in the Registry!")
                         st.rerun()
     else:
-        st.info("Nenhum experimento encontrado. Inicie um treino na aba AutoML & Model Hub.")
+        st.info("No experiments found. Start a training session in the AutoML & Model Hub tab.")
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
 with tabs[3]:
