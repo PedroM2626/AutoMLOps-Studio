@@ -86,8 +86,6 @@ def get_deepchecks_suite(task_type):
     except ImportError:
         return None
 
-class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
-
 # Silenciar avisos de convergência e outros avisos repetitivos
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
