@@ -44,6 +44,7 @@ from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.covariance import EllipticEnvelope
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
     mean_squared_error, mean_absolute_error, r2_score, confusion_matrix,
@@ -85,6 +86,7 @@ def get_deepchecks_suite(task_type):
         return data_integrity()
     except ImportError:
         return None
+
 
 # Silenciar avisos de convergência e outros avisos repetitivos
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -621,6 +623,9 @@ class AutoMLTrainer:
             if name == 'sgd_regressor': return SGDRegressor(max_iter=1000, random_state=random_state)
             if name == 'adaboost': return AdaBoostRegressor(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=-1, random_seed=random_state)
+        elif self.task_type == 'dimensionality_reduction':
+            if name == 'pca': return PCA(random_state=random_state)
+            if name == 'truncated_svd': return TruncatedSVD(random_state=random_state)
             
         return None
 
@@ -986,6 +991,41 @@ class AutoMLTrainer:
                     kernel=t.suggest_categorical('oc_kernel', ['rbf', 'poly', 'sigmoid'])
                 )
             }
+        elif self.task_type == 'dimensionality_reduction':
+            # Use X_train feature count if available, otherwise default to 10 max
+            max_comp = 10
+            if hasattr(self, '_n_features') and self._n_features is not None:
+                max_comp = max(2, min(10, self._n_features - 1)) # SVD requires strictly less than n_features
+            
+            def get_pca(t):
+                try:
+                    return PCA(
+                        n_components=t.suggest_int('pca_n_components', 2, max_comp) if hasattr(t, 'suggest_int') else 2,
+                        svd_solver=t.suggest_categorical('pca_solver', ['auto', 'full', 'arpack', 'randomized']) if hasattr(t, 'suggest_categorical') else 'auto',
+                        random_state=42
+                    )
+                except Exception as e:
+                    logger.error(f'Error creating PCA: {e}')
+                    import traceback; traceback.print_exc()
+                    return None
+            
+            def get_svd(t):
+                try:
+                    return TruncatedSVD(
+                        n_components=t.suggest_int('svd_n_components', 2, max_comp) if hasattr(t, 'suggest_int') else 2,
+                        algorithm=t.suggest_categorical('svd_alg', ['arpack', 'randomized']) if hasattr(t, 'suggest_categorical') else 'randomized',
+                        random_state=42
+                    )
+                except Exception as e:
+                    logger.error(f'Error creating SVD: {e}')
+                    import traceback; traceback.print_exc()
+                    return None
+
+            models_config = {
+                'pca': get_pca,
+                'truncated_svd': get_svd
+            }
+            logger.info(f"DEBUG _get_models: task_type={self.task_type}, name requested={name}, returning keys={list(models_config.keys())}")
         else:
             return {}
 
@@ -1025,6 +1065,7 @@ class AutoMLTrainer:
         self.custom_models = custom_models if custom_models else {}
         self.feature_names = feature_names
         self.class_names = class_names
+        self._n_features = X_train.shape[1] if hasattr(X_train, 'shape') else (len(X_train[0]) if X_train is not None and len(X_train) > 0 else 2)
         
         # Se selected_models não for fornecido, usa a lista do preset
         if selected_models is None:
@@ -1230,15 +1271,10 @@ class AutoMLTrainer:
                     else:
                         # Cross Validation Logic
                         n_splits = validation_params.get('folds', 3) if validation_params else 3
-                        # Fallback se folds não estiver definido
-                        if not isinstance(n_splits, int): n_splits = 3
                         
                         # Definir métricas para calcular via cross_validate
                         if self.task_type == 'classification':
-                            scoring_list = ['accuracy', 'f1_weighted', 'precision_weighted', 'recall_weighted']
-                            # Adicionar roc_auc se o modelo suportar predict_proba
-                            if hasattr(model, 'predict_proba'):
-                                scoring_list.append('roc_auc_ovr')
+                            scoring_list = ['accuracy', 'f1_weighted', 'precision_weighted', 'recall_weighted', 'roc_auc_ovr']
                             
                             if validation_strategy == 'stratified_cv':
                                 cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
@@ -1302,15 +1338,25 @@ class AutoMLTrainer:
                     else:
                         score = 0
                     trial_metrics['decision_score'] = score
+                elif self.task_type == 'dimensionality_reduction':
+                    model.fit(X_tr)
+                    if hasattr(model, 'explained_variance_ratio_'):
+                        score = model.explained_variance_ratio_.sum()
+                    else:
+                        score = 0
+                    trial_metrics['explained_variance'] = score
                 else: # clustering
                     model.fit(X_tr)
                     labels = model.labels_ if hasattr(model, 'labels_') else model.predict(X_tr)
+                    
                     if len(set(labels)) > 1:
                         score = silhouette_score(X_tr, labels)
+                        trial_metrics['silhouette'] = score
+                        trial_metrics['calinski_harabasz'] = calinski_harabasz_score(X_tr, labels)
+                        trial_metrics['davies_bouldin'] = davies_bouldin_score(X_tr, labels)
                     else:
-                        score = -1
-                    trial_metrics['silhouette'] = score
-
+                        score = -1.0 # Penalizar modelo que agrupa tudo numa única classe
+                        trial_metrics['silhouette'] = -1.0
                 # Unified Logging for all tasks/strategies
                 logger.info(f"Registrando {full_trial_name} no MLflow...")
                 run_id = tracker.log_experiment(
@@ -1324,9 +1370,9 @@ class AutoMLTrainer:
 
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
-                # Don't set score to -1 here, let it be 0.0 to avoid breaking charts
-                score = 0.0 
-                run_id = "error_run"
+                # Don't set score to 0.0 here, raise TrialPruned to let Optuna know the trial failed completely
+                import optuna
+                raise optuna.TrialPruned(f"Trial failed due to exception: {e}")
 
             duration = time.time() - start_time
             trial_metrics['duration'] = duration
@@ -1337,7 +1383,7 @@ class AutoMLTrainer:
             
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
-            if self.task_type in ['classification', 'clustering', 'anomaly_detection']:
+            if self.task_type in ['classification', 'clustering', 'anomaly_detection', 'dimensionality_reduction']:
                 score = max(0.0, score)
             
             # Enrich trial metrics with parameters for easy access in callbacks
@@ -1478,9 +1524,9 @@ class AutoMLTrainer:
                 best_score_for_model = -np.inf
                 
                 for t in study.trials:
-                    # Check if trial was for this model and completed
-                    if t.state == optuna.trial.TrialState.COMPLETE and t.user_attrs.get("model_name") == m_name:
-                         if t.value > best_score_for_model:
+                    # Check if trial was for this model and completed (ignore pruned/failed trials)
+                    if t.state == optuna.trial.TrialState.COMPLETE and t.user_attrs.get("full_name", "").startswith(m_name):
+                         if t.value is not None and t.value > best_score_for_model:
                              best_score_for_model = t.value
                              best_trial_for_model = t
                 
@@ -1492,6 +1538,10 @@ class AutoMLTrainer:
                     best_params_model['model_name'] = m_name # Ensure model name is present
                     
                     # Use specific seed if applicable
+                    best_seed = self.random_state.get(m_name, 42) if isinstance(self.random_state, dict) else self.random_state
+                    best_model_instance = self._get_models(best_params_model, best_seed)
+                else:
+                    logger.warning(f"Nenhum trial concluido com sucesso para {m_name}. Relatorio ignorado.")
                     model_seed = self.random_state
                     if isinstance(self.random_state, dict):
                         model_seed = self.random_state.get(m_name, 42)

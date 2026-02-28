@@ -23,6 +23,34 @@ import time
 import plotly.express as px
 from PIL import Image
 import mlflow
+import logging
+
+class StreamlitLogHandler(logging.Handler):
+    """
+    Custom logging handler that streams logs directly to a Streamlit placeholder.
+    """
+    def __init__(self, placeholder, max_lines=50):
+        super().__init__()
+        self.placeholder = placeholder
+        self.max_lines = max_lines
+        self.log_lines = []
+        # Format the log message slightly richer
+        self.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s', datefmt='%H:%M:%S'))
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.log_lines.append(msg)
+            if len(self.log_lines) > self.max_lines:
+                self.log_lines.pop(0)
+            
+            # Combine lines and write to placeholder
+            log_text = '\n'.join(self.log_lines)
+            # Use atomic update
+            self.placeholder.code(log_text, language='text')
+        except Exception:
+            self.handleError(record)
+
 
 # 🎨 Custom Styling
 try:
@@ -335,9 +363,17 @@ with tabs[1]:
         st.subheader("📋 Configuração do Treino (Tabular)")
         
         # 1. Definição da Tarefa
-        col_t1, col_t2 = st.columns(2)
+        col_t0, col_t1, col_t2 = st.columns([1, 1, 1])
+        with col_t0:
+            learning_type = st.radio("Tipo de Aprendizado", ["Supervisionado", "Não Supervisionado"], key="learning_type_selector")
+
         with col_t1:
-            task = st.radio("Tipo de Tarefa", ["classification", "regression", "clustering", "time_series", "anomaly_detection"], key="task_selector_train")
+            if learning_type == "Supervisionado":
+                task_options = ["classification", "regression", "time_series"]
+            else:
+                task_options = ["clustering", "anomaly_detection", "dimensionality_reduction"]
+                
+            task = st.selectbox("Tipo de Tarefa", task_options, key="task_selector_train")
         
         with col_t2:
             training_strategy = st.radio("Configuração de Hiperparâmetros", ["Automático", "Manual"], 
@@ -577,7 +613,8 @@ with tabs[1]:
             'regression': ['r2', 'rmse', 'mae'],
             'clustering': ['silhouette'],
             'time_series': ['rmse', 'mae', 'mape'],
-            'anomaly_detection': ['f1']
+            'anomaly_detection': ['f1'],
+            'dimensionality_reduction': ['explained_variance']
         }
         
         target_metric_options = metric_options.get(task, ['accuracy'])
@@ -664,7 +701,7 @@ with tabs[1]:
                     
                     col_sel1, col_sel2 = st.columns(2)
                     with col_sel1:
-                        if task not in ["clustering", "anomaly_detection"]:
+                        if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
                             target_pre = st.selectbox("🎯 Target (Variável Alvo)", sample_df.columns, key="target_selector_pre")
                     
                     with col_sel2:
@@ -763,7 +800,7 @@ with tabs[1]:
             st.subheader("⚙️ Configuração Final")
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                if task not in ["clustering", "anomaly_detection"]:
+                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
                     # Se já foi selecionado no pré-carregamento, apenas exibir e travar
                     if st.session_state.get('target_active') and st.session_state['target_active'] in train_df.columns:
                         target = st.session_state['target_active']
@@ -813,6 +850,31 @@ with tabs[1]:
                 status_c = st.empty()
                 progress_bar = st.progress(0)
                 chart_c = st.empty()
+                
+                # Container for real-time logs
+                st.markdown("### 🖥️ Logs de Execução (Tempo Real)")
+                log_expander = st.expander("Ver Logs do AutoML Engine e Optuna", expanded=True)
+                log_placeholder = log_expander.empty()
+                
+                # Setup Streamlit Logging Handler
+                st_handler = StreamlitLogHandler(log_placeholder)
+                st_handler.setLevel(logging.INFO)
+                
+                # Attach to both automl_engine and optuna loggers
+                automl_logger = logging.getLogger('automl_engine')
+                optuna_logger = logging.getLogger('optuna')
+                
+                # Prevent adding multiple handlers if button clicked multiple times
+                if not any(isinstance(h, StreamlitLogHandler) for h in automl_logger.handlers):
+                    automl_logger.addHandler(st_handler)
+                if not any(isinstance(h, StreamlitLogHandler) for h in optuna_logger.handlers):
+                    optuna_logger.addHandler(st_handler)
+                
+                # Temporarily set log level to INFO to capture the progress
+                original_automl_level = automl_logger.level
+                original_optuna_level = optuna_logger.level
+                automl_logger.setLevel(logging.INFO)
+                optuna_logger.setLevel(logging.INFO)
                 
                 # Container for per-model reports (NEW)
                 st.markdown("### 📊 Relatórios por Modelo (Tempo Real)")
@@ -1000,37 +1062,47 @@ with tabs[1]:
                     if hasattr(processor, 'label_encoder') and processor.label_encoder:
                         class_names = processor.label_encoder.classes_.tolist()
 
-                    best_model = trainer.train(
-                        X_train_proc, 
-                        y_train_proc, 
-                        n_trials=n_trials,
-                        timeout=timeout_per_model,
-                        time_budget=total_time_budget,
-                        callback=callback, 
-                        selected_models=selected_models, 
-                        early_stopping_rounds=early_stopping,
-                        manual_params=manual_params,
-                        experiment_name=clean_experiment_name,
-                        random_state=random_seed_config,
-                        validation_strategy=validation_strategy,
-                        validation_params=validation_params,
-                        custom_models=custom_models,
-                        optimization_mode=selected_opt_mode,
-                        optimization_metric=optimization_metric,
-                        stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
-                        feature_names=feature_names,
-                        class_names=class_names
-                    )
-                    best_params = trainer.best_params
-                    
-                    st.session_state['best_model'] = best_model
-                    st.session_state['best_params'] = best_params
-                    st.session_state['processor'] = processor
-                    
-                    # Evaluation
-                    metrics, y_pred = trainer.evaluate(X_test_proc, y_test_proc) if X_test_proc is not None else (None, None)
-                    
-                    st.success("Processo de AutoML Finalizado com Sucesso!")
+                    try:
+                        best_model = trainer.train(
+                            X_train_proc, 
+                            y_train_proc, 
+                            n_trials=n_trials,
+                            timeout=timeout_per_model,
+                            time_budget=total_time_budget,
+                            callback=callback, 
+                            selected_models=selected_models, 
+                            early_stopping_rounds=early_stopping,
+                            manual_params=manual_params,
+                            experiment_name=clean_experiment_name,
+                            random_state=random_seed_config,
+                            validation_strategy=validation_strategy,
+                            validation_params=validation_params,
+                            custom_models=custom_models,
+                            optimization_mode=selected_opt_mode,
+                            optimization_metric=optimization_metric,
+                            stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
+                            feature_names=feature_names,
+                            class_names=class_names
+                        )
+                        best_params = trainer.best_params
+                        
+                        st.session_state['best_model'] = best_model
+                        st.session_state['best_params'] = best_params
+                        st.session_state['processor'] = processor
+                        
+                        # Evaluation
+                        metrics, y_pred = trainer.evaluate(X_test_proc, y_test_proc) if X_test_proc is not None else (None, None)
+                        
+                        st.success("Processo de AutoML Finalizado com Sucesso!")
+                    finally:
+                        # Ensure the Streamlit handler is removed after process finishes or fails
+                        try:
+                            automl_logger.removeHandler(st_handler)
+                            optuna_logger.removeHandler(st_handler)
+                            automl_logger.setLevel(original_automl_level)
+                            optuna_logger.setLevel(original_optuna_level)
+                        except:
+                            pass
                     
                     # Mostrar o melhor modelo de forma destacada
                     best_model_name = trainer.best_params.get('model_name', 'Desconhecido')
@@ -1267,7 +1339,23 @@ with tabs[1]:
 
                 with st.spinner("Training vision model..."):
                     try:
+                        # Container for real-time logs in CV
+                        st.markdown("### 🖥️ Logs de Execução CV (Tempo Real)")
+                        cv_log_expander = st.expander("Ver Logs de Treinamento", expanded=True)
+                        cv_log_placeholder = cv_log_expander.empty()
+                        cv_st_handler = StreamlitLogHandler(cv_log_placeholder)
+                        cv_st_handler.setLevel(logging.INFO)
+                        cv_logger = logging.getLogger('cv_engine')
+                        if not any(isinstance(h, StreamlitLogHandler) for h in cv_logger.handlers):
+                            cv_logger.addHandler(cv_st_handler)
+                        original_cv_level = cv_logger.level
+                        cv_logger.setLevel(logging.INFO)
+                    
                         best_model_cv = trainer.train(data_dir, n_epochs=epochs, lr=lr_cv, callback=cv_callback, mask_dir=mask_dir)
+                        
+                        cv_logger.removeHandler(cv_st_handler)
+                        cv_logger.setLevel(original_cv_level)
+                        
                         st.success("Vision Training Complete!")
                         st.session_state['best_cv_model'] = best_model_cv
                         st.session_state['cv_trainer'] = trainer
@@ -1302,6 +1390,11 @@ with tabs[1]:
                             st.warning(f"Failed to log to MLflow: {ml_err}")
 
                     except Exception as e:
+                        try:
+                            cv_logger.removeHandler(cv_st_handler)
+                            cv_logger.setLevel(original_cv_level)
+                        except:
+                            pass
                         st.error(f"CV Training Failed: {e}")
                         st.error("Check if your ZIP file structure matches the task requirements (e.g., ImageFolder structure for classification).")
 
