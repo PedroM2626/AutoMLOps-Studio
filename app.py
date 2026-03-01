@@ -459,24 +459,45 @@ with tabs[4]:
             
             with col_stab1:
                 st.markdown("#### 1. Configuration")
-                model_names = [m.name for m in models]
-                selected_model_name = st.selectbox("Registered Model", model_names, key="stab_model_sel")
+                model_source = st.radio("Model Source", ["Registry", "File Upload"], horizontal=True)
                 
-                from mlflow.tracking import MlflowClient
-                client = MlflowClient()
-                versions = client.search_model_versions(f"name='{selected_model_name}'")
-                version_nums = [v.version for v in versions]
-                selected_version = st.selectbox("Version", version_nums, key="stab_ver_sel")
+                loaded_pipeline = None
+                if model_source == "Registry":
+                    model_names = [m.name for m in models]
+                    selected_model_name = st.selectbox("Registered Model", model_names, key="stab_model_sel")
+                    
+                    from mlflow.tracking import MlflowClient
+                    client = MlflowClient()
+                    versions = client.search_model_versions(f"name='{selected_model_name}'")
+                    version_nums = [v.version for v in versions]
+                    selected_version = st.selectbox("Version", version_nums, key="stab_ver_sel")
+                    
+                    if selected_model_name and selected_version:
+                        loaded_pipeline = load_registered_model(selected_model_name, selected_version)
+                else:
+                    uploaded_model = st.file_uploader("Upload Model (.pkl, .joblib, .onnx)", type=["pkl", "joblib", "onnx"])
+                    if uploaded_model:
+                        if uploaded_model.name.endswith(".onnx"):
+                            st.warning("Note: Stability analysis requires retraining (`.fit()`). ONNX models compiled for inference may fail unless wrapped properly.")
+                        try:
+                            import joblib
+                            loaded_pipeline = joblib.load(uploaded_model)
+                            st.success("Model loaded from file!")
+                        except Exception as e:
+                            st.error(f"Failed to load model from file: {e}")
                 
                 stab_datasets = datalake.list_datasets()
                 stab_ref_ds = st.selectbox("Test Dataset (Data Lake)", [""] + stab_datasets, key="stab_ref_ds")
                 df_stab_ref = None
+                target_col = None
                 if stab_ref_ds:
                     stab_ref_ver = st.selectbox("Dataset Version", datalake.list_versions(stab_ref_ds), key="stab_ref_ver")
                     df_stab_ref = datalake.load_version(stab_ref_ds, stab_ref_ver)
                     st.success(f"Dataset Loaded: {df_stab_ref.shape[0]} rows")
                     
-                target_col = st.text_input("Target Column Name", value="target")
+                    # Dynamic Target Column Selection
+                    target_col = st.selectbox("Target Column Name", options=df_stab_ref.columns.tolist(), index=len(df_stab_ref.columns)-1)
+                    
                 task_type_sel = st.selectbox("Task Type", ["classification", "regression"])
             
             with col_stab2:
@@ -484,18 +505,42 @@ with tabs[4]:
                 test_type = st.radio("Select Stability Test", ["General Stability Check (Seed & Split)", "Seed Stability (Initialization)", "Split Stability (Data Variability)"], horizontal=True)
                 n_iters = st.slider("Number of Iterations / Splits", 2, 20, 5)
                 
-                if df_stab_ref is not None and target_col in df_stab_ref.columns:
+                if df_stab_ref is not None and target_col and target_col in df_stab_ref.columns and loaded_pipeline is not None:
                     if st.button("🚀 Run Stability Analysis", type="primary"):
                         with st.spinner(f"Running {test_type}..."):
                             try:
+                                # Unwrap MLflow PyFunc wrapper to expose underlying sklearn for `.clone()` & retraining
+                                actual_model = loaded_pipeline
+                                if hasattr(loaded_pipeline, "_model_impl"):
+                                    if hasattr(loaded_pipeline._model_impl, "sklearn_model"):
+                                        actual_model = loaded_pipeline._model_impl.sklearn_model
+                                    elif hasattr(loaded_pipeline._model_impl, "python_model") and hasattr(loaded_pipeline._model_impl.python_model, "pipeline"):
+                                        actual_model = loaded_pipeline._model_impl.python_model.pipeline
+                                        
                                 # Prepare Model and Data
-                                loaded_pipeline = load_registered_model(selected_model_name, selected_version)
+                                X_raw = df_stab_ref.drop(columns=[target_col])
+                                y_raw = df_stab_ref[target_col]
                                 
-                                X_stab = df_stab_ref.drop(columns=[target_col])
-                                y_stab = df_stab_ref[target_col]
+                                # Process Data using AutoMLDataProcessor
+                                from automl_engine import AutoMLDataProcessor
+                                processor = st.session_state.get('processor')
                                 
+                                if not processor:
+                                    st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
+                                    # Instantiate a fallback processor to encode categories/strings temporarily
+                                    processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
+                                    X_stab, y_stab = processor.fit_transform(df_stab_ref)
+                                else:
+                                    old_target = processor.target_column
+                                    processor.target_column = target_col
+                                    X_stab, y_stab = processor.transform(df_stab_ref)
+                                    processor.target_column = old_target
+                                    
+                                if y_stab is None:
+                                    y_stab = y_raw
+                                    
                                 from stability_engine import StabilityAnalyzer
-                                analyzer = StabilityAnalyzer(base_model=loaded_pipeline, X=X_stab, y=y_stab, task_type=task_type_sel)
+                                analyzer = StabilityAnalyzer(base_model=actual_model, X=X_stab, y=y_stab, task_type=task_type_sel)
                                 
                                 if "General Stability" in test_type:
                                     report = analyzer.run_general_stability_check(n_iterations=n_iters)

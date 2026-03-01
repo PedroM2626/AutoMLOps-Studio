@@ -86,7 +86,10 @@ class StabilityAnalyzer:
                 iter_metrics['seed'] = seed
                 metrics_history.append(iter_metrics)
             except Exception as e:
-                logger.error(f"Error in seed stability iteration {i}: {e}")
+                import traceback
+                error_msg = f"Error in seed stability iteration {i}: {e}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
             
         return pd.DataFrame(metrics_history)
 
@@ -121,7 +124,10 @@ class StabilityAnalyzer:
                 iter_metrics['split_seed'] = split_seed
                 metrics_history.append(iter_metrics)
             except Exception as e:
-                logger.error(f"Error in split stability iteration {i}: {e}")
+                import traceback
+                error_msg = f"Error in split stability iteration {i}: {e}\n{traceback.format_exc()}"
+                logger.error(error_msg)
+                raise RuntimeError(error_msg)
             
         return pd.DataFrame(metrics_history)
 
