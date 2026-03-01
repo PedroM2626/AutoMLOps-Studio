@@ -170,6 +170,253 @@ class StabilityAnalyzer:
             
         return pd.DataFrame(metrics_history)
 
+    def run_noise_injection_stability(self, noise_level=0.05, n_iterations=5):
+        """
+        Test stability against random noise (Gaussian for numeric, random flipping for categorical).
+        noise_level: Fraction of standard deviation for numeric noise, or fraction of rows to flip for categorical.
+        """
+        metrics_history = []
+        X_train, X_val, y_train, y_val = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=self.random_state
+        )
+        
+        # Identify types
+        is_df = isinstance(X_val, pd.DataFrame)
+        numeric_cols = []
+        cat_cols = []
+        if is_df:
+            numeric_cols = X_val.select_dtypes(include=[np.number]).columns.tolist()
+            cat_cols = X_val.select_dtypes(exclude=[np.number]).columns.tolist()
+        else:
+            # Assume all numeric if it's a numpy array
+            numeric_cols = list(range(X_val.shape[1]))
+            
+        std_devs = None
+        if len(numeric_cols) > 0:
+            std_devs = X_val[numeric_cols].std() if is_df else np.std(X_val, axis=0)
+            # handle zero std
+            if is_df:
+                std_devs = std_devs.replace(0, 1e-6)
+            else:
+                std_devs[std_devs == 0] = 1e-6
+                
+        # Train base model once
+        model = clone(self.base_model)
+        if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
+        elif hasattr(model, 'random_seed'): model.set_params(random_seed=self.random_state)
+        model.fit(X_train, y_train)
+
+        # Baseline (No Noise)
+        y_pred = model.predict(X_val)
+        y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
+        baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
+        baseline_metrics['iteration'] = -1
+        baseline_metrics['noise_type'] = 'baseline'
+        metrics_history.append(baseline_metrics)
+        
+        for i in range(n_iterations):
+            np.random.seed(self.random_state + i)
+            X_val_noisy = X_val.copy() if is_df else np.copy(X_val)
+            
+            # Numeric noise
+            if len(numeric_cols) > 0:
+                noise = np.random.normal(0, std_devs * noise_level, size=(X_val.shape[0], len(numeric_cols)))
+                if is_df:
+                    X_val_noisy[numeric_cols] = X_val_noisy[numeric_cols] + noise
+                else:
+                    X_val_noisy += noise
+                    
+            # Categorical noise (flipping)
+            if is_df and len(cat_cols) > 0:
+                for col in cat_cols:
+                    unique_vals = X_val[col].dropna().unique()
+                    if len(unique_vals) > 1:
+                        mask = np.random.rand(len(X_val_noisy)) < noise_level
+                        mask_sum = np.sum(mask)
+                        # Assign random categories to the masked rows
+                        random_cats = np.random.choice(unique_vals, size=mask_sum)
+                        X_val_noisy.loc[mask, col] = random_cats
+                        
+            # Predict on noisy data
+            y_pred_noisy = model.predict(X_val_noisy)
+            y_proba_noisy = model.predict_proba(X_val_noisy) if hasattr(model, "predict_proba") else None
+            
+            iter_metrics = self._get_metrics(y_val, y_pred_noisy, y_proba_noisy)
+            iter_metrics['iteration'] = i
+            iter_metrics['noise_type'] = f'noise_level_{noise_level}'
+            metrics_history.append(iter_metrics)
+            
+        return pd.DataFrame(metrics_history)
+
+    def run_slice_stability(self, slice_column):
+        """
+        Evaluate model performance across different groups (slices) of a categorical feature to test Fairness/Bias.
+        """
+        if not isinstance(self.X, pd.DataFrame):
+            raise ValueError("Slice stability requires X to be a pandas DataFrame.")
+        if slice_column not in self.X.columns:
+            raise ValueError(f"Column '{slice_column}' not found in X.")
+            
+        metrics_history = []
+        X_train, X_val, y_train, y_val = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=self.random_state
+        )
+        
+        # Train once
+        model = clone(self.base_model)
+        if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
+        elif hasattr(model, 'random_seed'): model.set_params(random_seed=self.random_state)
+        model.fit(X_train, y_train)
+
+        # Baseline (Overall)
+        y_pred = model.predict(X_val)
+        y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
+        baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
+        baseline_metrics['slice'] = 'OVERALL (Baseline)'
+        metrics_history.append(baseline_metrics)
+        
+        unique_slices = X_val[slice_column].unique()
+        
+        for val in unique_slices:
+            if pd.isna(val):
+                mask = X_val[slice_column].isna()
+            else:
+                mask = X_val[slice_column] == val
+                
+            mask_sum = np.sum(mask)
+            if mask_sum < 5:
+                # Skip slices that are too small
+                continue
+                
+            X_slice = X_val[mask]
+            y_slice = y_val[mask]
+            
+            y_pred_slice = model.predict(X_slice)
+            y_proba_slice = model.predict_proba(X_slice) if hasattr(model, "predict_proba") else None
+            
+            slice_metrics = self._get_metrics(y_slice, y_pred_slice, y_proba_slice)
+            slice_metrics['slice'] = str(val)
+            slice_metrics['support'] = int(mask_sum)
+            metrics_history.append(slice_metrics)
+            
+        df = pd.DataFrame(metrics_history)
+        # Reorder to make slice first
+        cols = ['slice'] + [c for c in df.columns if c != 'slice']
+        return df[cols]
+
+    def run_missing_value_robustness(self, missing_fractions=[0.05, 0.10, 0.20]):
+        """
+        Randomly drops values (NaNs) in the evaluation set to test imputation resilience.
+        """
+        metrics_history = []
+        X_train, X_val, y_train, y_val = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=self.random_state
+        )
+        
+        # Train once
+        model = clone(self.base_model)
+        if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
+        elif hasattr(model, 'random_seed'): model.set_params(random_seed=self.random_state)
+        model.fit(X_train, y_train)
+
+        # Baseline
+        y_pred = model.predict(X_val)
+        y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
+        baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
+        baseline_metrics['missing_fraction'] = 0.0
+        metrics_history.append(baseline_metrics)
+        
+        is_df = isinstance(X_val, pd.DataFrame)
+        
+        for frac in missing_fractions:
+            np.random.seed(self.random_state)
+            X_val_missing = X_val.copy() if is_df else np.copy(X_val)
+            
+            # Create a random mask for the entire matrix
+            # Only apply to numeric columns to avoid breaking text pipelines completely
+            target_cols = []
+            if is_df:
+                target_cols = [c for c in X_val.columns if pd.api.types.is_numeric_dtype(X_val[c])]
+            else:
+                target_cols = list(range(X_val.shape[1]))
+            
+            if len(target_cols) > 0:
+                 if is_df:
+                     mask = np.random.rand(X_val.shape[0], len(target_cols)) < frac
+                     # Use numpy assignment for speed
+                     vals = X_val_missing[target_cols].values
+                     # Cast vals to float so np.nan can be assigned without breaking ints
+                     vals = vals.astype(float)
+                     vals[mask] = np.nan
+                     X_val_missing[target_cols] = vals
+                 else:
+                     X_val_missing = X_val_missing.astype(float)
+                     mask = np.random.rand(*X_val.shape) < frac
+                     X_val_missing[mask] = np.nan
+
+            try:
+                y_pred_miss = model.predict(X_val_missing)
+                y_proba_miss = model.predict_proba(X_val_missing) if hasattr(model, "predict_proba") else None
+                
+                iter_metrics = self._get_metrics(y_val, y_pred_miss, y_proba_miss)
+                iter_metrics['missing_fraction'] = frac
+                metrics_history.append(iter_metrics)
+            except Exception as e:
+                # The model/pipeline lacks imputation logic
+                 iter_metrics = {'missing_fraction': frac, 'error': str(e)}
+                 metrics_history.append(iter_metrics)
+                 
+        return pd.DataFrame(metrics_history)
+
+    def run_calibration_stability(self, n_splits=5):
+        """
+        Evaluate Brier Score and calibration across CV splits (Classification only).
+        """
+        if self.task_type != 'classification':
+            raise ValueError("Calibration stability is only for classification tasks.")
+            
+        from sklearn.metrics import brier_score_loss
+            
+        metrics_history = []
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
+        
+        # Check if binary
+        is_binary = len(np.unique(self.y)) == 2
+        
+        for i, (train_idx, val_idx) in enumerate(cv.split(self.X, self.y)):
+            if isinstance(self.X, pd.DataFrame):
+                X_train, X_val = self.X.iloc[train_idx], self.X.iloc[val_idx]
+                y_train, y_val = self.y.iloc[train_idx], self.y.iloc[val_idx]
+            else:
+                X_train, X_val = self.X[train_idx], self.X[val_idx]
+                y_train, y_val = self.y[train_idx], self.y[val_idx]
+                
+            model = clone(self.base_model)
+            if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
+            
+            model.fit(X_train, y_train)
+            if not hasattr(model, "predict_proba"):
+                logger.warning("Model does not support predict_proba. Cannot calculate Brier score.")
+                break
+                
+            y_proba = model.predict_proba(X_val)
+            
+            iter_metrics = {'split': i}
+            if is_binary:
+                iter_metrics['brier_score'] = brier_score_loss(y_val, y_proba[:, 1])
+            else:
+                # Multiclass Brier score is the sum of binary Brier scores over classes
+                brier_sum = 0
+                for c in range(y_proba.shape[1]):
+                    # Binarize label
+                    y_val_bin = (y_val == model.classes_[c]).astype(int)
+                    brier_sum += brier_score_loss(y_val_bin, y_proba[:, c])
+                iter_metrics['brier_score'] = brier_sum / y_proba.shape[1]
+                
+            metrics_history.append(iter_metrics)
+            
+        return pd.DataFrame(metrics_history)
+
     def run_general_stability_check(self, n_iterations=10):
         """
         Runs a combined stability check (Seed + Split) to give a general assessment.

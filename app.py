@@ -477,12 +477,20 @@ with tabs[4]:
                 else:
                     uploaded_model = st.file_uploader("Upload Model (.pkl, .joblib, .onnx)", type=["pkl", "joblib", "onnx"])
                     if uploaded_model:
-                        if uploaded_model.name.endswith(".onnx"):
-                            st.warning("Note: Stability analysis requires retraining (`.fit()`). ONNX models compiled for inference may fail unless wrapped properly.")
                         try:
-                            import joblib
-                            loaded_pipeline = joblib.load(uploaded_model)
-                            st.success("Model loaded from file!")
+                            if uploaded_model.name.endswith(".onnx"):
+                                st.warning("Note: Stability analysis requires retraining (`.fit()`). ONNX models compiled for inference may fail unless wrapped properly.")
+                                import onnx
+                                loaded_pipeline = onnx.load(uploaded_model)
+                                st.success("ONNX Model loaded from file! (Warning: Stability testing might fail)")
+                            elif uploaded_model.name.endswith(".joblib"):
+                                import joblib
+                                loaded_pipeline = joblib.load(uploaded_model)
+                                st.success("Joblib Model loaded from file!")
+                            elif uploaded_model.name.endswith(".pkl"):
+                                import pickle
+                                loaded_pipeline = pickle.load(uploaded_model)
+                                st.success("Pickle Model loaded from file!")
                         except Exception as e:
                             st.error(f"Failed to load model from file: {e}")
                 
@@ -498,12 +506,41 @@ with tabs[4]:
                     # Dynamic Target Column Selection
                     target_col = st.selectbox("Target Column Name", options=df_stab_ref.columns.tolist(), index=len(df_stab_ref.columns)-1)
                     
-                task_type_sel = st.selectbox("Task Type", ["classification", "regression"])
+                task_type_sel = st.selectbox("Task Type", ["classification", "regression", "clustering", "time_series", "anomaly_detection"])
             
             with col_stab2:
                 st.markdown("#### 2. Stability Analysis Execution")
-                test_type = st.radio("Select Stability Test", ["General Stability Check (Seed & Split)", "Seed Stability (Initialization)", "Split Stability (Data Variability)"], horizontal=True)
-                n_iters = st.slider("Number of Iterations / Splits", 2, 20, 5)
+                test_type = st.radio("Select Stability Test", [
+                    "General Stability Check (Seed & Split)", 
+                    "Seed Stability (Initialization)", 
+                    "Split Stability (Data Variability)",
+                    "Noise Injection Robustness",
+                    "Slice Stability (Fairness/Bias)",
+                    "Missing Value Robustness",
+                    "Calibration Stability"
+                ])
+                
+                # Dynamic inputs based on test type
+                n_iters = 5
+                noise_level = 0.05
+                slice_col = None
+                
+                if "Seed Stability" in test_type or "Split Stability" in test_type or "General Stability" in test_type or "Noise" in test_type:
+                    n_iters = st.slider("Number of Iterations / Splits", 2, 20, 5)
+                    
+                if "Noise Injection" in test_type:
+                    noise_level = st.slider("Noise Level (Fraction of Std Dev / Flip Prob)", 0.01, 0.50, 0.05, 0.01)
+                    
+                if "Slice Stability" in test_type:
+                    if df_stab_ref is not None:
+                        cat_cols = df_stab_ref.select_dtypes(exclude=[np.number]).columns.tolist()
+                        if cat_cols:
+                            slice_col = st.selectbox("Select Categorical Feature to Slice (Fairness Test)", cat_cols)
+                        else:
+                            st.warning("No categorical columns found in the dataset for Slice Stability.")
+                    
+                if "Calibration" in test_type:
+                    st.info("ℹ️ Calibration stability uses Cross-Validation (5 splits) to calculate the Brier Score.")
                 
                 if df_stab_ref is not None and target_col and target_col in df_stab_ref.columns and loaded_pipeline is not None:
                     if st.button("🚀 Run Stability Analysis", type="primary"):
@@ -570,6 +607,38 @@ with tabs[4]:
                                     st.dataframe(agg_res)
                                     with st.expander("View Raw Iterations Data"):
                                         st.dataframe(raw_res)
+                                        
+                                elif "Noise Injection" in test_type:
+                                    raw_res = analyzer.run_noise_injection_stability(noise_level=noise_level, n_iterations=n_iters)
+                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                    st.markdown(f"**Results under {noise_level*100:.1f}% noise**")
+                                    st.dataframe(agg_res)
+                                    with st.expander("View Raw Iterations Data"):
+                                        st.dataframe(raw_res)
+                                        
+                                elif "Slice Stability" in test_type:
+                                    if slice_col:
+                                        res = analyzer.run_slice_stability(slice_col)
+                                        st.markdown(f"**Fairness & Slice Stability across `{slice_col}`**")
+                                        st.dataframe(res)
+                                    else:
+                                        st.error("Please select a categorical column to test slice stability.")
+                                        
+                                elif "Missing Value" in test_type:
+                                    res = analyzer.run_missing_value_robustness()
+                                    st.markdown("**Imputation Resilience (Performance at different NaN rates)**")
+                                    st.dataframe(res)
+                                    
+                                elif "Calibration" in test_type:
+                                    if task_type_sel != "classification":
+                                        st.error("Calibration test is only available for Classification tasks.")
+                                    else:
+                                        res = analyzer.run_calibration_stability(n_splits=5)
+                                        st.markdown("**Cross-Validated Brier Scores (Lower is better)**")
+                                        metrics = analyzer.calculate_stability_metrics(res)
+                                        st.dataframe(metrics)
+                                        with st.expander("View Splits"):
+                                            st.dataframe(res)
                                         
                                 st.success("Analysis Complete!")
                                 
