@@ -507,143 +507,191 @@ with tabs[4]:
                     target_col = st.selectbox("Target Column Name", options=df_stab_ref.columns.tolist(), index=len(df_stab_ref.columns)-1)
                     
                 task_type_sel = st.selectbox("Task Type", ["classification", "regression", "clustering", "time_series", "anomaly_detection"])
+                
+                # Pre-unwrap actual_model strictly for UI param reading
+                actual_model = None
+                if loaded_pipeline is not None:
+                    actual_model = loaded_pipeline
+                    if hasattr(loaded_pipeline, "_model_impl"):
+                        if hasattr(loaded_pipeline._model_impl, "sklearn_model"):
+                            actual_model = loaded_pipeline._model_impl.sklearn_model
+                        elif hasattr(loaded_pipeline._model_impl, "python_model") and hasattr(loaded_pipeline._model_impl.python_model, "pipeline"):
+                            actual_model = loaded_pipeline._model_impl.python_model.pipeline
             
             with col_stab2:
                 st.markdown("#### 2. Stability Analysis Execution")
-                test_type = st.radio("Select Stability Test", [
+                test_types = st.multiselect("Select Stability Tests", [
                     "General Stability Check (Seed & Split)", 
                     "Seed Stability (Initialization)", 
                     "Split Stability (Data Variability)",
+                    "Hyperparameter Stability",
                     "Noise Injection Robustness",
                     "Slice Stability (Fairness/Bias)",
                     "Missing Value Robustness",
                     "Calibration Stability"
-                ])
+                ], default=["General Stability Check (Seed & Split)"])
                 
                 # Dynamic inputs based on test type
-                n_iters = 5
+                test_types_str = " ".join(test_types)
+                n_iters = 3  # Default lowered for performance
                 noise_level = 0.05
                 slice_col = None
+                hp_name = None
+                hp_vals = None
                 
-                if "Seed Stability" in test_type or "Split Stability" in test_type or "General Stability" in test_type or "Noise" in test_type:
-                    n_iters = st.slider("Number of Iterations / Splits", 2, 20, 5)
+                if any(t in test_types_str for t in ["Seed", "Split", "General", "Noise"]):
+                    n_iters = st.slider("Number of Iterations / Splits", 2, 20, 3)
                     
-                if "Noise Injection" in test_type:
+                if "Noise Injection Robustness" in test_types:
                     noise_level = st.slider("Noise Level (Fraction of Std Dev / Flip Prob)", 0.01, 0.50, 0.05, 0.01)
                     
-                if "Slice Stability" in test_type:
+                if "Slice Stability (Fairness/Bias)" in test_types:
                     if df_stab_ref is not None:
                         cat_cols = df_stab_ref.select_dtypes(exclude=[np.number]).columns.tolist()
                         if cat_cols:
                             slice_col = st.selectbox("Select Categorical Feature to Slice (Fairness Test)", cat_cols)
                         else:
                             st.warning("No categorical columns found in the dataset for Slice Stability.")
+                            
+                if "Hyperparameter Stability" in test_types:
+                    if actual_model is not None and hasattr(actual_model, "get_params"):
+                        params = list(actual_model.get_params().keys())
+                        if params:
+                            hp_name = st.selectbox("Select Hyperparameter to vary", params)
+                            hp_vals_str = st.text_input("Values to test (comma-separated)", "2, 4, 8")
+                            try:
+                                # Simple parsing
+                                hp_vals = []
+                                for v in hp_vals_str.split(","):
+                                    v = v.strip()
+                                    if v.isdigit(): hp_vals.append(int(v))
+                                    elif '.' in v: hp_vals.append(float(v))
+                                    elif v.lower() == 'none': hp_vals.append(None)
+                                    elif v.lower() == 'true': hp_vals.append(True)
+                                    elif v.lower() == 'false': hp_vals.append(False)
+                                    else: hp_vals.append(v)
+                            except:
+                                hp_vals = [v.strip() for v in hp_vals_str.split(",")]
+                        else:
+                            st.warning("Model does not expose hyperparameters.")
+                    else:
+                        st.info("Load a model first to view its hyperparameters.")
                     
-                if "Calibration" in test_type:
+                if "Calibration Stability" in test_types:
                     st.info("ℹ️ Calibration stability uses Cross-Validation (5 splits) to calculate the Brier Score.")
                 
                 if df_stab_ref is not None and target_col and target_col in df_stab_ref.columns and loaded_pipeline is not None:
                     if st.button("🚀 Run Stability Analysis", type="primary"):
-                        with st.spinner(f"Running {test_type}..."):
-                            try:
-                                # Unwrap MLflow PyFunc wrapper to expose underlying sklearn for `.clone()` & retraining
-                                actual_model = loaded_pipeline
-                                if hasattr(loaded_pipeline, "_model_impl"):
-                                    if hasattr(loaded_pipeline._model_impl, "sklearn_model"):
-                                        actual_model = loaded_pipeline._model_impl.sklearn_model
-                                    elif hasattr(loaded_pipeline._model_impl, "python_model") and hasattr(loaded_pipeline._model_impl.python_model, "pipeline"):
-                                        actual_model = loaded_pipeline._model_impl.python_model.pipeline
-                                        
-                                # Prepare Model and Data
-                                X_raw = df_stab_ref.drop(columns=[target_col])
-                                y_raw = df_stab_ref[target_col]
-                                
-                                # Process Data using AutoMLDataProcessor
-                                from automl_engine import AutoMLDataProcessor
-                                processor = st.session_state.get('processor')
-                                
-                                if not processor:
-                                    st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
-                                    # Instantiate a fallback processor to encode categories/strings temporarily
-                                    processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
-                                    X_stab, y_stab = processor.fit_transform(df_stab_ref)
-                                else:
-                                    old_target = processor.target_column
-                                    processor.target_column = target_col
-                                    X_stab, y_stab = processor.transform(df_stab_ref)
-                                    processor.target_column = old_target
+                        if not test_types:
+                            st.warning("Please select at least one stability test to run.")
+                        else:
+                            with st.spinner("Preparing stability engine..."):
+                                try:
+                                    # Prepare Model and Data
+                                    X_raw = df_stab_ref.drop(columns=[target_col])
+                                    y_raw = df_stab_ref[target_col]
                                     
-                                if y_stab is None:
-                                    y_stab = y_raw
+                                    # Process Data using AutoMLDataProcessor
+                                    from automl_engine import AutoMLDataProcessor
+                                    processor = st.session_state.get('processor')
                                     
-                                from stability_engine import StabilityAnalyzer
-                                analyzer = StabilityAnalyzer(base_model=actual_model, X=X_stab, y=y_stab, task_type=task_type_sel)
-                                
-                                if "General Stability" in test_type:
-                                    report = analyzer.run_general_stability_check(n_iterations=n_iters)
+                                    if not processor:
+                                        st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
+                                        processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
+                                        X_stab, y_stab = processor.fit_transform(df_stab_ref)
+                                    else:
+                                        old_target = processor.target_column
+                                        processor.target_column = target_col
+                                        X_stab, y_stab = processor.transform(df_stab_ref)
+                                        processor.target_column = old_target
+                                        
+                                    if y_stab is None:
+                                        y_stab = y_raw
+                                        
+                                    from stability_engine import StabilityAnalyzer
+                                    analyzer = StabilityAnalyzer(base_model=actual_model, X=X_stab, y=y_stab, task_type=task_type_sel)
                                     
-                                    st.markdown("##### 🎲 Seed Stability (Initialization Variance)")
-                                    if not report['seed_stability'].empty:
-                                        st.dataframe(report['seed_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
-                                    else:
-                                        st.warning("Seed test yielded empty metrics.")
-                                        
-                                    st.markdown("##### 🔀 Split Stability (Data Variance)")
-                                    if not report['split_stability'].empty:
-                                        st.dataframe(report['split_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
-                                    else:
-                                        st.warning("Split test yielded empty metrics.")
-                                        
-                                elif "Seed Stability" in test_type:
-                                    raw_res = analyzer.run_seed_stability(n_iterations=n_iters)
-                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
-                                    st.dataframe(agg_res)
-                                    with st.expander("View Raw Iterations Data"):
-                                        st.dataframe(raw_res)
-                                        
-                                elif "Split Stability" in test_type:
-                                    raw_res = analyzer.run_split_stability(n_splits=n_iters)
-                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
-                                    st.dataframe(agg_res)
-                                    with st.expander("View Raw Iterations Data"):
-                                        st.dataframe(raw_res)
-                                        
-                                elif "Noise Injection" in test_type:
-                                    raw_res = analyzer.run_noise_injection_stability(noise_level=noise_level, n_iterations=n_iters)
-                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
-                                    st.markdown(f"**Results under {noise_level*100:.1f}% noise**")
-                                    st.dataframe(agg_res)
-                                    with st.expander("View Raw Iterations Data"):
-                                        st.dataframe(raw_res)
-                                        
-                                elif "Slice Stability" in test_type:
-                                    if slice_col:
-                                        res = analyzer.run_slice_stability(slice_col)
-                                        st.markdown(f"**Fairness & Slice Stability across `{slice_col}`**")
-                                        st.dataframe(res)
-                                    else:
-                                        st.error("Please select a categorical column to test slice stability.")
-                                        
-                                elif "Missing Value" in test_type:
-                                    res = analyzer.run_missing_value_robustness()
-                                    st.markdown("**Imputation Resilience (Performance at different NaN rates)**")
-                                    st.dataframe(res)
+                                    # Execute Tests Sequentially
+                                    for t_idx, tt in enumerate(test_types):
+                                        st.markdown(f"---")
+                                        st.markdown(f"### ⚙️ {tt}")
+                                        with st.spinner(f"Running {tt}..."):
+                                            if "General Stability" in tt:
+                                                report = analyzer.run_general_stability_check(n_iterations=n_iters)
+                                                
+                                                st.markdown("##### 🎲 Seed Stability (Initialization Variance)")
+                                                if not report['seed_stability'].empty:
+                                                    st.dataframe(report['seed_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
+                                                else:
+                                                    st.warning("Seed test yielded empty metrics.")
+                                                    
+                                                st.markdown("##### 🔀 Split Stability (Data Variance)")
+                                                if not report['split_stability'].empty:
+                                                    st.dataframe(report['split_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
+                                                else:
+                                                    st.warning("Split test yielded empty metrics.")
+                                                    
+                                            elif "Seed Stability" in tt:
+                                                raw_res = analyzer.run_seed_stability(n_iterations=n_iters)
+                                                agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                                st.dataframe(agg_res)
+                                                with st.expander("View Raw Iterations Data"):
+                                                    st.dataframe(raw_res)
+                                                    
+                                            elif "Split Stability" in tt:
+                                                raw_res = analyzer.run_split_stability(n_splits=n_iters)
+                                                agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                                st.dataframe(agg_res)
+                                                with st.expander("View Raw Iterations Data"):
+                                                    st.dataframe(raw_res)
+                                                    
+                                            elif "Hyperparameter Stability" in tt:
+                                                if hp_name and hp_vals:
+                                                    raw_res = analyzer.run_hyperparameter_stability(hp_name, hp_vals)
+                                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                                    st.markdown(f"**Hyperparameter:** `{hp_name}`")
+                                                    st.dataframe(agg_res)
+                                                    with st.expander("View Raw Iterations Data"):
+                                                        st.dataframe(raw_res)
+                                                else:
+                                                    st.error("Missing hyperparameter configuration.")
+                                                    
+                                            elif "Noise Injection" in tt:
+                                                raw_res = analyzer.run_noise_injection_stability(noise_level=noise_level, n_iterations=n_iters)
+                                                agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                                st.markdown(f"**Results under {noise_level*100:.1f}% noise**")
+                                                st.dataframe(agg_res)
+                                                with st.expander("View Raw Iterations Data"):
+                                                    st.dataframe(raw_res)
+                                                    
+                                            elif "Slice Stability" in tt:
+                                                if slice_col:
+                                                    res = analyzer.run_slice_stability(slice_col)
+                                                    st.markdown(f"**Fairness & Slice Stability across `{slice_col}`**")
+                                                    st.dataframe(res)
+                                                else:
+                                                    st.error("Please select a categorical column to test slice stability.")
+                                                    
+                                            elif "Missing Value" in tt:
+                                                res = analyzer.run_missing_value_robustness()
+                                                st.markdown("**Imputation Resilience (Performance at different NaN rates)**")
+                                                st.dataframe(res)
+                                                
+                                            elif "Calibration" in tt:
+                                                if task_type_sel != "classification":
+                                                    st.error("Calibration test is only available for Classification tasks.")
+                                                else:
+                                                    res = analyzer.run_calibration_stability(n_splits=5)
+                                                    st.markdown("**Cross-Validated Brier Scores (Lower is better)**")
+                                                    metrics = analyzer.calculate_stability_metrics(res)
+                                                    st.dataframe(metrics)
+                                                    with st.expander("View Splits"):
+                                                        st.dataframe(res)
+                                            
+                                    st.success("Analysis Complete!")
                                     
-                                elif "Calibration" in test_type:
-                                    if task_type_sel != "classification":
-                                        st.error("Calibration test is only available for Classification tasks.")
-                                    else:
-                                        res = analyzer.run_calibration_stability(n_splits=5)
-                                        st.markdown("**Cross-Validated Brier Scores (Lower is better)**")
-                                        metrics = analyzer.calculate_stability_metrics(res)
-                                        st.dataframe(metrics)
-                                        with st.expander("View Splits"):
-                                            st.dataframe(res)
-                                        
-                                st.success("Analysis Complete!")
-                                
-                            except Exception as e:
-                                st.error(f"Error executing Stability Analysis: {e}")
+                                except Exception as e:
+                                    st.error(f"Error executing Stability Analysis: {e}")
                 elif df_stab_ref is not None:
                     st.error(f"Target column '{target_col}' not found in the selected dataset.")
                 else:
