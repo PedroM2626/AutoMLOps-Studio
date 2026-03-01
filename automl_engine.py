@@ -1538,6 +1538,9 @@ class AutoMLTrainer:
                 if best_trial_for_model:
                     logger.info(f"Best trial for {m_name}: Trial {best_trial_for_model.number} (Score: {best_score_for_model:.4f})")
                     
+                    # Recuperar métricas salvas durante o trial (incluindo consumption_code)
+                    trial_metrics = self.model_summaries.get(m_name, {}).get('metrics', {})
+                    
                     # 2. Re-instantiate the best model
                     best_params_model = best_trial_for_model.params.copy()
                     best_params_model['model_name'] = m_name # Ensure model name is present
