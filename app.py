@@ -594,17 +594,25 @@ with tabs[4]:
                                     
                                     # Process Data using AutoMLDataProcessor
                                     from automl_engine import AutoMLDataProcessor
-                                    processor = st.session_state.get('processor')
+                                    from sklearn.pipeline import Pipeline
+                                    is_pipeline = isinstance(actual_model, Pipeline)
                                     
-                                    if not processor:
-                                        st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
-                                        processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
-                                        X_stab, y_stab = processor.fit_transform(df_stab_ref)
+                                    if is_pipeline:
+                                        # If the loaded model is already a Pipeline, it expects raw DataFrame input.
+                                        X_stab, y_stab = X_raw, y_raw
+                                        processor = None # Override to None since internal transformer handles it
                                     else:
-                                        old_target = processor.target_column
-                                        processor.target_column = target_col
-                                        X_stab, y_stab = processor.transform(df_stab_ref)
-                                        processor.target_column = old_target
+                                        # Use or create an external processor for bare estimators
+                                        processor = st.session_state.get('processor')
+                                        if not processor:
+                                            st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
+                                            processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
+                                            X_stab, y_stab = processor.fit_transform(df_stab_ref)
+                                        else:
+                                            old_target = processor.target_column
+                                            processor.target_column = target_col
+                                            X_stab, y_stab = processor.transform(df_stab_ref)
+                                            processor.target_column = old_target
                                         
                                     if y_stab is None:
                                         y_stab = y_raw
@@ -693,7 +701,22 @@ with tabs[4]:
                                                             st.dataframe(res)
                                                             
                                             elif "NLP Text" in tt:
-                                                res = analyzer.run_nlp_robustness(n_iterations=n_iters, typo_probability=0.1)
+                                                tf_func = processor.transform if processor else None
+                                                if tf_func:
+                                                    # Need to temporarily unset target_column on processor so it doesn't fail parsing raw X
+                                                    old_tgt = processor.target_column
+                                                    processor.target_column = None
+                                                
+                                                res = analyzer.run_nlp_robustness(
+                                                    n_iterations=n_iters, 
+                                                    typo_probability=0.1,
+                                                    X_raw=X_raw,
+                                                    transform_func=tf_func
+                                                )
+                                                
+                                                if tf_func:
+                                                    processor.target_column = old_tgt
+                                                    
                                                 st.markdown("**NLP Robustness (Text Injection/Typos)**")
                                                 if 'error' in res.columns:
                                                     st.error(res.iloc[0]['error'])
@@ -706,7 +729,11 @@ with tabs[4]:
                                     st.success("Analysis Complete!")
                                     
                                 except Exception as e:
+                                    import traceback
+                                    err_trace = traceback.format_exc()
                                     st.error(f"Error executing Stability Analysis: {e}")
+                                    with open('error_trace.txt', 'w') as f:
+                                        f.write(err_trace)
                 elif df_stab_ref is not None:
                     st.error(f"Target column '{target_col}' not found in the selected dataset.")
                 else:

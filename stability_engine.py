@@ -207,12 +207,16 @@ class StabilityAnalyzer:
         model.fit(X_train, y_train)
 
         # Baseline (No Noise)
-        y_pred = model.predict(X_val)
-        y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
-        baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
-        baseline_metrics['iteration'] = -1
-        baseline_metrics['noise_type'] = 'baseline'
-        metrics_history.append(baseline_metrics)
+        try:
+            y_pred = model.predict(X_val)
+            y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
+            baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
+            baseline_metrics['iteration'] = -1
+            baseline_metrics['noise_type'] = 'baseline'
+            metrics_history.append(baseline_metrics)
+        except Exception as e:
+            logger.error(f"Error calculating baseline metrics for noise stability: {e}")
+            metrics_history.append({'iteration': -1, 'noise_type': 'baseline', 'error': str(e)})
         
         for i in range(n_iterations):
             np.random.seed(self.random_state + i)
@@ -444,29 +448,44 @@ class StabilityAnalyzer:
         }
         return combined_report
 
-    def run_nlp_robustness(self, n_iterations=3, typo_probability=0.1):
+    def run_nlp_robustness(self, n_iterations=3, typo_probability=0.1, X_raw=None, transform_func=None):
         """
         Simulates typos and character dropping in text columns to test NLP robustness.
         """
         metrics_history = []
-        is_df = isinstance(self.X, pd.DataFrame)
+        X_to_use = X_raw if X_raw is not None else self.X
+        is_df = isinstance(X_to_use, pd.DataFrame)
         
         if not is_df:
-            return pd.DataFrame([{'iteration': 'N/A', 'error': 'NLP Robustness requires a Pandas DataFrame with explicit text columns.'}])
+            return pd.DataFrame([{'iteration': -1, 'error': 'NLP Robustness requires a Pandas DataFrame with explicit text columns.'}])
             
-        object_cols = [c for c in self.X.columns if self.X[c].dtype == 'object' or self.X[c].dtype.name == 'category']
+        # Ensure X_to_use and self.y have the same number of rows
+        if len(X_to_use) != len(self.y):
+            logger.warning(f"Length mismatch in run_nlp_robustness: X_raw ({len(X_to_use)}) != y ({len(self.y)}). Attempting to align...")
+            if len(X_to_use) > len(self.y):
+                # This often happens if the processor dropped some rows (e.g. NaNs)
+                # If X_to_use is a DataFrame, we try to match indices if self.y is a Series
+                if isinstance(self.y, (pd.Series, pd.DataFrame)):
+                    X_to_use = X_to_use.loc[self.y.index]
+                else:
+                    # If self.y is a numpy array, we assume the first N rows correspond (risky but better than crashing)
+                    X_to_use = X_to_use.iloc[:len(self.y)]
+            else:
+                return pd.DataFrame([{'iteration': -1, 'error': f'Inconsistent number of samples: X={len(X_to_use)}, y={len(self.y)}'}])
+
+        object_cols = [c for c in X_to_use.columns if X_to_use[c].dtype == 'object' or X_to_use[c].dtype.name == 'category']
         
-        # Heuristic: Find text columns (strings longer than typical short categories)
-        text_cols = []
-        for c in object_cols:
-            # We assume a column is text if it has a high average length or many unique values
-            if len(self.X[c].unique()) > 10:
-                text_cols.append(c)
+        # We consider all string/object columns as valid targets for typo injection
+        text_cols = list(object_cols)
                 
         if len(text_cols) == 0:
-            return pd.DataFrame([{'iteration': 'N/A', 'error': 'No suitable text columns detected for NLP Robustness.'}])
+            return pd.DataFrame([{'iteration': -1, 'error': 'No suitable text columns detected for NLP Robustness.'}])
 
-        X_train, X_val, y_train, y_val = train_test_split(
+        X_train_raw, X_val_raw, y_train, y_val = train_test_split(
+            X_to_use, self.y, test_size=0.2, random_state=self.random_state
+        )
+        
+        X_train, X_val, _, _ = train_test_split(
             self.X, self.y, test_size=0.2, random_state=self.random_state
         )
         
@@ -480,7 +499,7 @@ class StabilityAnalyzer:
         y_pred = model.predict(X_val)
         y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
         baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
-        baseline_metrics['iteration'] = 'baseline'
+        baseline_metrics['iteration'] = -1
         baseline_metrics['noise_type'] = 'None'
         metrics_history.append(baseline_metrics)
         
@@ -500,10 +519,22 @@ class StabilityAnalyzer:
 
         for i in range(n_iterations):
             np.random.seed(self.random_state + i)
-            X_val_noisy = X_val.copy()
+            X_val_noisy_raw = X_val_raw.copy()
             
             for c in text_cols:
-                X_val_noisy[c] = X_val_noisy[c].apply(lambda x: inject_typos(x, p=typo_probability))
+                X_val_noisy_raw[c] = X_val_noisy_raw[c].apply(lambda x: inject_typos(x, p=typo_probability))
+                
+            if transform_func is not None:
+                try:
+                    out = transform_func(X_val_noisy_raw)
+                    if isinstance(out, tuple) and len(out) == 2:
+                        X_val_noisy = out[0]
+                    else:
+                        X_val_noisy = out
+                except Exception as e:
+                    return pd.DataFrame([{'iteration': i, 'error': f'Preprocessor transform failed on noisy data: {e}'}])
+            else:
+                X_val_noisy = X_val_noisy_raw
                 
             y_pred_noisy = model.predict(X_val_noisy)
             y_proba_noisy = model.predict_proba(X_val_noisy) if hasattr(model, "predict_proba") else None
