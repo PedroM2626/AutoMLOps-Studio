@@ -307,9 +307,12 @@ with tabs[0]:
 # --- TAB 4: MLOPS MONITORING ---
 with tabs[4]:
     st.header("📉 ML Monitoring & Observability")
-    st.markdown("Monitor deployed models for Data Drift and Concept Drift using telemetry data from the API.")
+    st.markdown("Monitor deployed models for Data Drift, Concept Drift, and assess overall Model Robustness & Stability.")
 
-    col_mon1, col_mon2 = st.columns([1, 2])
+    mon_tabs = st.tabs(["Production Drift", "Model Robustness & Stability"])
+    
+    with mon_tabs[0]:
+        col_mon1, col_mon2 = st.columns([1, 2])
 
     with col_mon1:
         st.subheader("1. Reference Data (Baseline)")
@@ -443,6 +446,94 @@ with tabs[4]:
                         st.error(f"Error during drift analysis: {e}")
         else:
             st.info("👈 Load both Baseline and Telemetry data to run Drift Analysis.")
+
+    with mon_tabs[1]:
+        st.subheader("🛡️ Model Robustness & Stability")
+        st.markdown("Run live stability tests on your Registered Models against specific Base Datasets.")
+        
+        models = get_registered_models()
+        if not models:
+            st.warning("No models found in Registry. Please register a model from Experiments first.")
+        else:
+            col_stab1, col_stab2 = st.columns([1, 2])
+            
+            with col_stab1:
+                st.markdown("#### 1. Configuration")
+                model_names = [m.name for m in models]
+                selected_model_name = st.selectbox("Registered Model", model_names, key="stab_model_sel")
+                
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                versions = client.search_model_versions(f"name='{selected_model_name}'")
+                version_nums = [v.version for v in versions]
+                selected_version = st.selectbox("Version", version_nums, key="stab_ver_sel")
+                
+                stab_datasets = datalake.list_datasets()
+                stab_ref_ds = st.selectbox("Test Dataset (Data Lake)", [""] + stab_datasets, key="stab_ref_ds")
+                df_stab_ref = None
+                if stab_ref_ds:
+                    stab_ref_ver = st.selectbox("Dataset Version", datalake.list_versions(stab_ref_ds), key="stab_ref_ver")
+                    df_stab_ref = datalake.load_version(stab_ref_ds, stab_ref_ver)
+                    st.success(f"Dataset Loaded: {df_stab_ref.shape[0]} rows")
+                    
+                target_col = st.text_input("Target Column Name", value="target")
+                task_type_sel = st.selectbox("Task Type", ["classification", "regression"])
+            
+            with col_stab2:
+                st.markdown("#### 2. Stability Analysis Execution")
+                test_type = st.radio("Select Stability Test", ["General Stability Check (Seed & Split)", "Seed Stability (Initialization)", "Split Stability (Data Variability)"], horizontal=True)
+                n_iters = st.slider("Number of Iterations / Splits", 2, 20, 5)
+                
+                if df_stab_ref is not None and target_col in df_stab_ref.columns:
+                    if st.button("🚀 Run Stability Analysis", type="primary"):
+                        with st.spinner(f"Running {test_type}..."):
+                            try:
+                                # Prepare Model and Data
+                                loaded_pipeline = load_registered_model(selected_model_name, selected_version)
+                                
+                                X_stab = df_stab_ref.drop(columns=[target_col])
+                                y_stab = df_stab_ref[target_col]
+                                
+                                from stability_engine import StabilityAnalyzer
+                                analyzer = StabilityAnalyzer(base_model=loaded_pipeline, X=X_stab, y=y_stab, task_type=task_type_sel)
+                                
+                                if "General Stability" in test_type:
+                                    report = analyzer.run_general_stability_check(n_iterations=n_iters)
+                                    
+                                    st.markdown("##### 🎲 Seed Stability (Initialization Variance)")
+                                    if not report['seed_stability'].empty:
+                                        st.dataframe(report['seed_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
+                                    else:
+                                        st.warning("Seed test yielded empty metrics.")
+                                        
+                                    st.markdown("##### 🔀 Split Stability (Data Variance)")
+                                    if not report['split_stability'].empty:
+                                        st.dataframe(report['split_stability'][['mean', 'std', 'stability_score']].style.highlight_max(axis=0, subset=['stability_score'], color='lightgreen'))
+                                    else:
+                                        st.warning("Split test yielded empty metrics.")
+                                        
+                                elif "Seed Stability" in test_type:
+                                    raw_res = analyzer.run_seed_stability(n_iterations=n_iters)
+                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                    st.dataframe(agg_res)
+                                    with st.expander("View Raw Iterations Data"):
+                                        st.dataframe(raw_res)
+                                        
+                                elif "Split Stability" in test_type:
+                                    raw_res = analyzer.run_split_stability(n_splits=n_iters)
+                                    agg_res = analyzer.calculate_stability_metrics(raw_res)
+                                    st.dataframe(agg_res)
+                                    with st.expander("View Raw Iterations Data"):
+                                        st.dataframe(raw_res)
+                                        
+                                st.success("Analysis Complete!")
+                                
+                            except Exception as e:
+                                st.error(f"Error executing Stability Analysis: {e}")
+                elif df_stab_ref is not None:
+                    st.error(f"Target column '{target_col}' not found in the selected dataset.")
+                else:
+                    st.info("Wait for dataset selection to enable analysis.")
     with data_tabs[1]:
         st.subheader("📉 Data Drift Analysis")
         st.markdown("Compare two datasets (e.g., Training vs Inference) to detect distribution shifts.")
