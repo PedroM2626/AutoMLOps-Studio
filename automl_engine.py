@@ -1909,6 +1909,30 @@ class AutoMLTrainer:
                                         mlflow.log_figure(fig_obj, f"{plot_name}.png")
                                     except Exception as e:
                                         logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
+                                
+                                # Generate and Log Model Card
+                                from mlops_utils import generate_model_card
+                                import os
+                                try:
+                                    mc_content = generate_model_card(
+                                        model_name=m_name,
+                                        params=best_params_model,
+                                        metrics=report_metrics,
+                                        feature_names=self.feature_names,
+                                        task_type=self.task_type,
+                                        duration=trial_metrics.get('duration', 0.0)
+                                    )
+                                    temp_mc_path = f"model_card_{m_name}.md"
+                                    with open(temp_mc_path, "w", encoding="utf-8") as f:
+                                        f.write(mc_content)
+                                    
+                                    mlflow.log_artifact(temp_mc_path)
+                                    os.remove(temp_mc_path)
+                                    # Add to trial_metrics so UI can catch it
+                                    trial_metrics['model_card'] = mc_content
+                                except Exception as mc_err:
+                                    logger.warning(f"Failed to generate/log Model Card for {m_name}: {mc_err}")
+
                     except Exception as ml_err:
                         logger.warning(f"MLflow logging failed for report: {ml_err}. Continuing to UI callback.")
                 

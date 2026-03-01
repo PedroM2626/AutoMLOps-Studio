@@ -267,7 +267,8 @@ tabs = st.tabs([
     "Data", 
     "AutoML & CV", 
     "Experiments", 
-    "Model Registry & Deploy"
+    "Model Registry & Deploy",
+    "Monitoring 📉"
 ])
 
 # --- TAB 0: DATA & DRIFT ---
@@ -297,15 +298,155 @@ with tabs[0]:
             if selected_ds:
                 versions = datalake.list_versions(selected_ds)
                 selected_ver = st.selectbox("Select Version", versions)
-                if st.button("Load into Workspace"):
-                    st.session_state['df'] = datalake.load_version(selected_ds, selected_ver)
-                    st.success(f"Loaded {selected_ds} ({selected_ver})")
-                    st.rerun()
+                if st.button("Delete Model Version"):
+                    from mlops_utils import get_model_registry
+                    if get_model_registry().delete_model_version(selected_ds, selected_ver):
+                        st.success("Version deleted!")
+                        st.rerun()
 
+# --- TAB 4: MLOPS MONITORING ---
+with tabs[4]:
+    st.header("📉 ML Monitoring & Observability")
+    st.markdown("Monitor deployed models for Data Drift and Concept Drift using telemetry data from the API.")
+
+    col_mon1, col_mon2 = st.columns([1, 2])
+
+    with col_mon1:
+        st.subheader("1. Reference Data (Baseline)")
+        st.info("The Baseline is usually the training dataset stored in your Data Lake.")
+        mon_datasets = datalake.list_datasets()
+        mon_ref_ds = st.selectbox("Select Baseline Dataset", [""] + mon_datasets, key="mon_ref_ds")
+        df_baseline = None
+        if mon_ref_ds:
+            mon_ref_ver = st.selectbox("Baseline Version", datalake.list_versions(mon_ref_ds), key="mon_ref_ver")
+            df_baseline = datalake.load_version(mon_ref_ds, mon_ref_ver)
+            st.success(f"Loaded Baseline: {df_baseline.shape[0]} rows")
+
+        st.subheader("2. Production Telemetry")
+        st.info("Telemetry data collected from the `/predict` API endpoint.")
+
+        # Load Telemetry Data
+        telemetry_path = os.path.join("data_lake", "monitoring", "api_telemetry.csv")
+        df_telemetry = None
+        if os.path.exists(telemetry_path):
+            try:
+                df_telemetry = pd.read_csv(telemetry_path)
+                st.success(f"Found {len(df_telemetry)} prediction logs.")
+
+                # Filter by timeframe option
+                days_filter = st.slider("Analyze last N days", 1, 30, 7)
+                if '__timestamp' in df_telemetry.columns:
+                    df_telemetry['__timestamp'] = pd.to_datetime(df_telemetry['__timestamp'])
+                    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
+                    df_telemetry = df_telemetry[df_telemetry['__timestamp'] >= cutoff_date]
+                    st.caption(f"Filtered to {len(df_telemetry)} recent logs.")
+            except Exception as e:
+                st.error(f"Error loading telemetry: {e}")
+        else:
+            st.warning("No telemetry data found. Send requests to the API first.")
+
+    with col_mon2:
+        st.subheader("📊 Drift Analysis Matrix")
+
+        if df_baseline is not None and df_telemetry is not None and not df_telemetry.empty:
+            if st.button("Calculate Data Drift (Deepchecks)", type="primary"):
+                with st.spinner("Analyzing data distributions..."):
+                    try:
+                        import plotly.express as px
+                        
+                        # Find overlapping features (ignoring metadata columns)
+                        meta_cols = [c for c in df_telemetry.columns if c.startswith("__")]
+                        operational_cols = df_telemetry.drop(columns=meta_cols, errors='ignore').columns
+                        intersect_cols = df_baseline.select_dtypes(include=np.number).columns.intersection(operational_cols)
+                        
+                        if len(intersect_cols) == 0:
+                            st.error("No matching numeric columns found between Baseline and Telemetry.")
+                        else:
+                            st.info("Initiating Deepchecks Data Drift Suite...")
+                            # Try to import Deepchecks
+                            try:
+                                from deepchecks.tabular import Dataset
+                                from deepchecks.tabular.suites import data_drift
+                                import tempfile
+                                import os
+                                
+                                # Prepare Deepchecks datasets
+                                # Using only intersecting columns
+                                ds_train = Dataset(df_baseline[intersect_cols])
+                                ds_test = Dataset(df_telemetry[intersect_cols])
+                                
+                                # Run Suite
+                                suite = data_drift()
+                                result = suite.run(train_dataset=ds_train, test_dataset=ds_test)
+                                
+                                # Extract result (html)
+                                st.success("Drift Analysis Complete!")
+                                
+                                # Save HTML to temporary file and read it back
+                                fd, path = tempfile.mkstemp(suffix=".html")
+                                try:
+                                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                                        result.save_as_html(path)
+                                        
+                                    with open(path, 'r', encoding='utf-8') as f:
+                                        html_report = f.read()
+                                        
+                                    import streamlit.components.v1 as components
+                                    st.markdown("### Deepchecks Interactive Report")
+                                    components.html(html_report, height=800, scrolling=True)
+                                    
+                                finally:
+                                    os.remove(path)
+                                    
+                            except ImportError:
+                                st.error("Deepchecks is not installed or failed to import. Falling back to native scipy approach.")
+                                # Fallback scipy approach
+                                from scipy.stats import ks_2samp
+                                drift_results = []
+                                drift_count = 0
+                                
+                                for col in intersect_cols:
+                                    stat, p_value = ks_2samp(df_baseline[col].dropna(), df_telemetry[col].dropna())
+                                    is_drift = p_value < 0.05 
+                                    if is_drift: drift_count += 1
+                                    
+                                    drift_results.append({
+                                        "Feature": col,
+                                        "KS-Statistic": float(stat),
+                                        "P-Value": float(p_value),
+                                        "Status": "🔴 Drift Detected" if is_drift else "🟢 Stable"
+                                    })
+                                
+                                st.write(f"### Results: {drift_count} out of {len(intersect_cols)} features drifting")
+                                df_report = pd.DataFrame(drift_results)
+                                st.dataframe(df_report.style.applymap(
+                                    lambda v: 'color: red' if 'Drift' in str(v) else 'color: green', 
+                                    subset=['Status']
+                                ), use_container_width=True)
+                                
+                                with st.expander("View Distribution Plots"):
+                                    plot_col = st.selectbox("Select Feature to Plot", [r['Feature'] for r in drift_results])
+                                    if plot_col:
+                                        fig = px.histogram(
+                                            df_baseline, x=plot_col, color_discrete_sequence=['#4CAF50'], 
+                                            opacity=0.6, nbins=30, title=f"Feature Drift: {plot_col}"
+                                        )
+                                        fig.add_histogram(
+                                            x=df_telemetry[plot_col], name='Production (Telemetry)', 
+                                            marker_color='#FF5722', opacity=0.6
+                                        )
+                                        fig.update_layout(barmode='overlay')
+                                        st.plotly_chart(fig, use_container_width=True)
+
+
+                    except Exception as e:
+                        st.error(f"Error during drift analysis: {e}")
+        else:
+            st.info("👈 Load both Baseline and Telemetry data to run Drift Analysis.")
     with data_tabs[1]:
         st.subheader("📉 Data Drift Analysis")
         st.markdown("Compare two datasets (e.g., Training vs Inference) to detect distribution shifts.")
-        
+
         # Select Reference Dataset (Training)
         st.markdown("#### 1. Reference Data (Baseline)")
         ref_ds = st.selectbox("Reference Dataset", [""] + datasets, key="drift_ref_ds")
@@ -1160,6 +1301,21 @@ with tabs[1]:
                         st.info("Use the code below to load and use this model in your application.")
                         st.code(trainer.best_consumption_code, language='python')
                     
+                    # --- Model Card ---
+                    if hasattr(trainer, 'model_summaries') and best_model_name in trainer.model_summaries:
+                        best_model_info = trainer.model_summaries[best_model_name]
+                        if 'model_card' in best_model_info.get('metrics', {}):
+                            st.divider()
+                            st.subheader("📄 Model Card")
+                            with st.expander("View Full Model Card", expanded=False):
+                                st.markdown(best_model_info['metrics']['model_card'])
+                                st.download_button(
+                                    label="Download Model Card (Markdown)",
+                                    data=best_model_info['metrics']['model_card'],
+                                    file_name=f"model_card_{best_model_name}.md",
+                                    mime="text/markdown"
+                                )
+                    
                     # --- Visualizações de Resultados ---
                     if X_test_proc is not None:
                         st.divider()
@@ -1490,132 +1646,103 @@ with tabs[2]:
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
 with tabs[3]:
-    st.header("Model Registry, Deployment & Monitoring")
+    st.header("Model Registry & Deployment")
     
-    reg_tabs = st.tabs(["Registry & Deploy", "Real-time Monitoring"])
+    st.subheader("Model Deployment Center")
     
-    with reg_tabs[0]:
-        st.subheader("Model Deployment Center")
+# 1. Select Model from Registry
+    models = get_registered_models()
+    if not models:
+        st.warning("No models found in Registry. Please register a model from Experiments first.")
+    else:
+        col_dep1, col_dep2 = st.columns([1, 2])
         
-        # 1. Select Model from Registry
-        models = get_registered_models()
-        if not models:
-            st.warning("No models found in Registry. Please register a model from Experiments first.")
-        else:
-            col_dep1, col_dep2 = st.columns([1, 2])
+        with col_dep1:
+            st.markdown("#### 1. Select Artifact")
+            model_names = [m.name for m in models]
+            selected_model_name = st.selectbox("Registered Model", model_names, key="deploy_model_sel")
             
-            with col_dep1:
-                st.markdown("#### 1. Select Artifact")
-                model_names = [m.name for m in models]
-                selected_model_name = st.selectbox("Registered Model", model_names, key="deploy_model_sel")
-                
-                # Get versions
-                from mlflow.tracking import MlflowClient
-                client = MlflowClient()
-                versions = client.search_model_versions(f"name='{selected_model_name}'")
-                version_nums = [v.version for v in versions]
-                selected_version = st.selectbox("Version", version_nums, key="deploy_ver_sel")
-                
-                # Fetch details
-                model_details = get_model_details(selected_model_name, selected_version)
-                # model_details is a dictionary, not an object
-                st.info(f"Stage: {model_details.get('current_stage', 'None')}")
-                st.caption(f"Last Updated: {model_details.get('last_updated_timestamp', 'Unknown')}")
+            # Get versions
+            from mlflow.tracking import MlflowClient
+            client = MlflowClient()
+            versions = client.search_model_versions(f"name='{selected_model_name}'")
+            version_nums = [v.version for v in versions]
+            selected_version = st.selectbox("Version", version_nums, key="deploy_ver_sel")
+            
+            # Fetch details
+            model_details = get_model_details(selected_model_name, selected_version)
+            # model_details is a dictionary, not an object
+            st.info(f"Stage: {model_details.get('current_stage', 'None')}")
+            st.caption(f"Last Updated: {model_details.get('last_updated_timestamp', 'Unknown')}")
 
-            with col_dep2:
-                st.markdown("#### 2. Deployment Configuration")
-                env = st.radio("Target Environment", ["Development (Local)", "Staging", "Production"], horizontal=True)
-                
-                col_res1, col_res2 = st.columns(2)
-                with col_res1:
-                    cpu_alloc = st.slider("CPU Allocation", 0.5, 4.0, 1.0, step=0.5)
-                    min_replicas = st.number_input("Min Replicas", 1, 5, 1)
-                with col_res2:
-                    mem_alloc = st.slider("Memory (GB)", 0.5, 16.0, 2.0, step=0.5)
-                    max_replicas = st.number_input("Max Replicas", 1, 10, 2)
-                
-                if st.button("Deploy / Update Service", type="primary"):
-                    with st.spinner(f"Deploying {selected_model_name} v{selected_version} to {env}..."):
-                        # Mock Deployment Process
-                        time.sleep(2)
-                        endpoint_url = f"http://localhost:8000/predict/{selected_model_name}/{selected_version}"
-                        st.session_state['active_endpoint'] = {
-                            'url': endpoint_url,
-                            'model': selected_model_name,
-                            'version': selected_version,
-                            'env': env,
-                            'status': 'Healthy'
-                        }
-                        st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
+        with col_dep2:
+            st.markdown("#### 2. Deployment Configuration")
+            env = st.radio("Target Environment", ["Development (Local)", "Staging", "Production"], horizontal=True)
             
-            st.divider()
+            col_res1, col_res2 = st.columns(2)
+            with col_res1:
+                cpu_alloc = st.slider("CPU Allocation", 0.5, 4.0, 1.0, step=0.5)
+                min_replicas = st.number_input("Min Replicas", 1, 5, 1)
+            with col_res2:
+                mem_alloc = st.slider("Memory (GB)", 0.5, 16.0, 2.0, step=0.5)
+                max_replicas = st.number_input("Max Replicas", 1, 10, 2)
             
-            # 3. Integrated Testing Interface (Merged from old Test Models tab)
-            st.markdown("#### 3. Live Inference Test")
-            
-            if 'active_endpoint' in st.session_state:
-                st.success(f"Connected to Active Endpoint: `{st.session_state['active_endpoint']['url']}`")
-                
-                # Input Method
-                input_type = st.radio("Input Format", ["JSON/Text", "CSV File"], horizontal=True)
-                
-                if input_type == "JSON/Text":
-                    input_data = st.text_area("Input JSON", value='{"feature1": 0.5, "feature2": 1.2}', height=150)
-                    if st.button("Send Request"):
-                        # Mock Inference
-                        try:
-                            import json
-                            data = json.loads(input_data)
-                            # In real scenario: requests.post(endpoint, json=data)
-                            # Here we load model locally to simulate
-                            with st.spinner("Processing..."):
-                                loaded_model = load_registered_model(selected_model_name, selected_version)
-                                # Convert dict to DF
-                                df_in = pd.DataFrame([data])
-                                pred = loaded_model.predict(df_in)
-                                st.json({"prediction": pred.tolist(), "latency_ms": 45, "model_version": selected_version})
-                        except Exception as e:
-                            st.error(f"Inference Error: {e}")
-                            
-                elif input_type == "CSV File":
-                    up_file = st.file_uploader("Upload Batch CSV", type="csv", key="deploy_test_csv")
-                    if up_file:
-                        df_test = pd.read_csv(up_file)
-                        if st.button("Run Batch Prediction"):
-                            with st.spinner("Running batch inference..."):
-                                loaded_model = load_registered_model(selected_model_name, selected_version)
-                                preds = loaded_model.predict(df_test)
-                                df_test['prediction'] = preds
-                                st.dataframe(df_test)
-                                st.info(f"Processed {len(df_test)} records in 0.42s")
-            else:
-                st.info("Deploy a model above to enable live testing.")
-
-    with reg_tabs[1]:
-        st.subheader("Model Performance Monitoring")
+            if st.button("Deploy / Update Service", type="primary"):
+                with st.spinner(f"Deploying {selected_model_name} v{selected_version} to {env}..."):
+                    # Mock Deployment Process
+                    time.sleep(2)
+                    endpoint_url = f"http://localhost:8000/predict/{selected_model_name}/{selected_version}"
+                    st.session_state['active_endpoint'] = {
+                        'url': endpoint_url,
+                        'model': selected_model_name,
+                        'version': selected_version,
+                        'env': env,
+                        'status': 'Healthy'
+                    }
+                    st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
+        
+        st.divider()
+        
+        # 3. Integrated Testing Interface (Merged from old Test Models tab)
+        st.markdown("#### 3. Live Inference Test")
         
         if 'active_endpoint' in st.session_state:
-            ep = st.session_state['active_endpoint']
-            st.markdown(f"**Monitored Service:** {ep['model']} (v{ep['version']}) | **Env:** {ep['env']}")
+            st.success(f"Connected to Active Endpoint: `{st.session_state['active_endpoint']['url']}`")
             
-            # Dashboard Mockup
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Avg Latency", "42ms", "-5ms")
-            m2.metric("Requests/min", "128", "+12")
-            m3.metric("Error Rate", "0.02%", "0.00%")
-            m4.metric("CPU Usage", "45%", "+2%")
+            # Input Method
+            input_type = st.radio("Input Format", ["JSON/Text", "CSV File"], horizontal=True)
             
-            st.markdown("#### Prediction Drift & Accuracy")
-            # Mock Charts
-            chart_data = pd.DataFrame(np.random.randn(50, 2), columns=['latency', 'accuracy'])
-            st.line_chart(chart_data)
-            
-            st.markdown("#### Alerts & Logs")
-            st.error("2023-10-27 14:30: High Latency Warning (>200ms) detected on pod-2")
-            st.info("2023-10-27 14:00: Autoscaling triggered (replicas 2 -> 3)")
-            
+            if input_type == "JSON/Text":
+                input_data = st.text_area("Input JSON", value='{"feature1": 0.5, "feature2": 1.2}', height=150)
+                if st.button("Send Request"):
+                    # Mock Inference
+                    try:
+                        import json
+                        data = json.loads(input_data)
+                        # In real scenario: requests.post(endpoint, json=data)
+                        # Here we load model locally to simulate
+                        with st.spinner("Processing..."):
+                            loaded_model = load_registered_model(selected_model_name, selected_version)
+                            # Convert dict to DF
+                            df_in = pd.DataFrame([data])
+                            pred = loaded_model.predict(df_in)
+                            st.json({"prediction": pred.tolist(), "latency_ms": 45, "model_version": selected_version})
+                    except Exception as e:
+                        st.error(f"Inference Error: {e}")
+                        
+            elif input_type == "CSV File":
+                up_file = st.file_uploader("Upload Batch CSV", type="csv", key="deploy_test_csv")
+                if up_file:
+                    df_test = pd.read_csv(up_file)
+                    if st.button("Run Batch Prediction"):
+                        with st.spinner("Running batch inference..."):
+                            loaded_model = load_registered_model(selected_model_name, selected_version)
+                            preds = loaded_model.predict(df_test)
+                            df_test['prediction'] = preds
+                            st.dataframe(df_test)
+                            st.info(f"Processed {len(df_test)} records in 0.42s")
         else:
-            st.warning("No active deployment found. Deploy a model to view monitoring dashboard.")
+                st.info("Deploy a model above to enable live testing.")
 
 
 

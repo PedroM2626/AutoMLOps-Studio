@@ -58,9 +58,34 @@ def predict(request: PredictionRequest):
         
         # If classifier and label encoder exists, inverse transform
         if hasattr(model_assets["processor"], "label_encoder") and model_assets["processor"].label_encoder:
-            predictions = model_assets["processor"].label_encoder.inverse_transform(predictions)
+            pred_classes = model_assets["processor"].label_encoder.inverse_transform(predictions)
+            result = pred_classes.tolist()
+        else:
+            result = predictions.tolist()
             
-        return {"predictions": predictions.tolist()}
+        # --- Telemetry Logging for ML Monitoring (Drift) ---
+        try:
+            import datetime
+            import json
+            
+            mon_dir = os.path.join("data_lake", "monitoring")
+            os.makedirs(mon_dir, exist_ok=True)
+            log_file = os.path.join(mon_dir, "api_telemetry.csv")
+            
+            # Add metadata columns
+            df_log = df.copy()
+            df_log["__timestamp"] = datetime.datetime.now().isoformat()
+            df_log["__model_version"] = "latest" # Idealmente pegaríamos o nome exato
+            df_log["__prediction"] = result
+            
+            # Se for a primeira vez, salva com header, se não faz append
+            write_header = not os.path.exists(log_file)
+            df_log.to_csv(log_file, mode='a', header=write_header, index=False)
+        except Exception as tel_err:
+            import logging
+            logging.error(f"Failed to log telemetry: {tel_err}")
+            
+        return {"predictions": result}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
