@@ -395,9 +395,15 @@ class StabilityAnalyzer:
             if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
             
             model.fit(X_train, y_train)
-            if not hasattr(model, "predict_proba"):
+            
+            # Check for predict_proba, handling Pipelines
+            has_proba = hasattr(model, "predict_proba")
+            if not has_proba and hasattr(model, "steps"):
+                has_proba = hasattr(model.steps[-1][1], "predict_proba")
+                
+            if not has_proba:
                 logger.warning("Model does not support predict_proba. Cannot calculate Brier score.")
-                break
+                return pd.DataFrame([{'split': 'N/A', 'brier_score': None, 'error': 'predict_proba() unsupported by this model type.'}])
                 
             y_proba = model.predict_proba(X_val)
             
@@ -436,8 +442,78 @@ class StabilityAnalyzer:
             'raw_seed': seed_results,
             'raw_split': split_results
         }
-        
         return combined_report
+
+    def run_nlp_robustness(self, n_iterations=3, typo_probability=0.1):
+        """
+        Simulates typos and character dropping in text columns to test NLP robustness.
+        """
+        metrics_history = []
+        is_df = isinstance(self.X, pd.DataFrame)
+        
+        if not is_df:
+            return pd.DataFrame([{'iteration': 'N/A', 'error': 'NLP Robustness requires a Pandas DataFrame with explicit text columns.'}])
+            
+        object_cols = [c for c in self.X.columns if self.X[c].dtype == 'object' or self.X[c].dtype.name == 'category']
+        
+        # Heuristic: Find text columns (strings longer than typical short categories)
+        text_cols = []
+        for c in object_cols:
+            # We assume a column is text if it has a high average length or many unique values
+            if len(self.X[c].unique()) > 10:
+                text_cols.append(c)
+                
+        if len(text_cols) == 0:
+            return pd.DataFrame([{'iteration': 'N/A', 'error': 'No suitable text columns detected for NLP Robustness.'}])
+
+        X_train, X_val, y_train, y_val = train_test_split(
+            self.X, self.y, test_size=0.2, random_state=self.random_state
+        )
+        
+        model = clone(self.base_model)
+        if hasattr(model, 'random_state'): model.set_params(random_state=self.random_state)
+        elif hasattr(model, 'random_seed'): model.set_params(random_seed=self.random_state)
+        
+        model.fit(X_train, y_train)
+
+        # Baseline
+        y_pred = model.predict(X_val)
+        y_proba = model.predict_proba(X_val) if hasattr(model, "predict_proba") else None
+        baseline_metrics = self._get_metrics(y_val, y_pred, y_proba)
+        baseline_metrics['iteration'] = 'baseline'
+        baseline_metrics['noise_type'] = 'None'
+        metrics_history.append(baseline_metrics)
+        
+        def inject_typos(text, p=0.1):
+            if not isinstance(text, str):
+                return text
+            chars = list(text)
+            for i in range(len(chars)):
+                if np.random.rand() < p and chars[i].isalpha():
+                    # random swap with another letter or drop
+                    action = np.random.choice(['drop', 'swap'])
+                    if action == 'swap':
+                        chars[i] = chr(np.random.randint(97, 123)) # a-z
+                    else:
+                        chars[i] = ""
+            return "".join(chars)
+
+        for i in range(n_iterations):
+            np.random.seed(self.random_state + i)
+            X_val_noisy = X_val.copy()
+            
+            for c in text_cols:
+                X_val_noisy[c] = X_val_noisy[c].apply(lambda x: inject_typos(x, p=typo_probability))
+                
+            y_pred_noisy = model.predict(X_val_noisy)
+            y_proba_noisy = model.predict_proba(X_val_noisy) if hasattr(model, "predict_proba") else None
+            
+            iter_metrics = self._get_metrics(y_val, y_pred_noisy, y_proba_noisy)
+            iter_metrics['iteration'] = i
+            iter_metrics['noise_type'] = f'Text Typos {typo_probability*100}%'
+            metrics_history.append(iter_metrics)
+            
+        return pd.DataFrame(metrics_history)
 
     def calculate_stability_metrics(self, df_results):
         """

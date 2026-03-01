@@ -528,7 +528,8 @@ with tabs[4]:
                     "Noise Injection Robustness",
                     "Slice Stability (Fairness/Bias)",
                     "Missing Value Robustness",
-                    "Calibration Stability"
+                    "Calibration Stability",
+                    "NLP Text Robustness"
                 ], default=["General Stability Check (Seed & Split)"])
                 
                 # Dynamic inputs based on test type
@@ -683,9 +684,23 @@ with tabs[4]:
                                                 else:
                                                     res = analyzer.run_calibration_stability(n_splits=5)
                                                     st.markdown("**Cross-Validated Brier Scores (Lower is better)**")
+                                                    if 'error' in res.columns:
+                                                        st.error(res.iloc[0]['error'])
+                                                    else:
+                                                        metrics = analyzer.calculate_stability_metrics(res)
+                                                        st.dataframe(metrics)
+                                                        with st.expander("View Splits"):
+                                                            st.dataframe(res)
+                                                            
+                                            elif "NLP Text" in tt:
+                                                res = analyzer.run_nlp_robustness(n_iterations=n_iters, typo_probability=0.1)
+                                                st.markdown("**NLP Robustness (Text Injection/Typos)**")
+                                                if 'error' in res.columns:
+                                                    st.error(res.iloc[0]['error'])
+                                                else:
                                                     metrics = analyzer.calculate_stability_metrics(res)
                                                     st.dataframe(metrics)
-                                                    with st.expander("View Splits"):
+                                                    with st.expander("View Iterations"):
                                                         st.dataframe(res)
                                             
                                     st.success("Analysis Complete!")
