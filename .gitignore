@@ -9,3 +9,5 @@ dist/
 *mlruns*    
 *pycache*
 *.db*
+*.log
+*.txt

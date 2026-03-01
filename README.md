@@ -35,27 +35,29 @@ Aprender MLOps muitas vezes exige lidar com infraestruturas complexas antes mesm
 
 ### 1. 📊 Gestão de Dados & Drift Analysis (Aba Data)
 - **Ingestão Inteligente**: Upload de CSVs com armazenamento versionado no Data Lake local.
-- **Detecção de Drift Integrada**: Análise estatística (KS Test, PSI) e visualizações temporais para identificar mudanças na distribuição dos dados antes do treinamento.
+- **Detecção de Drift Integrada**: Análise estatística (KS Test) e integração com **Deepchecks** para relatórios automáticos de integridade de dados (Data Integrity).
 
 ### 2. 🤖 Configuração de Treino (AutoML)
 - **Suporte Multi-Tarefa**: Classificação, Regressão, Clustering, Séries Temporais e Detecção de Anomalias.
-- **Otimização Avançada com Optuna**: 
-    - **Bayesian (TPE)**, **Random Search**, **Grid Search** e **Hyperband** (Pruning precoce).
-- **Validação Automática**: Escolha inteligente entre Cross-Validation (dados pequenos) e Holdout (dados grandes), com suporte especial para Séries Temporais.
-- **Ensemble Builder**: Crie modelos robustos usando Voting (Hard/Soft) ou Stacking.
+- **NLP & Transformers**: Pré-processamento otimizado para texto com suporte a TF-IDF, Count e Hugging Face Transformers (BERT, RoBERTa, etc.).
+- **Otimização Avançada com Optuna**: Bayesian (TPE) com pruning precoce.
+- **Ensemble Builder**: Criação dinâmica de Voting e Stacking Regressors/Classifiers.
 
 ### 3. 👁️ Visão Computacional (CV Engine)
 - **Deep Learning Facilitado**: Classificação de Imagens, Segmentação Semântica (DeepLabV3) e Detecção de Objetos (Faster R-CNN).
-- **Transfer Learning**: Use backbones pré-treinados (ResNet, MobileNet) para acelerar o aprendizado.
 
-### 4. ⚖️ Estabilidade & Robustez
-- **Stress Testing**: Avalie como o modelo se comporta com diferentes seeds, splits de dados e variações de hiperparâmetros para garantir que ele seja confiável, não apenas preciso.
+### 4. ⚖️ Monitoring & Stability (Novo!)
+- **Production Drift**: Dashboard para comparar dados de treinamento vs produção em tempo real.
+- **Model Robustness & Stability**: Testes de estresse automáticos:
+    - **Seed Stability**: Avalia a variação do modelo com diferentes inicializações.
+    - **Split Stability**: Testa a robustez contra diferentes divisões dos dados (Data Variance).
+    - **Hyperparameter Sensitivity**: Analisa o impacto de pequenas variações nos hiperparâmetros.
 
-### 5. 🚀 Model Registry & Deployment (Novo!)
-- **Gestão de Ciclo de Vida**: Integre-se ao MLflow para gerenciar versões e estágios (Staging/Production).
-- **Deployment Simulator**: Simule a implantação em diferentes ambientes com configuração de recursos (CPU/RAM).
-- **Live Inference**: Teste seus modelos implantados instantaneamente com upload de dados e veja predições em tempo real.
-- **Performance Monitoring**: Dashboard de latência, erros e logs de predição integrados.
+### 5. 🚀 Model Registry & Deployment
+- **Gestão via MLflow**: Registro de modelos, controle de versões e estágios (Staging/Production).
+- **Inference Playground**: Teste instantâneo de modelos registrados com suporte a colunas dinâmicas.
+- **Self-Documenting Models**: Geração automática de relatórios detalhados contendo métricas e performance.
+
 
 ---
 

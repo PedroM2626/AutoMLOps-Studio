@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "C:\Users\pedro\Downloads\automlops-studio\automl_engine.py", line 1938, in train
-    'consumption_code': trial_metrics.get('consumption_code', '')
-                        ^^^^^^^^^^^^^
-NameError: name 'trial_metrics' is not defined
