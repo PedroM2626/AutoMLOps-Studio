@@ -1364,9 +1364,14 @@ class AutoMLTrainer:
                     metrics=trial_metrics,
                     model=model,
                     model_name=full_trial_name,
-                    register=False
+                    register=False,
+                    feature_names=self.feature_names
                 )
                 logger.info(f"Run {full_trial_name} registered with ID: {run_id}")
+                
+                # Gerar amostra de código para o relatório/callback
+                from mlops_utils import get_consumption_code
+                trial_metrics['consumption_code'] = get_consumption_code(full_trial_name, run_id, self.task_type, feature_names=self.feature_names)
 
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
@@ -1929,7 +1934,8 @@ class AutoMLTrainer:
                          'metrics': report_metrics,
                          'plots': pil_plots, # Use PIL images
                          'run_id': best_run_id,
-                         'stability': stability_results
+                         'stability': stability_results,
+                         'consumption_code': trial_metrics.get('consumption_code', '')
                      }
                      
                      report_payload = trial_metrics.copy() if 'trial_metrics' in locals() else {}
@@ -2012,6 +2018,19 @@ class AutoMLTrainer:
             logger.info("Feature Importance calculated (based on coefficients).")
         else:
             self.feature_importance = None
+
+        # --- NOVA: Amostra de código para o melhor modelo global ---
+        try:
+            # Recuperar run_id do melhor trial global
+            best_run_id = study.best_trial.user_attrs.get('run_id')
+            if best_model_name and best_run_id:
+                from mlops_utils import get_consumption_code
+                self.best_consumption_code = get_consumption_code(best_model_name, best_run_id, self.task_type, feature_names=self.feature_names)
+            else:
+                self.best_consumption_code = None
+        except Exception as e:
+            logger.warning(f"Failed to generate best consumption code: {e}")
+            self.best_consumption_code = None
 
         return self.best_model
 

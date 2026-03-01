@@ -1153,6 +1153,13 @@ with tabs[1]:
                                 with cols_m[i % len(cols_m)]:
                                     st.metric(m_name.upper(), f"{m_val:.4f}" if isinstance(m_val, (float, np.float64, np.float32)) else m_val)
                     
+                    # --- Amostra de Código de Consumo ---
+                    if hasattr(trainer, 'best_consumption_code') and trainer.best_consumption_code:
+                        st.divider()
+                        st.subheader("💻 Model Consumption (Code Sample)")
+                        st.info("Use the code below to load and use this model in your application.")
+                        st.code(trainer.best_consumption_code, language='python')
+                    
                     # --- Visualizações de Resultados ---
                     if X_test_proc is not None:
                         st.divider()

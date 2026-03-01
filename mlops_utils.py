@@ -13,12 +13,61 @@ load_dotenv()
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
 mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
 
+def get_consumption_code(model_name, run_id, task_type, feature_names=None):
+    """Generates a Python code snippet to consume the trained model."""
+    safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+    
+    # Gerar dicionário de colunas para o DataFrame de exemplo
+    if feature_names and len(feature_names) > 0:
+        cols_str = ",\n    ".join([f'"{col}": [0.0]' for col in feature_names[:10]]) # Mostra as primeiras 10
+        if len(feature_names) > 10:
+            cols_str += f",\n    # ... e mais {len(feature_names)-10} colunas"
+    else:
+        cols_str = "# \"feature_1\": [1.0], \n    # \"feature_2\": [\"valor\"]"
+
+    code = f"""# --- AutoMLOps Code Sample: Consuming {model_name} ---
+import mlflow
+import pandas as pd
+import numpy as np
+
+# 1. Configurar Tracking (se necessário)
+mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+
+# 2. Carregar o modelo do MLflow
+# Você também pode usar 'models:/{model_name}/latest' se tiver registrado o modelo
+model_uri = "runs:/{run_id}/{safe_name}"
+model = mlflow.sklearn.load_model(model_uri)
+
+print(f"Modelo {{model_uri}} carregado com sucesso!")
+
+# 3. Preparar dados de exemplo (Ajuste conforme suas colunas)
+# Exemplo baseado no treinamento:
+sample_data = pd.DataFrame({{
+    {cols_str}
+}})
+
+# 4. Fazer predição
+try:
+    predictions = model.predict(sample_data)
+    print("Resultado da Predição:", predictions)
+    
+    # Se for classificação, você também pode querer as probabilidades:
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(sample_data)
+        print("Probabilidades:", probs)
+except Exception as e:
+    print("Erro ao predizer (Verifique se os dados de entrada condizem com o treinamento):", e)
+    print("DICA: Use o AutoMLDataProcessor para transformar dados brutos antes do predict.")
+"""
+    return code
+
+
 class MLFlowTracker:
     def __init__(self, experiment_name):
         self.experiment_name = experiment_name
         mlflow.set_experiment(experiment_name)
 
-    def log_experiment(self, params, metrics, model, model_name, artifacts=None, register=True):
+    def log_experiment(self, params, metrics, model, model_name, artifacts=None, register=True, feature_names=None):
         with mlflow.start_run():
             mlflow.log_params(params)
             try:
@@ -41,6 +90,21 @@ class MLFlowTracker:
                         mlflow.log_artifact(art_path)
             
             run_id = mlflow.active_run().info.run_id
+            
+            # Gerar e logar amostra de código de consumo
+            try:
+                task_type = params.get('task_type', 'classification')
+                code_sample = get_consumption_code(model_name, run_id, task_type, feature_names=feature_names)
+                code_filename = f"consume_{safe_artifact_path}.py"
+                with open(code_filename, "w", encoding="utf-8") as f:
+                    f.write(code_sample)
+                mlflow.log_artifact(code_filename)
+                # Opcionalmente remover o arquivo temporário
+                if os.path.exists(code_filename):
+                    os.remove(code_filename)
+            except Exception as e:
+                print(f"Warning: Failed to log code sample: {e}")
+
             return run_id
 
 class DataLake:
