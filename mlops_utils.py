@@ -389,3 +389,67 @@ def load_registered_model(model_name, version=None):
     except Exception as e:
         print(f"Error loading registered model: {e}")
         return None
+
+
+def get_run_details(run_id: str) -> dict:
+    """
+    Returns a rich dict of all MLflow data for a specific run_id.
+    Includes params, metrics (last value + full history), tags, artifact list, and run info.
+    """
+    try:
+        from mlflow.tracking import MlflowClient
+        client = MlflowClient()
+        run = client.get_run(run_id)
+
+        # Params
+        params = dict(run.data.params)
+
+        # Metrics (last value)
+        metrics = dict(run.data.metrics)
+
+        # Full metric history per key
+        metric_history = {}
+        for key in metrics:
+            try:
+                history = client.get_metric_history(run_id, key)
+                metric_history[key] = [{"step": m.step, "value": m.value, "timestamp": m.timestamp} for m in history]
+            except Exception:
+                pass
+
+        # Tags (filter internal mlflow tags)
+        tags = {k: v for k, v in run.data.tags.items() if not k.startswith("mlflow.")}
+
+        # Artifact list
+        try:
+            artifacts = [a.path for a in client.list_artifacts(run_id)]
+        except Exception:
+            artifacts = []
+
+        # Run info
+        info = {
+            "run_id": run.info.run_id,
+            "experiment_id": run.info.experiment_id,
+            "status": run.info.status,
+            "start_time": run.info.start_time,
+            "end_time": run.info.end_time,
+            "artifact_uri": run.info.artifact_uri,
+            "lifecycle_stage": run.info.lifecycle_stage,
+        }
+
+        # Experiment name
+        try:
+            exp = client.get_experiment(run.info.experiment_id)
+            info["experiment_name"] = exp.name
+        except Exception:
+            info["experiment_name"] = "Unknown"
+
+        return {
+            "info": info,
+            "params": params,
+            "metrics": metrics,
+            "metric_history": metric_history,
+            "tags": tags,
+            "artifacts": artifacts,
+        }
+    except Exception as e:
+        return {"error": str(e)}

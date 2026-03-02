@@ -6,8 +6,9 @@ import numpy as np
 from mlops_utils import (
     MLFlowTracker, DriftDetector, ModelExplainer, get_model_registry, 
     DataLake, register_model_from_run, get_registered_models, get_all_runs,
-    get_model_details, load_registered_model
+    get_model_details, load_registered_model, get_run_details
 )
+from training_manager import TrainingJobManager, JobStatus
 import shap
 import joblib # type: ignore
 import os
@@ -26,31 +27,7 @@ import plotly.express as px
 import mlflow
 import logging
 
-class StreamlitLogHandler(logging.Handler):
-    """
-    Custom logging handler that streams logs directly to a Streamlit placeholder.
-    """
-    def __init__(self, placeholder, max_lines=50):
-        super().__init__()
-        self.placeholder = placeholder
-        self.max_lines = max_lines
-        self.log_lines = []
-        # Format the log message slightly richer
-        self.setFormatter(logging.Formatter('%(asctime)s | %(levelname)-8s | %(message)s', datefmt='%H:%M:%S'))
-
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            self.log_lines.append(msg)
-            if len(self.log_lines) > self.max_lines:
-                self.log_lines.pop(0)
-            
-            # Combine lines and write to placeholder
-            log_text = '\n'.join(self.log_lines)
-            # Use atomic update
-            self.placeholder.code(log_text, language='text')
-        except Exception:
-            self.handleError(record)
+# StreamlitLogHandler is replaced by TrainingJobManager queue-based logging.
 
 
 # 🎨 Custom Styling
@@ -211,6 +188,12 @@ st.markdown("Enterprise-grade Automated Machine Learning & MLOps Platform.")
 # Session state initialization
 if 'trials_data' not in st.session_state: st.session_state['trials_data'] = []
 if 'best_model' not in st.session_state: st.session_state['best_model'] = None
+if 'job_manager' not in st.session_state:
+    st.session_state['job_manager'] = TrainingJobManager()
+if 'mlflow_cache' not in st.session_state:
+    st.session_state['mlflow_cache'] = {}
+
+# poll_updates moved to Experiments tab fragment for performance
 
 def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None):
     """
@@ -1272,452 +1255,55 @@ with tabs[1]:
                 )
                 st.info("📊 Results will be saved to MLflow and a PDF report will be generated.")
 
-            if st.button("🚀 Start Training", key="btn_start_train"):
-                st.session_state['trials_data'] = []
-                st.session_state['report_data'] = {} # Reset reports on new training
-                start_time_train = time.time()
-                
-                # Nome do experimento baseado no dataset e timestamp
-                exp_tag = selected_configs[0]['name'] if selected_configs else "AutoML"
-                experiment_name = f"{exp_tag}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
+            if st.button("🚀 Submit Experiment", key="btn_start_train", type="primary"):
+                if not selected_configs:
+                    st.error("Please select and load a dataset first.")
+                elif 'train_df' not in st.session_state:
+                    st.error("Please load the data first (click '📥 Load and Prepare Data').")
+                else:
+                    exp_tag = selected_configs[0]['name'] if selected_configs else "AutoML"
+                    experiment_name = f"{exp_tag}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
+                    clean_experiment_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
+                    target_metric_name_local = optimization_metric.upper()
 
-                # Container for feedback
-                status_c = st.empty()
-                progress_bar = st.progress(0)
-                chart_c = st.empty()
-                
-                # Container for real-time logs
-                st.markdown("### 🖥️ Execution Logs (Real-time)")
-                log_expander = st.expander("View AutoML Engine and Optuna Logs", expanded=True)
-                log_placeholder = log_expander.empty()
-                
-                # Setup Streamlit Logging Handler
-                st_handler = StreamlitLogHandler(log_placeholder)
-                st_handler.setLevel(logging.INFO)
-                
-                # Attach to both automl_engine and optuna loggers
-                automl_logger = logging.getLogger('automl_engine')
-                optuna_logger = logging.getLogger('optuna')
-                
-                # Prevent adding multiple handlers if button clicked multiple times
-                if not any(isinstance(h, StreamlitLogHandler) for h in automl_logger.handlers):
-                    automl_logger.addHandler(st_handler)
-                if not any(isinstance(h, StreamlitLogHandler) for h in optuna_logger.handlers):
-                    optuna_logger.addHandler(st_handler)
-                
-                # Temporarily set log level to INFO to capture the progress
-                original_automl_level = automl_logger.level
-                original_optuna_level = optuna_logger.level
-                automl_logger.setLevel(logging.INFO)
-                optuna_logger.setLevel(logging.INFO)
-                
-                # Container for per-model reports (NEW)
-                st.markdown("### 📊 Per-Model Reports (Real-time)")
-                if 'report_data' not in st.session_state:
-                    st.session_state['report_data'] = {}
-                
-                # Use st.empty() as a fixed placeholder for the entire report section
-                report_section_placeholder = st.empty()
-
-                # Calcular total real de trials para a barra de progresso
-                # Instancia o trainer com o preset para pegar as configs
-                trainer_for_info = AutoMLTrainer(task_type=task, preset=training_preset)
-                preset_config = trainer_for_info.preset_configs.get(training_preset)
-                
-                effective_models_list = selected_models if selected_models else preset_config['models']
-                n_trials_val = n_trials if n_trials is not None else preset_config['n_trials']
-                total_expected_trials = n_trials_val * len(effective_models_list)
-                
-                def callback(trial, score, full_name, dur, metrics=None):
-                    # Check for special report event
-                    if metrics and '__report__' in metrics:
-                        report = metrics['__report__']
-                        model_name = report['model_name']
-                        
-                        # Store report in session state to survive reruns
-                        st.session_state['report_data'][model_name] = report
-                        
-                        # Atomic render: replace the entire content of the placeholder
-                        with report_section_placeholder.container():
-                            # Render ALL reports stored in session state
-                            for m_name, rep in st.session_state['report_data'].items():
-                                expander_label = f"Final Report: {rep['model_name']} (Score: {rep['score']:.4f})"
-                                with st.expander(expander_label, expanded=True):
-                                    col_rep1, col_rep2 = st.columns([1, 2])
-                                    with col_rep1:
-                                        st.markdown("🎯 **Validation Metrics**")
-                                        if rep['metrics']:
-                                            # Display metrics as a nice table instead of raw JSON
-                                            met_df = pd.DataFrame([rep['metrics']]).T.reset_index()
-                                            met_df.columns = ['Metric', 'Value']
-                                            st.table(met_df)
-                                        else:
-                                            st.warning("Validation metrics not available.")
-                                            
-                                        st.markdown(f"📌 **Best Trial:** {rep['best_trial_number']}")
-                                        st.markdown(f"🔗 **MLflow Run ID:** `{rep['run_id']}`")
-                                        
-                                        if 'stability' in rep and rep['stability']:
-                                            st.divider()
-                                            st.markdown("⚖️ **Stability Analysis**")
-                                            for s_type, s_data in rep['stability'].items():
-                                                if s_type == 'general':
-                                                    st.write("📈 **General Stability Summary**")
-                                                    summary = {k: v for k, v in s_data.items() if k not in ['raw_seed', 'raw_split']}
-                                                    # Convert nested dict to flat for table
-                                                    flat_summary = []
-                                                    for metric, stats in summary.items():
-                                                        if isinstance(stats, dict):
-                                                            row = {'Metric': metric.upper()}
-                                                            row.update({k.capitalize(): f"{v:.4f}" if isinstance(v, float) else v for k, v in stats.items()})
-                                                            flat_summary.append(row)
-                                                    
-                                                    if flat_summary:
-                                                        st.table(pd.DataFrame(flat_summary))
-                                                elif s_type == 'hyperparam':
-                                                    with st.expander(f"Sensitivity: {s_type}", expanded=False):
-                                                        st.dataframe(s_data, use_container_width=True)
-                                                else:
-                                                    with st.expander(f"Test: {s_type}", expanded=False):
-                                                        st.dataframe(s_data, use_container_width=True)
-                                    with col_rep2:
-                                        if 'plots' in rep and rep['plots']:
-                                            plot_labels = list(rep['plots'].keys())
-                                            if plot_labels:
-                                                tab_plots = st.tabs(plot_labels)
-                                                for i, plot_name in enumerate(plot_labels):
-                                                    with tab_plots[i]:
-                                                        # Handle both Matplotlib Figures and PIL Images
-                                                        plot_obj = rep['plots'][plot_name]
-                                                        if isinstance(plot_obj, Image.Image):
-                                                            st.image(plot_obj, use_container_width=True)
-                                                        else:
-                                                            st.pyplot(plot_obj, clear_figure=True)
-                                            else:
-                                                st.info("No visualizations available for this model.")
-                                        else:
-                                            st.info("No visualizations available for this model.")
-                        return
-
-                    # Extrair nome do algoritmo e o número do trial do modelo
-                    algo_name = full_name.split(" - ")[0]
-                    trial_label = full_name.split(" - ")[1] # "Trial X"
-                    trial_num = int(trial_label.replace("Trial ", ""))
-
-                    trial_info = {
-                        "Global Trial": trial.number + 1,
-                        "Model Trial": trial_num,
-                        "Model": algo_name,
-                        "Identifier": full_name,
-                        "Duration (s)": dur
+                    job_config = {
+                        # Data
+                        'train_df': st.session_state.get('train_df'),
+                        'test_df': st.session_state.get('test_df'),
+                        'target': target,
+                        'task': task,
+                        'date_col': date_col_pre,
+                        'forecast_horizon': forecast_horizon,
+                        'selected_nlp_cols': selected_nlp_cols,
+                        'nlp_config': nlp_config_automl,
+                        # Training
+                        'preset': training_preset,
+                        'n_trials': n_trials,
+                        'timeout': timeout_per_model,
+                        'time_budget': total_time_budget,
+                        'selected_models': selected_models,
+                        'manual_params': manual_params,
+                        'experiment_name': clean_experiment_name,
+                        'random_state': random_seed_config,
+                        'validation_strategy': validation_strategy,
+                        'validation_params': validation_params,
+                        'ensemble_config': ensemble_config,
+                        'optimization_mode': selected_opt_mode,
+                        'optimization_metric': optimization_metric,
+                        'target_metric_name': target_metric_name_local,
+                        'early_stopping': early_stopping,
+                        'stability_config': {'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
+                        # MLflow
+                        'mlflow_tracking_uri': mlflow.get_tracking_uri(),
+                        'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
+                        'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
                     }
 
-                    # Adicionar métricas adicionais se houver
-                    if metrics:
-                        for m_k, m_v in metrics.items():
-                            if m_k != "__report__" and isinstance(m_v, (int, float, np.number)):
-                                col_name = m_k.upper()
-                                trial_info[col_name] = m_v
-                    
-                    # Garantir que a métrica alvo esteja presente no trial_info para o gráfico
-                    if target_metric_name not in trial_info:
-                        trial_info[target_metric_name] = score
-
-                    st.session_state['trials_data'].append(trial_info)
-                    
-                    df_trials = pd.DataFrame(st.session_state['trials_data'])
-                    
-                    with status_c:
-                        metric_text = f"{target_metric_name}: {score:.4f}"
-                        st.info(f"{full_name} completed | {metric_text} | Total: {trial.number + 1}/{total_expected_trials}")
-                    
-                    progress_bar.progress(min((trial.number + 1) / total_expected_trials, 1.0))
-                    
-                    with chart_c:
-                        # Gráfico mostrando o progresso de cada modelo individualmente
-                        # Prepare rich hover data
-                        available_cols = df_trials.columns.tolist()
-                        hover_data_cols = [c for c in ["Model", "Identifier", "Duration (s)"] if c in available_cols]
-                        
-                        # Adicionar todas as métricas encontradas ao hover
-                        for col in available_cols:
-                            if col not in hover_data_cols and col not in ["Global Trial", "Model Trial"]:
-                                hover_data_cols.append(col)
-                        
-                        fig = px.line(df_trials, x="Model Trial", y=target_metric_name, color="Model", 
-                                    markers=True, 
-                                    hover_name="Identifier",
-                                    hover_data=hover_data_cols,
-                                    title=f"Optimization Progress: {target_metric_name} by Algorithm")
-                        
-                        fig.update_layout(xaxis_title="Model Trial No.", yaxis_title=target_metric_name)
-                        st.plotly_chart(fig, key=f"chart_{trial.number}", use_container_width=True)
-
-                with st.spinner("Processing..."):
-                    processor = AutoMLDataProcessor(target_column=target, task_type=task, date_col=date_col_pre, forecast_horizon=forecast_horizon, nlp_config=nlp_config_automl)
-                    X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
-                    
-                    # Exibir relatório de qualidade Deepchecks se disponível
-                    if hasattr(processor, 'quality_report_html') and processor.quality_report_html:
-                        with st.expander("📊 Data Quality Report (Deepchecks)", expanded=False):
-                            import streamlit.components.v1 as components
-                            # Limitar altura para não quebrar a UI
-                            components.html(processor.quality_report_html, height=800, scrolling=True)
-                    
-                    X_test_proc, y_test_proc = processor.transform(test_df) if test_df is not None else (None, None)
-                    
-                    # Preparar modelos customizados (Upload/Registry)
-                    custom_models = {}
-                    if model_source == "Local Upload (.pkl)" and 'uploaded_pkl' in locals() and uploaded_pkl:
-                         try:
-                             loaded_model = joblib.load(uploaded_pkl)
-                             custom_models["Uploaded_Model"] = loaded_model
-                         except Exception as e:
-                             st.error(f"Error loading .pkl: {e}")
-                             st.stop()
-                    elif model_source == "Model Registry (Registered)" and selected_models:
-                         model_name = selected_models[0]
-                         try:
-                             loaded_model = load_registered_model(model_name)
-                             custom_models[model_name] = loaded_model
-                         except Exception as e:
-                             st.error(f"Error loading from registry: {e}")
-                             st.stop()
-
-                    trainer = AutoMLTrainer(task_type=task, preset=training_preset, ensemble_config=ensemble_config)
-                    
-                    # Limpar nome do experimento para evitar erro de codificação no Windows
-                    clean_experiment_name = "".join(c for c in experiment_name if ord(c) < 128)
-                    if not clean_experiment_name:
-                        clean_experiment_name = "AutoML_Experiment"
-
-                    # Get feature and class names for better reporting
-                    feature_names = processor.get_feature_names()
-                    class_names = None
-                    if hasattr(processor, 'label_encoder') and processor.label_encoder:
-                        class_names = processor.label_encoder.classes_.tolist()
-
-                    try:
-                        best_model = trainer.train(
-                            X_train_proc, 
-                            y_train_proc, 
-                            n_trials=n_trials,
-                            timeout=timeout_per_model,
-                            time_budget=total_time_budget,
-                            callback=callback, 
-                            selected_models=selected_models, 
-                            early_stopping_rounds=early_stopping,
-                            manual_params=manual_params,
-                            experiment_name=clean_experiment_name,
-                            random_state=random_seed_config,
-                            validation_strategy=validation_strategy,
-                            validation_params=validation_params,
-                            custom_models=custom_models,
-                            optimization_mode=selected_opt_mode,
-                            optimization_metric=optimization_metric,
-                            stability_config={'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
-                            feature_names=feature_names,
-                            class_names=class_names
-                        )
-                        best_params = trainer.best_params
-                        
-                        st.session_state['best_model'] = best_model
-                        st.session_state['best_params'] = best_params
-                        st.session_state['processor'] = processor
-                        
-                        # Evaluation
-                        metrics, y_pred = trainer.evaluate(X_test_proc, y_test_proc) if X_test_proc is not None else (None, None)
-                        
-                        st.success("AutoML Process Finished Successfully!")
-                    finally:
-                        # Ensure the Streamlit handler is removed after process finishes or fails
-                        try:
-                            automl_logger.removeHandler(st_handler)
-                            optuna_logger.removeHandler(st_handler)
-                            automl_logger.setLevel(original_automl_level)
-                            optuna_logger.setLevel(original_optuna_level)
-                        except:
-                            pass
-                    
-                    # Mostrar o melhor modelo de forma destacada
-                    best_model_name = trainer.best_params.get('model_name', 'Unknown')
+                    jm = st.session_state['job_manager']
+                    job_id = jm.submit_job(job_config, name=clean_experiment_name)
+                    st.success(f"✅ Experiment **{clean_experiment_name}** submitted! (Job ID: `{job_id}`)")
+                    st.info("📊 View live progress, logs and results in the **Experiments** tab.")
                     st.balloons()
-                    st.markdown(f"""
-                        <div style="background-color:#d4edda; padding:20px; border-radius:10px; border-left:8px solid #28a745; margin-bottom:20px;">
-                            <h2 style="color:#155724; margin:0;">Best Model Found: {best_model_name}</h2>
-                            <p style="color:#155724; font-size:1.1em; margin-top:10px;">The system optimized and selected the algorithm above as the best performing for your task.</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-
-                    # --- Resumo por Modelo ---
-                    if hasattr(trainer, 'model_summaries') and trainer.model_summaries:
-                        st.markdown("### Best Results by Algorithm")
-                        summary_data = []
-                        for m_name, info in trainer.model_summaries.items():
-                            row = {
-                                "Algorithm": m_name,
-                                "Best Score": f"{info['score']:.4f}",
-                                "Trial": info['trial_name'],
-                                "Duration (s)": f"{info['duration']:.2f}"
-                            }
-                            # Adicionar métricas adicionais se disponíveis
-                            if 'metrics' in info:
-                                for met_name, met_val in info['metrics'].items():
-                                    if met_name != 'confusion_matrix' and isinstance(met_val, (int, float, np.number)):
-                                        row[met_name.upper()] = f"{met_val:.4f}"
-                            summary_data.append(row)
-                        
-                        df_summary = pd.DataFrame(summary_data)
-                        st.table(df_summary)
-                        
-                        # Também permitir ver todos os trials em uma tabela expansível
-                        with st.expander("View Full History of All Trials"):
-                            if st.session_state.get('trials_data'):
-                                df_all = pd.DataFrame(st.session_state['trials_data'])
-                                if not df_all.empty:
-                                    # Drop all-NA columns to avoid deprecation warning
-                                    df_all = df_all.dropna(axis=1, how='all')
-                                    st.dataframe(df_all.sort_values(by=target_metric_name, ascending=False), use_container_width=True)
-                            else:
-                                st.info("No trial data to display.")
-
-                    if metrics: 
-                        st.markdown("### Final Results (Global Best Model)")
-                        cols_m = st.columns(len(metrics))
-                        for i, (m_name, m_val) in enumerate(metrics.items()):
-                            if m_name != 'confusion_matrix':
-                                with cols_m[i % len(cols_m)]:
-                                    st.metric(m_name.upper(), f"{m_val:.4f}" if isinstance(m_val, (float, np.float64, np.float32)) else m_val)
-                    
-                    # --- Amostra de Código de Consumo ---
-                    if hasattr(trainer, 'best_consumption_code') and trainer.best_consumption_code:
-                        st.divider()
-                        st.subheader("💻 Model Consumption (Code Sample)")
-                        st.info("Use the code below to load and use this model in your application.")
-                        st.code(trainer.best_consumption_code, language='python')
-                    
-                    # --- Model Card ---
-                    if hasattr(trainer, 'model_summaries') and best_model_name in trainer.model_summaries:
-                        best_model_info = trainer.model_summaries[best_model_name]
-                        if 'model_card' in best_model_info.get('metrics', {}):
-                            st.divider()
-                            st.subheader("📄 Model Card")
-                            with st.expander("View Full Model Card", expanded=False):
-                                st.markdown(best_model_info['metrics']['model_card'])
-                                st.download_button(
-                                    label="Download Model Card (Markdown)",
-                                    data=best_model_info['metrics']['model_card'],
-                                    file_name=f"model_card_{best_model_name}.md",
-                                    mime="text/markdown"
-                                )
-                    
-                    # --- Visualizações de Resultados ---
-                    if X_test_proc is not None:
-                        st.divider()
-                        st.subheader("Performance Visualization")
-                        
-                        if task == "classification":
-                            col_v1, col_v2 = st.columns(2)
-                            with col_v1:
-                                if 'confusion_matrix' in metrics:
-                                    cm = np.array(metrics['confusion_matrix'])
-                                    
-                                    # Use class names for Plotly labels if available
-                                    labels_plotly = class_names if class_names else None
-                                    
-                                    fig_cm = px.imshow(cm, text_auto=True, title="Confusion Matrix",
-                                                     labels=dict(x="Predicted", y="Actual", color="Quantity"),
-                                                     x=labels_plotly, y=labels_plotly)
-                                    st.plotly_chart(fig_cm)
-                            with col_v2:
-                                # Feature Importance (SHAP - SHapley Additive exPlanations)
-                                st.markdown("#### Feature Importance (SHAP)")
-                                st.info("Calculating Explainability via SHAP (may take a few seconds)...")
-                                
-                                shap_success = False
-                                try:
-                                    # Usar sample para performance em ambientes com poucos recursos
-                                    max_shap_train = 100
-                                    max_shap_test = 50
-                                    
-                                    sample_train = X_train_proc
-                                    if len(sample_train) > max_shap_train:
-                                        sample_train = shap.utils.sample(sample_train, max_shap_train)
-                                        
-                                    sample_test = X_test_proc
-                                    if sample_test is not None and len(sample_test) > max_shap_test:
-                                        sample_test = shap.utils.sample(sample_test, max_shap_test)
-
-                                    if sample_test is not None:
-                                        # Use dense representation if sparse to avoid SHAP errors
-                                        if hasattr(sample_train, "toarray"):
-                                            sample_train = sample_train.toarray()
-                                        if hasattr(sample_test, "toarray"):
-                                            sample_test = sample_test.toarray()
-                                            
-                                        explainer = ModelExplainer(best_model, sample_train, task_type=task)
-                                        
-                                        # Plot Beeswarm (Resumo)
-                                        st.markdown("**SHAP Summary Plot**")
-                                        st.caption("Mostra como cada feature impacta a saida do modelo. Pontos vermelhos = valor alto da feature, azuis = valor baixo.")
-                                        fig_shap = explainer.plot_importance(sample_test, plot_type="summary")
-                                        if fig_shap:
-                                            st.pyplot(fig_shap, clear_figure=True)
-                                        
-                                        # Plot Bar (Global Importance)
-                                        st.markdown("**SHAP Feature Importance (Bar)**")
-                                        st.caption("Absolute mean of the impact of each feature.")
-                                        fig_shap_bar = explainer.plot_importance(sample_test, plot_type="bar")
-                                        if fig_shap_bar:
-                                            st.pyplot(fig_shap_bar, clear_figure=True)
-                                        shap_success = True
-                                except Exception as e:
-                                    st.warning(f"Could not generate SHAP plot: {e}")
-
-                                # Fallback to manual feature importance if SHAP fails
-                                if not shap_success and hasattr(trainer, 'feature_importance') and trainer.feature_importance:
-                                    st.info("Displaying importance based on coefficients/trees (alternative method).")
-                                    fi_data = pd.DataFrame({
-                                        'Feature': processor.get_feature_names(),
-                                        'Importance': trainer.feature_importance
-                                    }).sort_values(by='Importance', ascending=False)
-                                    
-                                    fig_fi = px.bar(fi_data.head(15), x='Importance', y='Feature', orientation='h',
-                                                  title="Top 15 Most Important Features")
-                                    fig_fi.update_layout(yaxis={'categoryorder':'total ascending'})
-                                    st.plotly_chart(fig_fi, use_container_width=True)
-
-                        elif task in ["regression", "time_series"]:
-                            df_res = pd.DataFrame({"Actual": y_test_proc, "Predicted": y_pred})
-                            if task == "time_series":
-                                fig_res = px.line(df_res.reset_index(), y=["Actual", "Predicted"], title="Time Series: Actual vs Predicted")
-                            else:
-                                fig_res = px.scatter(df_res, x="Actual", y="Predicted", trendline="ols", title="Regression: Actual vs Predicted")
-                            st.plotly_chart(fig_res)
-
-                        elif task == "clustering":
-                            # PCA for visualization
-                            from sklearn.decomposition import PCA
-                            pca = PCA(n_components=2)
-                            X_pca = pca.fit_transform(X_test_proc)
-                            df_pca = pd.DataFrame(X_pca, columns=['PCA1', 'PCA2'])
-                            df_pca['Cluster'] = y_pred.astype(str)
-                            fig_cluster = px.scatter(df_pca, x='PCA1', y='PCA2', color='Cluster', title="Cluster Visualization (PCA)")
-                            st.plotly_chart(fig_cluster)
-
-                        elif task == "anomaly_detection":
-                            from sklearn.decomposition import PCA
-                            pca = PCA(n_components=2)
-                            X_pca = pca.fit_transform(X_test_proc)
-                            df_pca = pd.DataFrame(X_pca, columns=['PCA1', 'PCA2'])
-                            # y_pred: -1 for anomaly, 1 for normal
-                            df_pca['Status'] = np.where(y_pred == -1, 'Anomaly', 'Normal')
-                            fig_anom = px.scatter(df_pca, x='PCA1', y='PCA2', color='Status', 
-                                                color_discrete_map={'Anomaly': 'red', 'Normal': 'blue'},
-                                                title="Anomaly Detection (PCA)")
-                            st.plotly_chart(fig_anom)
-
-
 
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
@@ -1902,42 +1488,326 @@ with tabs[1]:
 
 # --- TAB 3: EXPERIMENTS ---
 with tabs[2]:
-    st.header("Experiments Explorer")
-    st.markdown("Here you can find the history of **all training runs**. Choose the best ones to register in the official catalog.")
+    jm: TrainingJobManager = st.session_state['job_manager']
     
-    runs = get_cached_all_runs()
-    if not runs.empty:
-        # Filtros de Experimento
-        exp_names = runs['experiment_name'].unique().tolist()
-        selected_exps = st.multiselect("Filter Experiments", exp_names, default=exp_names)
+    @st.fragment(run_every=2.0)
+    def experiments_dashboard():
+        jm.poll_updates()
+        jobs = jm.list_jobs()
+
+        # Header
+        col_exp_h1, col_exp_h2 = st.columns([3, 1])
+        with col_exp_h1:
+            st.header("🧪 Experiments")
+            st.caption(f"Active jobs: **{jm.active_count()}** · Total: **{len(jobs)}**")
+        with col_exp_h2:
+            if st.button("🔄 Refresh", key="exp_refresh"):
+                st.rerun()
+
+        if not jobs:
+            st.info("No experiments yet. Go to **AutoML & Model Hub** → configure settings → click **Submit Experiment**.")
+            return
+
+        # Search / filter bar
+        search_q = st.text_input("🔍 Search experiments", key="exp_search", placeholder="Filter by name...")
+        filter_status = st.multiselect(
+            "Status", 
+            [JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED],
+            default=[JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED],
+            key="exp_status_filter",
+            format_func=lambda s: {"queued":"🔵 Queued","running":"🟢 Running","paused":"🟡 Paused",
+                                   "completed":"✅ Completed","failed":"🔴 Failed","cancelled":"⚫ Cancelled"}.get(s, s)
+        )
+
+        visible_jobs = [
+            j for j in jobs
+            if j.status in filter_status and (not search_q or search_q.lower() in j.name.lower())
+        ]
+
+        if not visible_jobs:
+            st.warning("No experiments match the current filters.")
         
-        filtered_runs = runs[runs['experiment_name'].isin(selected_exps)].sort_values('start_time', ascending=False)
-        
-        # Grid de Runs
-        st.dataframe(filtered_runs[['run_id', 'experiment_name', 'status', 'start_time']], use_container_width=True)
-        
-        st.divider()
-        
-        # Detalhes e Registro
-        col_det1, col_det2 = st.columns([1, 1])
-        with col_det1:
-            run_id_sel = st.selectbox("Select Run to Explore", filtered_runs['run_id'].tolist())
-            if run_id_sel:
-                run_data = filtered_runs[filtered_runs['run_id'] == run_id_sel].iloc[0]
-                st.markdown("#### Metrics")
-                metrics = {k.replace('metrics.', ''): v for k, v in run_data.items() if k.startswith('metrics.') and pd.notna(v)}
-                st.json(metrics)
-        
-        with col_det2:
-            if run_id_sel:
-                st.markdown("#### Register as Official Model")
-                model_reg_name = st.text_input("Registry Name", value=f"model_{run_id_sel[:6]}")
-                if st.button("Confirm Registration"):
-                    if register_model_from_run(run_id_sel, model_reg_name):
-                        st.success(f"Model {model_reg_name} is now in the Registry!")
+        for job in visible_jobs:
+            # Status badge color
+            badge = {"queued":"🔵","running":"🟢","paused":"🟡","completed":"✅","failed":"🔴","cancelled":"⚫"}.get(job.status, "⚪")
+            score_str = f"Best: **{job.best_score:.4f}**" if job.best_score is not None else ""
+            label = f"{badge} **{job.name}** &nbsp;&nbsp; `{job.status.upper()}` &nbsp;&nbsp; ⏱ {job.duration_str}  &nbsp;&nbsp; {score_str}"
+
+            with st.expander(label, expanded=(job.status in (JobStatus.RUNNING, JobStatus.PAUSED))):
+                # ──── Action buttons ────
+                btn_cols = st.columns([1, 1, 1, 1, 1, 2])
+                with btn_cols[0]:
+                    if job.status == JobStatus.RUNNING:
+                        if st.button("⏸ Pause", key=f"pause_{job.job_id}"):
+                            jm.pause_job(job.job_id)
+                            st.rerun()
+                with btn_cols[1]:
+                    if job.status == JobStatus.PAUSED:
+                        if st.button("▶ Resume", key=f"resume_{job.job_id}"):
+                            jm.resume_job(job.job_id)
+                            st.rerun()
+                with btn_cols[2]:
+                    if job.is_active():
+                        if st.button("⏹ Cancel", key=f"cancel_{job.job_id}"):
+                            jm.cancel_job(job.job_id)
+                            st.rerun()
+                with btn_cols[3]:
+                    if st.button("🗑 Delete", key=f"delete_{job.job_id}"):
+                        jm.delete_job(job.job_id)
                         st.rerun()
-    else:
-        st.info("No experiments found. Start a training session in the AutoML & Model Hub tab.")
+                with btn_cols[4]:
+                    if job.mlflow_run_id:
+                        if st.button("📋 MLflow", key=f"mlflow_{job.job_id}"):
+                            st.session_state[f'mlflow_sel_{job.job_id}'] = True
+
+                # ──── Error display ────
+                if job.status == JobStatus.FAILED and job.error_msg:
+                    st.error(f"**Error:** {job.error_msg}")
+
+                # ──── Detail sub-tabs ────
+                detail_tabs = st.tabs(["📊 Overview", "📈 Progress", "🖥 Logs", "🏆 Results", "🔬 MLflow Details", "📦 Register"])
+
+                # ── Tab 0: Overview ──
+                with detail_tabs[0]:
+                    ov1, ov2 = st.columns(2)
+                    with ov1:
+                        st.markdown(f"**Status:** {job.status_label}")
+                        st.markdown(f"**Job ID:** `{job.job_id}`")
+                        st.markdown(f"**Duration:** {job.duration_str}")
+                        if job.best_score is not None:
+                            st.metric("Best Score", f"{job.best_score:.4f}")
+                        if job.mlflow_run_id:
+                            st.markdown(f"**MLflow Run:** `{job.mlflow_run_id}`")
+                        if job.mlflow_experiment:
+                            st.markdown(f"**Experiment:** `{job.mlflow_experiment}`")
+                    with ov2:
+                        cfg = job.config
+                        st.markdown("**Configuration:**")
+                        st.json({
+                            "task": cfg.get("task"),
+                            "target": cfg.get("target"),
+                            "preset": cfg.get("preset"),
+                            "n_trials": cfg.get("n_trials"),
+                            "validation": cfg.get("validation_strategy"),
+                            "optimization_metric": cfg.get("optimization_metric"),
+                            "selected_models": cfg.get("selected_models") or "All",
+                        }, expanded=False)
+
+                # ── Tab 1: Progress ──
+                with detail_tabs[1]:
+                    if job.trials_data:
+                        df_t = pd.DataFrame(job.trials_data)
+                        metric_col = job.target_metric
+                        if metric_col not in df_t.columns:
+                            numeric_cols = df_t.select_dtypes(include='number').columns.tolist()
+                            metric_col = numeric_cols[-1] if numeric_cols else None
+                        
+                        if metric_col and "Model" in df_t.columns:
+                            fig_p = px.line(
+                                df_t, x="Model Trial", y=metric_col, color="Model",
+                                markers=True, title=f"Optimization Progress — {metric_col}",
+                                hover_name="Identifier" if "Identifier" in df_t.columns else None
+                            )
+                            st.plotly_chart(fig_p, use_container_width=True, key=f"prog_{job.job_id}")
+                        
+                        with st.expander("All Trials Table"):
+                            st.dataframe(df_t.dropna(axis=1, how='all'), use_container_width=True)
+                    else:
+                        st.info("Waiting for first trial to complete…")
+                    
+                    # Model summaries if available
+                    if job.model_summaries:
+                        st.divider()
+                        st.markdown("#### Best Results by Model")
+                        sum_rows = []
+                        for mn, mi in job.model_summaries.items():
+                            row = {"Model": mn, "Best Score": f"{mi.get('score', 0):.4f}",
+                                   "Trial": mi.get("trial_name", "?"), "Duration (s)": f"{mi.get('duration', 0):.2f}"}
+                            if 'metrics' in mi:
+                                for mk, mv in mi['metrics'].items():
+                                    if mk != 'confusion_matrix' and isinstance(mv, (int, float)):
+                                        row[mk.upper()] = f"{mv:.4f}"
+                            sum_rows.append(row)
+                        if sum_rows:
+                            st.dataframe(pd.DataFrame(sum_rows), use_container_width=True)
+
+                # ── Tab 2: Logs ──
+                with detail_tabs[2]:
+                    if job.logs:
+                        log_text = "\n".join(job.logs[-200:])
+                        st.text_area("Live Logs (last 200 lines)", value=log_text, height=400, key=f"logs_{job.job_id}", disabled=True)
+                    else:
+                        st.info("No logs yet. Logs appear as training progresses.")
+
+                # ── Tab 3: Results ──
+                with detail_tabs[3]:
+                    if job.report_data:
+                        for m_name, rep in job.report_data.items():
+                            with st.expander(f"📊 Report: {m_name} (Score: {rep.get('score', 0):.4f})", expanded=True):
+                                r1, r2 = st.columns([1, 2])
+                                with r1:
+                                    st.markdown("**Validation Metrics**")
+                                    rep_metrics = rep.get('metrics', {})
+                                    if rep_metrics:
+                                        met_df = pd.DataFrame(list(rep_metrics.items()), columns=['Metric', 'Value'])
+                                        met_df = met_df[met_df['Metric'] != 'confusion_matrix']
+                                        st.table(met_df)
+                                    st.markdown(f"**MLflow Run:** `{rep.get('run_id', 'N/A')}`")
+                                    st.markdown(f"**Best Trial:** {rep.get('best_trial_number', 'N/A')}")
+
+                                    # Stability results
+                                    if rep.get('stability'):
+                                        st.divider()
+                                        st.markdown("**Stability Analysis**")
+                                        for s_type, s_data in rep['stability'].items():
+                                            with st.expander(f"Test: {s_type}"):
+                                                if isinstance(s_data, dict):
+                                                    st.json(s_data)
+                                                else:
+                                                    st.dataframe(s_data)
+
+                                with r2:
+                                    plots = rep.get('plots', {})
+                                    if plots:
+                                        plot_names = list(plots.keys())
+                                        plot_tabs = st.tabs(plot_names)
+                                        for pi, pn in enumerate(plot_names):
+                                            with plot_tabs[pi]:
+                                                ptype, pbuf = plots[pn]
+                                                try:
+                                                    import io as _io
+                                                    st.image(_io.BytesIO(pbuf))
+                                                except Exception:
+                                                    st.warning(f"Could not render plot: {pn}")
+                                    else:
+                                        st.info("No plots available.")
+
+                    elif job.status == JobStatus.COMPLETED:
+                        cfg = job.config
+                        bp = cfg.get('best_params', {})
+                        ev = cfg.get('eval_metrics', {})
+                        st.markdown(f"**Best Model:** `{bp.get('model_name', 'Unknown')}`")
+                        if ev:
+                            st.markdown("**Evaluation Metrics:**")
+                            for k, v in ev.items():
+                                if k != 'confusion_matrix' and isinstance(v, (int, float)):
+                                    st.metric(k.upper(), f"{v:.4f}")
+                        cc = cfg.get('consumption_code')
+                        if cc:
+                            st.divider()
+                            st.markdown("**Model Consumption Code:**")
+                            st.code(cc, language='python')
+                    else:
+                        st.info("Results will appear here when the experiment completes.")
+
+                # ── Tab 4: MLflow Details ──
+                with detail_tabs[4]:
+                    if job.mlflow_run_id:
+                        # Caching MLflow data
+                        cache = st.session_state['mlflow_cache']
+                        if job.mlflow_run_id not in cache:
+                            with st.spinner("Fetching MLflow data…"):
+                                cache[job.mlflow_run_id] = get_run_details(job.mlflow_run_id)
+                        
+                        rd = cache[job.mlflow_run_id]
+                        
+                        if "error" in rd:
+                            st.error(f"Could not load MLflow data: {rd['error']}")
+                        else:
+                            info = rd.get("info", {})
+                            cols_ml = st.columns(3)
+                            cols_ml[0].metric("Status", info.get("status", "?"))
+                            if info.get("start_time"):
+                                import datetime as _dt
+                                st.datetime_info = _dt.datetime.fromtimestamp(info["start_time"] / 1000)
+                                cols_ml[1].metric("Started", st.datetime_info.strftime("%H:%M:%S"))
+                            cols_ml[2].caption(f"Experiment: **{info.get('experiment_name', '?')}**")
+
+                            ml_tabs = st.tabs(["Parameters", "Metrics", "Tags", "Artifacts"])
+                            with ml_tabs[0]:
+                                params_data = rd.get("params", {})
+                                if params_data:
+                                    params_df = pd.DataFrame(list(params_data.items()), columns=['Parameter', 'Value'])
+                                    st.dataframe(params_df, use_container_width=True)
+                                else:
+                                    st.info("No parameters logged.")
+                            with ml_tabs[1]:
+                                metrics_data = rd.get("metrics", {})
+                                if metrics_data:
+                                    met_cols = st.columns(min(len(metrics_data), 4))
+                                    for mi, (mk, mv) in enumerate(metrics_data.items()):
+                                        met_cols[mi % 4].metric(mk, f"{mv:.4f}" if isinstance(mv, float) else mv)
+                                    
+                                    # Show history chart for numeric metrics
+                                    hist = rd.get("metric_history", {})
+                                    if hist:
+                                        metric_sel = st.selectbox("Metric History", list(hist.keys()), key=f"mhist_{job.job_id}")
+                                        if metric_sel and hist.get(metric_sel):
+                                            hist_df = pd.DataFrame(hist[metric_sel])
+                                            fig_hist = px.line(hist_df, x="step", y="value", title=f"{metric_sel} History")
+                                            st.plotly_chart(fig_hist, use_container_width=True, key=f"hist_{job.job_id}")
+                                else:
+                                    st.info("No metrics logged.")
+                            with ml_tabs[2]:
+                                tags_data = rd.get("tags", {})
+                                if tags_data:
+                                    st.json(tags_data)
+                                else:
+                                    st.info("No custom tags.")
+                            with ml_tabs[3]:
+                                artifacts = rd.get("artifacts", [])
+                                if artifacts:
+                                    for a in artifacts:
+                                        st.markdown(f"📄 `{a}`")
+                                else:
+                                    st.info("No artifacts logged.")
+                    else:
+                        st.info("MLflow data available after the experiment completes.")
+
+                # ── Tab 5: Register Model ──
+                with detail_tabs[5]:
+                    if job.mlflow_run_id:
+                        st.markdown("### Register this run as an Official Model")
+                        reg_name = st.text_input(
+                            "Model Registry Name", 
+                            value=f"{job.config.get('task', 'model')}_{job.name[:20]}",
+                            key=f"reg_name_{job.job_id}"
+                        )
+                        if st.button("📦 Register Model", key=f"reg_btn_{job.job_id}", type="primary"):
+                            with st.spinner("Registering…"):
+                                success = register_model_from_run(job.mlflow_run_id, reg_name)
+                            if success:
+                                st.success(f"✅ Model **{reg_name}** registered! Check the **Model Registry & Deploy** tab.")
+                            else:
+                                st.error("Registration failed. Ensure the run has a logged model artifact.")
+                    else:
+                        st.info("Model registration is available after the experiment completes and logs a model to MLflow.")
+
+    # Call the dashboard fragment
+    experiments_dashboard()
+
+    # ── Historic MLflow runs not in job manager ──
+    st.divider()
+    with st.expander("📚 All MLflow Runs (Historic)", expanded=False):
+        try:
+            runs = get_cached_all_runs()
+            if not runs.empty:
+                exp_names = runs['experiment_name'].unique().tolist()
+                sel_exps = st.multiselect("Filter Experiments", exp_names, default=exp_names, key="hist_exp_filter")
+                filt_runs = runs[runs['experiment_name'].isin(sel_exps)].sort_values('start_time', ascending=False)
+                st.dataframe(filt_runs[['run_id', 'experiment_name', 'status', 'start_time']], use_container_width=True)
+                
+                run_id_sel = st.selectbox("Select Run to Register", filt_runs['run_id'].tolist(), key="hist_run_sel")
+                if run_id_sel:
+                    reg_name_hist = st.text_input("Registry Name", value=f"model_{run_id_sel[:6]}", key="hist_reg_name")
+                    if st.button("Register Selected Run", key="hist_reg_btn"):
+                        if register_model_from_run(run_id_sel, reg_name_hist):
+                            st.success(f"Model {reg_name_hist} registered!")
+                            st.rerun()
+            else:
+                st.info("No historic MLflow runs found.")
+        except Exception as e:
+            st.warning(f"Could not load historic runs: {e}")
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
 with tabs[3]:
