@@ -30,29 +30,341 @@ import logging
 # StreamlitLogHandler is replaced by TrainingJobManager queue-based logging.
 
 
-# 🎨 Custom Styling
+# 🎨 Page config & full dark design system
 try:
-    st.set_page_config(page_title="AutoMLOps Studio", layout="wide")
+    st.set_page_config(
+        page_title="AutoMLOps Studio",
+        page_icon="🚀",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
 except st.errors.StreamlitAPIException:
-    # This happens if run with 'python app.py' instead of 'streamlit run app.py'
     print("ERROR: This app must be run with Streamlit.")
     print("Please run: streamlit run app.py")
     import sys
     sys.exit(1)
 
 st.markdown("""
-    <style>
-    .main { background-color: #f5f7f9; }
-    .stButton>button { border-radius: 8px; border: none; background-color: #4CAF50; color: white; transition: 0.3s; }
-    .stButton>button:hover { background-color: #45a049; transform: scale(1.02); }
-    .metric-card { background-color: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-left: 5px solid #4CAF50; }
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
-    .stTabs [data-baseweb="tab"] { background-color: #ffffff; border-radius: 8px 8px 0 0; padding: 10px 20px; border: 1px solid #e0e0e0; color: #000000 !important; }
-    .stTabs [aria-selected="true"] { background-color: #4CAF50 !important; color: white !important; }
-    .stTabs [data-baseweb="tab"] p { color: #000000 !important; font-weight: 500; }
-    .stTabs [aria-selected="true"] p { color: white !important; }
-    </style>
-    """, unsafe_allow_html=True)
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+:root {
+  --bg-primary:  #0d1117;
+  --bg-card:     #161b22;
+  --bg-surface:  #1c2128;
+  --accent-blue:   #2f80ed;
+  --accent-green:  #27ae60;
+  --accent-purple: #8b5cf6;
+  --accent-orange: #f59e0b;
+  --accent-red:    #ef4444;
+  --text-primary: #e6edf3;
+  --text-muted:   #8b949e;
+  --border:       #30363d;
+  --border-light: #21262d;
+}
+
+html, body, [class*="css"], .stApp {
+  font-family: 'Inter', sans-serif !important;
+  background-color: var(--bg-primary) !important;
+  color: var(--text-primary) !important;
+}
+
+/* ── Sidebar ── */
+[data-testid="stSidebar"] {
+  background-color: var(--bg-card) !important;
+  border-right: 1px solid var(--border) !important;
+}
+[data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] p,
+[data-testid="stSidebar"] label, [data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2, [data-testid="stSidebar"] h3 {
+  color: var(--text-primary) !important;
+}
+
+/* ── Tabs ── */
+.stTabs [data-baseweb="tab-list"] {
+  gap: 4px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 6px;
+  border: 1px solid var(--border);
+}
+.stTabs [data-baseweb="tab"] {
+  background-color: transparent !important;
+  border-radius: 8px;
+  padding: 8px 18px;
+  border: none !important;
+  color: var(--text-muted) !important;
+  font-weight: 500;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+.stTabs [data-baseweb="tab"]:hover {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+}
+.stTabs [aria-selected="true"] {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)) !important;
+  color: white !important;
+  box-shadow: 0 2px 12px rgba(47,128,237,0.35);
+}
+.stTabs [aria-selected="true"] p, .stTabs [data-baseweb="tab"] p {
+  color: inherit !important;
+  font-weight: 600;
+}
+
+/* ── Buttons ── */
+.stButton > button {
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 0.875rem;
+  padding: 6px 16px;
+  transition: all 0.2s ease;
+}
+.stButton > button:hover {
+  background-color: var(--bg-card);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(47,128,237,0.15);
+}
+.stButton > button[kind="primary"] {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  border: none;
+  color: white;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.stButton > button[kind="primary"]:hover {
+  background: linear-gradient(135deg, #1a6dd6, #7c3aed);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(47,128,237,0.35);
+  color: white;
+}
+
+/* ── Cards ── */
+.ui-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.ui-card:hover { border-color: var(--accent-blue); box-shadow: 0 4px 16px rgba(47,128,237,0.1); }
+.ui-card-selected {
+  background: linear-gradient(135deg, rgba(47,128,237,0.08), rgba(139,92,246,0.08));
+  border: 2px solid var(--accent-blue);
+  box-shadow: 0 4px 16px rgba(47,128,237,0.2);
+}
+.ui-metric {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  border-left: 3px solid var(--accent-blue);
+}
+.ui-metric .metric-value { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); }
+.ui-metric .metric-label { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* ── Badges ── */
+.badge {
+  display: inline-block;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+}
+.badge-running  { background: rgba(39,174,96,0.15);  color: #27ae60; border: 1px solid rgba(39,174,96,0.3); }
+.badge-paused   { background: rgba(245,158,11,0.15); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+.badge-done     { background: rgba(47,128,237,0.15); color: var(--accent-blue); border: 1px solid rgba(47,128,237,0.3); }
+.badge-failed   { background: rgba(239,68,68,0.15);  color: var(--accent-red); border: 1px solid rgba(239,68,68,0.3); }
+.badge-queued   { background: rgba(139,92,246,0.15); color: var(--accent-purple); border: 1px solid rgba(139,92,246,0.3); }
+
+/* ── Pipeline step bar ── */
+.pipeline-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 12px 20px;
+  margin-bottom: 24px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+.pipeline-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 90px;
+  cursor: pointer;
+  padding: 6px 10px;
+  border-radius: 10px;
+  transition: background 0.2s ease;
+  position: relative;
+}
+.pipeline-step:hover { background: var(--bg-surface); }
+.step-circle {
+  width: 34px; height: 34px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.85rem; font-weight: 700;
+  transition: all 0.25s ease;
+}
+.step-circle.pending  { background: var(--bg-surface); border: 2px solid var(--border); color: var(--text-muted); }
+.step-circle.active   { background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); color: white; box-shadow: 0 4px 12px rgba(47,128,237,0.4); }
+.step-circle.done     { background: var(--accent-green); color: white; }
+.step-label {
+  font-size: 0.7rem; font-weight: 500;
+  color: var(--text-muted);
+  text-align: center; white-space: nowrap;
+}
+.step-label.active { color: var(--accent-blue); font-weight: 600; }
+.step-label.done   { color: var(--accent-green); }
+.step-connector {
+  flex: 1; height: 2px; min-width: 20px;
+  background: var(--border);
+  margin: 0;
+  position: relative;
+  top: -14px;
+}
+.step-connector.done { background: var(--accent-green); }
+
+/* ── Task card (model selection) ── */
+.task-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.task-card:hover { border-color: var(--accent-blue); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(47,128,237,0.12); }
+.task-card.selected { border-color: var(--accent-blue); background: linear-gradient(135deg, rgba(47,128,237,0.1), rgba(139,92,246,0.1)); }
+.task-card .task-icon { font-size: 2rem; }
+.task-card .task-name { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
+.task-card .task-desc { font-size: 0.72rem; color: var(--text-muted); }
+
+/* ── Inputs / selects / sliders general dark ── */
+.stTextInput input, .stSelectbox div[data-baseweb="select"],
+.stMultiSelect div[data-baseweb="select"], .stNumberInput input,
+.stTextArea textarea {
+  background-color: var(--bg-surface) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--border) !important;
+  border-radius: 8px !important;
+}
+.stSelectbox div[data-baseweb="select"]:hover,
+.stMultiSelect div[data-baseweb="select"]:hover {
+  border-color: var(--accent-blue) !important;
+}
+div[data-baseweb="popover"] { background: var(--bg-card) !important; border-color: var(--border) !important; }
+div[data-baseweb="menu"] { background: var(--bg-card) !important; }
+div[data-baseweb="option"]:hover { background: var(--bg-surface) !important; }
+
+/* ── Dividers and headers ── */
+hr { border-color: var(--border-light) !important; }
+h1, h2, h3, h4, h5, h6 { color: var(--text-primary) !important; }
+p, span, li { color: var(--text-primary) !important; }
+.stCaption p, small { color: var(--text-muted) !important; }
+
+/* ── Dataframe / Tables ── */
+.dataframe, .stDataFrame { border-color: var(--border) !important; }
+
+/* ── Log terminal ── */
+.log-terminal {
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.78rem;
+  line-height: 1.6;
+  color: #58a6ff;
+  max-height: 400px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Step summary card ── */
+.summary-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 20px;
+  margin: 6px 0;
+}
+.summary-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border-light); }
+.summary-row:last-child { border-bottom: none; }
+.summary-key { color: var(--text-muted); font-size: 0.82rem; }
+.summary-val { color: var(--text-primary); font-size: 0.82rem; font-weight: 600; }
+
+/* ── Upload zone ── */
+.upload-zone {
+  border: 2px dashed var(--border);
+  border-radius: 14px;
+  padding: 32px;
+  text-align: center;
+  background: var(--bg-card);
+  transition: border-color 0.2s;
+}
+.upload-zone:hover { border-color: var(--accent-blue); }
+
+/* ── Hero header ── */
+.hero-header {
+  padding: 12px 0 8px;
+  background: transparent;
+}
+.hero-title {
+  font-size: 1.9rem;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1.2;
+}
+.hero-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+.version-badge {
+  display: inline-block;
+  background: rgba(47,128,237,0.15);
+  color: var(--accent-blue);
+  border: 1px solid rgba(47,128,237,0.3);
+  border-radius: 20px;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  margin-left: 10px;
+  vertical-align: middle;
+}
+
+/* ── Collapsible expander ── */
+.streamlit-expanderHeader {
+  background: var(--bg-surface) !important;
+  border-color: var(--border) !important;
+  border-radius: 8px !important;
+  color: var(--text-primary) !important;
+}
+.streamlit-expanderContent {
+  background: var(--bg-card) !important;
+  border-color: var(--border) !important;
+}
+</style>
+""", unsafe_allow_html=True)
 
 datalake = DataLake()
 
@@ -64,49 +376,95 @@ def get_cached_all_runs():
 def get_cached_registered_models():
     return get_registered_models()
 
-# 📊 Sidebar Metrics & Summary
+# 📋 Sidebar — Premium control panel
 with st.sidebar:
-    # Hybrid Rendering Detection
     if os.environ.get('IS_ELECTRON_APP') == 'true':
-        st.markdown("`Desktop Mode`")
-        
-    st.title("Platform Control")
+        st.markdown('<span class="badge badge-queued">🖥️ Desktop</span>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div style='padding: 12px 0 8px;'>
+      <div style='font-size:1.3rem;font-weight:800;background:linear-gradient(90deg,#2f80ed,#8b5cf6);
+           -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;'>
+        🚀 AutoMLOps Studio
+      </div>
+      <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
+        <span style='font-size:0.7rem;color:#8b949e;'>Enterprise ML Platform</span>
+        <span class='version-badge'>v2.0</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.divider()
-    
-    # Quick Stats (Cached)
+
+    # Quick Stats
     all_runs_df = get_cached_all_runs()
-    reg_models = get_cached_registered_models()
-    
-    st.markdown("### System Overview")
-    col_s1, col_s2 = st.columns(2)
-    with col_s1:
-        st.metric("Experiments", len(all_runs_df) if not all_runs_df.empty else 0)
-    with col_s2:
-        st.metric("Reg. Models", len(reg_models))
-        
-    st.divider()
-    st.markdown("### Active Dataset")
-    if 'df' in st.session_state:
-        st.success(f"Rows: {st.session_state['df'].shape[0]}\nCols: {st.session_state['df'].shape[1]}")
-    else:
-        st.warning("No data loaded")
+    reg_models_sidebar = get_cached_registered_models()
+    jm_sidebar = st.session_state.get('job_manager')
+    active_jobs = len([j for j in (jm_sidebar.jobs.values() if jm_sidebar else []) if getattr(j, 'status', None) and j.status.value == 'running'])
+
+    st.markdown("<p style='font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:#8b949e;margin-bottom:8px;'>SYSTEM OVERVIEW</p>", unsafe_allow_html=True)
+    m1, m2 = st.columns(2)
+    with m1:
+        st.markdown(f"""
+        <div class='ui-metric'>
+          <div class='metric-value'>{len(all_runs_df) if not all_runs_df.empty else 0}</div>
+          <div class='metric-label'>🧪 Runs</div>
+        </div>""", unsafe_allow_html=True)
+    with m2:
+        st.markdown(f"""
+        <div class='ui-metric' style='border-left-color:#27ae60;'>
+          <div class='metric-value'>{len(reg_models_sidebar)}</div>
+          <div class='metric-label'>📦 Models</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown('<br>', unsafe_allow_html=True)
+    m3, m4 = st.columns(2)
+    with m3:
+        datasets_count = len(datalake.list_datasets())
+        st.markdown(f"""
+        <div class='ui-metric' style='border-left-color:#8b5cf6;'>
+          <div class='metric-value'>{datasets_count}</div>
+          <div class='metric-label'>🗄️ Datasets</div>
+        </div>""", unsafe_allow_html=True)
+    with m4:
+        active_badge = f"<span class='badge badge-{'running' if active_jobs else 'done'}'>{active_jobs} active</span>" if active_jobs else "<span class='badge badge-done'>idle</span>"
+        st.markdown(f"""
+        <div class='ui-metric' style='border-left-color:#f59e0b;'>
+          <div class='metric-value' style='font-size:1.2rem;'>{active_badge}</div>
+          <div class='metric-label'>⚡ Jobs</div>
+        </div>""", unsafe_allow_html=True)
 
     st.divider()
-    
-    # --- DagsHub Integration ---
-    with st.expander("DagsHub Integration"):
+    st.markdown("<p style='font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:#8b949e;margin-bottom:8px;'>ACTIVE DATASET</p>", unsafe_allow_html=True)
+    if 'train_df' in st.session_state:
+        tdf = st.session_state['train_df']
+        task_lbl = st.session_state.get('current_task', 'N/A')
+        st.markdown(f"""
+        <div class='ui-card' style='padding:12px;margin-bottom:8px;border-left:3px solid #27ae60;'>
+          <div style='font-size:0.72rem;color:#8b949e;'>TRAIN SET</div>
+          <div style='font-weight:600;'>{tdf.shape[0]:,} rows × {tdf.shape[1]} cols</div>
+          <span class='badge badge-running' style='margin-top:6px;display:inline-block;'>{task_lbl}</span>
+        </div>""", unsafe_allow_html=True)
+    elif 'df' in st.session_state:
+        df_s = st.session_state['df']
+        st.markdown(f"""
+        <div class='ui-card' style='padding:12px;margin-bottom:8px;'>
+          <div style='font-size:0.72rem;color:#8b949e;'>DATASET</div>
+          <div style='font-weight:600;'>{df_s.shape[0]:,} rows × {df_s.shape[1]} cols</div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown("<div style='color:#8b949e;font-size:0.82rem;'>⚠️ No dataset loaded</div>", unsafe_allow_html=True)
+
+    st.divider()
+
+    # DagsHub Integration
+    with st.expander("☁️ DagsHub Integration"):
         st.caption("Connect to your DagsHub repository to save experiments remotely.")
-        
-        # Try to retrieve settings from environment (.env)
         env_user = os.environ.get("MLFLOW_TRACKING_USERNAME", "")
         env_pass = os.environ.get("MLFLOW_TRACKING_PASSWORD", "")
         env_uri = os.environ.get("MLFLOW_TRACKING_URI", "")
-        
-        # Try to extract the repository name from the URI if it is DagsHub
         default_repo = ""
         if "dagshub.com" in env_uri:
             try:
-                # Exemplo: https://dagshub.com/user/repo.mlflow
                 parts = env_uri.split("dagshub.com/")
                 if len(parts) > 1:
                     repo_part = parts[1].split(".mlflow")[0]
@@ -118,72 +476,63 @@ with st.sidebar:
         dh_user = st.text_input("DagsHub Username", value=env_user, key="dh_user_input")
         dh_repo = st.text_input("Repository Name", value=default_repo, key="dh_repo_input")
         dh_token = st.text_input("DagsHub Token (API Key)", value=env_pass, type="password", key="dh_token_input")
-        
+
         col_dh1, col_dh2 = st.columns(2)
-        
         with col_dh1:
-            if st.button("Connect to DagsHub"):
+            if st.button("Connect", key="dh_connect_btn"):
                 if dh_user and dh_repo and dh_token:
                     try:
-                        # Configure environment variables for MLflow authentication
                         os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
                         os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
-                        
-                        # Configure Tracking URI
                         remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
-                        os.environ["MLFLOW_TRACKING_URI"] = remote_uri # Update env for session persistence
+                        os.environ["MLFLOW_TRACKING_URI"] = remote_uri
                         mlflow.set_tracking_uri(remote_uri)
-                        
-                        # Try to list experiments to validate connection
                         try:
-                            # Simple connection test
                             mlflow.search_experiments(max_results=1)
-                            #st.success(f"✅ Connected: {dh_user}/{dh_repo}")
                             st.session_state['dagshub_connected'] = True
                             st.session_state['mlflow_uri'] = remote_uri
+                            st.success("Connected!")
                         except Exception as e:
-                            st.error(f"❌ Connection failed: {e}")
-                            # Revert to local in case of error
+                            st.error(f"Failed: {e}")
                             local_uri = "sqlite:///mlflow.db"
                             mlflow.set_tracking_uri(local_uri)
                             os.environ["MLFLOW_TRACKING_URI"] = local_uri
                     except Exception as e:
-                        st.error(f"Error configuring: {e}")
+                        st.error(f"Error: {e}")
                 else:
-                    st.warning("Fill in all fields.")
-        
+                    st.warning("Fill all fields.")
         with col_dh2:
-            # Disconnect button only if connected (or if URI points to DagsHub)
             is_dagshub = "dagshub.com" in mlflow.get_tracking_uri()
-            if st.button("Disconnect (Revert to Local)", disabled=not is_dagshub):
+            if st.button("Disconnect", disabled=not is_dagshub, key="dh_disconnect_btn"):
                 local_uri = "sqlite:///mlflow.db"
                 mlflow.set_tracking_uri(local_uri)
                 os.environ["MLFLOW_TRACKING_URI"] = local_uri
-                
-                # For security, we clear from os.environ to ensure real disconnection
                 if "MLFLOW_TRACKING_USERNAME" in os.environ:
                     del os.environ["MLFLOW_TRACKING_USERNAME"]
                 if "MLFLOW_TRACKING_PASSWORD" in os.environ:
                     del os.environ["MLFLOW_TRACKING_PASSWORD"]
-                    
                 st.session_state['dagshub_connected'] = False
-                st.info("🔌 Disconnected. Using local MLflow.")
+                st.info("Disconnected.")
                 st.rerun()
 
-        # Mostrar status atual
         current_uri = mlflow.get_tracking_uri()
         if "dagshub.com" in current_uri:
-            st.success(f"🟢 Connected to DagsHub")
-            st.caption(f"URI: {current_uri}")
+            st.success("🟢 Connected to DagsHub")
         else:
-            st.info("⚪ Using Local MLflow (SQLite)")
-    
-    # Exibir URI atual
+            st.info("⚪ Local MLflow (SQLite)")
+
     current_uri = mlflow.get_tracking_uri()
     st.caption(f"Tracking URI: `{current_uri}`")
 
-st.title("🚀 AutoMLOps Studio")
-st.markdown("Enterprise-grade Automated Machine Learning & MLOps Platform.")
+# 🎨 Hero Header
+st.markdown("""
+<div class='hero-header'>
+  <div class='hero-title'>🚀 AutoMLOps Studio
+    <span class='version-badge'>v2.0.0</span>
+  </div>
+  <div class='hero-subtitle'>Enterprise-grade Automated Machine Learning &amp; MLOps Platform</div>
+</div>
+""", unsafe_allow_html=True)
 
 # Session state initialization
 if 'trials_data' not in st.session_state: st.session_state['trials_data'] = []
@@ -192,8 +541,45 @@ if 'job_manager' not in st.session_state:
     st.session_state['job_manager'] = TrainingJobManager()
 if 'mlflow_cache' not in st.session_state:
     st.session_state['mlflow_cache'] = {}
+# Pipeline wizard state
+if 'automl_step' not in st.session_state: st.session_state['automl_step'] = 0
+if 'automl_config' not in st.session_state: st.session_state['automl_config'] = {}
 
 # poll_updates moved to Experiments tab fragment for performance
+
+
+def render_pipeline_header(steps: list, current: int):
+    """Render a horizontal WatsonX-style step indicator.
+    steps: list of (icon, label) tuples.
+    current: 0-based index of the active step.
+    """
+    html_parts = ['<div class="pipeline-bar">']
+    for i, (icon, label) in enumerate(steps):
+        if i < current:
+            circle_cls = 'done'
+            label_cls  = 'done'
+            circle_content = '✓'
+        elif i == current:
+            circle_cls = 'active'
+            label_cls  = 'active'
+            circle_content = str(i + 1)
+        else:
+            circle_cls = 'pending'
+            label_cls  = ''
+            circle_content = str(i + 1)
+
+        html_parts.append(f"""
+        <div class="pipeline-step">
+          <div class="step-circle {circle_cls}">{circle_content}</div>
+          <div class="step-label {label_cls}">{icon} {label}</div>
+        </div>""")
+        if i < len(steps) - 1:
+            connector_cls = 'done' if i < current else ''
+            html_parts.append(f'<div class="step-connector {connector_cls}"></div>')
+
+    html_parts.append('</div>')
+    st.markdown(''.join(html_parts), unsafe_allow_html=True)
+
 
 def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None):
     """
@@ -256,49 +642,83 @@ tabs = st.tabs([
 
 # --- TAB 0: DATA & DRIFT ---
 with tabs[0]:
-    st.header("📦 Data Lake & Management")
+    st.markdown(f"""
+    <div class='hero-header'>
+      <div class='hero-title'>📦 Data Lake & Management</div>
+      <div class='hero-subtitle'>Catalog, version, and analyze your datasets.</div>
+    </div>""", unsafe_allow_html=True)
     
-    data_tabs = st.tabs(["Data Management", "Drift Detection"])
+    data_tabs = st.tabs(["🗄️ Data Management", "📉 Drift Detection"])
     
     with data_tabs[0]:
         col_dl1, col_dl2 = st.columns([2, 1])
         with col_dl1:
-            uploaded_files = st.file_uploader("Upload CSV Data", type="csv", accept_multiple_files=True)
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("📤 Upload New Data")
+            uploaded_files = st.file_uploader("Upload CSV Data", type="csv", accept_multiple_files=True, label_visibility="collapsed")
             if uploaded_files:
                 for uploaded_file in uploaded_files:
                     df = pd.read_csv(uploaded_file)
-                    st.write(f"Preview: {uploaded_file.name}", df.head(3))
+                    with st.expander(f"👁️ Preview: {uploaded_file.name}"):
+                        st.dataframe(df.head(5), use_container_width=True)
                     
-                    dataset_name = st.text_input(f"Dataset Name for {uploaded_file.name}", uploaded_file.name.replace(".csv", ""), key=f"name_{uploaded_file.name}")
-                    if st.button(f"Save {uploaded_file.name} to Data Lake", key=f"save_{uploaded_file.name}"):
+                    dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(".csv", ""), key=f"name_{uploaded_file.name}")
+                    if st.button(f"📥 Save {uploaded_file.name}", key=f"save_{uploaded_file.name}", type="primary"):
                         path = datalake.save_dataset(df, dataset_name)
-                        st.success(f"Dataset '{dataset_name}' saved and versioned!")
-                        st.session_state['df'] = df # Set as last active
+                        st.success(f"Dataset '{dataset_name}' saved to lake!")
+                        st.session_state['df'] = df
+            st.markdown("</div>", unsafe_allow_html=True)
+
         with col_dl2:
-            st.subheader("Explore & Load")
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("🔍 Explore & Load")
             datasets = datalake.list_datasets()
-            selected_ds = st.selectbox("Select Dataset to Load", [""] + datasets)
+            selected_ds = st.selectbox("Select Dataset", [""] + datasets, key="data_load_sel")
             if selected_ds:
                 versions = datalake.list_versions(selected_ds)
-                selected_ver = st.selectbox("Select Version", versions)
-                if st.button("Delete Model Version"):
-                    from mlops_utils import get_model_registry
-                    if get_model_registry().delete_model_version(selected_ds, selected_ver):
-                        st.success("Version deleted!")
-                        st.rerun()
+                selected_ver = st.selectbox("Version", versions, key="data_ver_sel")
+                
+                # Info card
+                st.markdown(f"""
+                <div style='background:#0d1117; padding:10px; border-radius:6px; margin:10px 0; border:1px solid #30363d;'>
+                  <div style='font-size:0.75rem; color:#8b949e;'>Dataset</div>
+                  <div style='font-weight:600;'>{selected_ds}</div>
+                  <div style='padding-top:4px; font-size:0.75rem; color:#8b949e;'>Version: {selected_ver}</div>
+                </div>""", unsafe_allow_html=True)
+
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("🗑 Delete Version", key="del_ds_ver"):
+                        if datalake.delete_version(selected_ds, selected_ver):
+                            st.success("Deleted!")
+                            st.rerun()
+                with c2:
+                    if st.button("👁 Load Preview", key="load_ds_ver", type="primary"):
+                        df_preview = datalake.load_version(selected_ds, selected_ver)
+                        st.session_state['data_preview_df'] = df_preview
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+        if 'data_preview_df' in st.session_state:
+            st.divider()
+            st.subheader("📊 Data Preview")
+            st.dataframe(st.session_state['data_preview_df'], use_container_width=True)
 
 # --- TAB 4: MLOPS MONITORING ---
 with tabs[4]:
-    st.header("📉 ML Monitoring & Observability")
-    st.markdown("Monitor deployed models for Data Drift, Concept Drift, and assess overall Model Robustness & Stability.")
+    st.markdown(f"""
+    <div class='hero-header'>
+      <div class='hero-title'>📉 ML Monitoring & Observability</div>
+      <div class='hero-subtitle'>Monitor deployed models for distribution shifts and robustness.</div>
+    </div>""", unsafe_allow_html=True)
 
-    mon_tabs = st.tabs(["Production Drift", "Model Robustness & Stability"])
+    mon_tabs = st.tabs(["🚀 Production Drift", "🛡️ Model Robustness & Stability"])
     
     with mon_tabs[0]:
         col_mon1, col_mon2 = st.columns([1, 2])
 
     with col_mon1:
-        st.subheader("1. Reference Data (Baseline)")
+        st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+        st.subheader("📋 Configuration")
         st.info("The Baseline is usually the training dataset stored in your Data Lake.")
         mon_datasets = datalake.list_datasets()
         mon_ref_ds = st.selectbox("Select Baseline Dataset", [""] + mon_datasets, key="mon_ref_ds")
@@ -308,8 +728,9 @@ with tabs[4]:
             df_baseline = datalake.load_version(mon_ref_ds, mon_ref_ver)
             st.success(f"Loaded Baseline: {df_baseline.shape[0]} rows")
 
-        st.subheader("2. Production Telemetry")
-        st.info("Telemetry data collected from the `/predict` API endpoint.")
+        st.divider()
+        st.subheader("📡 Production Telemetry")
+        st.caption("Telemetry data collected from predicted logs.")
 
         # Load Telemetry Data
         telemetry_path = os.path.join("data_lake", "monitoring", "api_telemetry.csv")
@@ -317,7 +738,7 @@ with tabs[4]:
         if os.path.exists(telemetry_path):
             try:
                 df_telemetry = pd.read_csv(telemetry_path)
-                st.success(f"Found {len(df_telemetry)} prediction logs.")
+                st.success(f"Found {len(df_telemetry)} logs.")
 
                 # Filter by timeframe option
                 days_filter = st.slider("Analyze last N days", 1, 30, 7)
@@ -329,7 +750,8 @@ with tabs[4]:
             except Exception as e:
                 st.error(f"Error loading telemetry: {e}")
         else:
-            st.warning("No telemetry data found. Send requests to the API first.")
+            st.warning("No telemetry data found.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with col_mon2:
         st.subheader("📊 Drift Analysis Matrix")
@@ -431,8 +853,10 @@ with tabs[4]:
             st.info("👈 Load both Baseline and Telemetry data to run Drift Analysis.")
 
     with mon_tabs[1]:
+        st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
         st.subheader("🛡️ Model Robustness & Stability")
         st.markdown("Run live stability tests on your Registered Models against specific Base Datasets.")
+        st.markdown("</div>", unsafe_allow_html=True)
         
         models = get_registered_models()
         if not models:
@@ -722,52 +1146,64 @@ with tabs[4]:
                 else:
                     st.info("Wait for dataset selection to enable analysis.")
     with data_tabs[1]:
-        st.subheader("📉 Data Drift Analysis")
-        st.markdown("Compare two datasets (e.g., Training vs Inference) to detect distribution shifts.")
+        st.markdown(f"""
+        <div class='ui-card'>
+          <div style='font-weight:700; font-size:1.1rem;'>📉 Data Drift Analysis</div>
+          <div style='color:#8b949e; font-size:0.85rem; margin-bottom:16px;'>Compare two datasets to detect distribution shifts between training (reference) and inference (current) data.</div>
+        </div>""", unsafe_allow_html=True)
 
-        # Select Reference Dataset (Training)
-        st.markdown("#### 1. Reference Data (Baseline)")
-        ref_ds = st.selectbox("Reference Dataset", [""] + datasets, key="drift_ref_ds")
-        df_ref = None
-        if ref_ds:
-            ref_ver = st.selectbox("Reference Version", datalake.list_versions(ref_ds), key="drift_ref_ver")
-            df_ref = datalake.load_version(ref_ds, ref_ver)
-            st.write(f"Reference Loaded: {df_ref.shape}")
+        col_dr1, col_dr2 = st.columns(2)
+        with col_dr1:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.markdown("##### 1. Reference Data (Baseline)")
+            ref_ds = st.selectbox("Reference Dataset", [""] + datasets, key="drift_ref_ds")
+            df_ref = None
+            if ref_ds:
+                ref_ver = st.selectbox("Reference Version", datalake.list_versions(ref_ds), key="drift_ref_ver")
+                df_ref = datalake.load_version(ref_ds, ref_ver)
+                st.write(f"Reference Loaded: {df_ref.shape}")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-        # Select Current Dataset (Production/New)
-        st.markdown("#### 2. Current Data (Target)")
-        curr_ds = st.selectbox("Current Dataset", [""] + datasets, key="drift_curr_ds")
-        df_curr = None
-        if curr_curr := curr_ds: # walrus operator just to match style
-            curr_ver = st.selectbox("Current Version", datalake.list_versions(curr_ds), key="drift_curr_ver")
-            df_curr = datalake.load_version(curr_ds, curr_ver)
-            st.write(f"Current Loaded: {df_curr.shape}")
+        with col_dr2:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.markdown("##### 2. Current Data (Target)")
+            curr_ds = st.selectbox("Current Dataset", [""] + datasets, key="drift_curr_ds")
+            df_curr = None
+            if curr_ds:
+                curr_ver = st.selectbox("Current Version", datalake.list_versions(curr_ds), key="drift_curr_ver")
+                df_curr = datalake.load_version(curr_ds, curr_ver)
+                st.write(f"Current Loaded: {df_curr.shape}")
+            st.markdown("</div>", unsafe_allow_html=True)
             
         if df_ref is not None and df_curr is not None:
-            if st.button("🚀 Run Drift Detection"):
-                with st.spinner("Calculating Drift Metrics (PSI, KS)..."):
-                    # Basic Drift Logic (Placeholder for sophisticated library like evidently)
+            if st.button("🚀 Run Drift Detection", key="drift_run_btn", type="primary"):
+                with st.spinner("Calculating Drift Metrics (KS Test)..."):
                     drift_report = []
                     numeric_cols = df_ref.select_dtypes(include=np.number).columns.intersection(df_curr.columns)
                     
+                    st.divider()
+                    st.markdown("### 📊 Distribution Comparison")
                     for col in numeric_cols:
-                        # KS Test
                         from scipy.stats import ks_2samp
                         stat, p_value = ks_2samp(df_ref[col].dropna(), df_curr[col].dropna())
                         drift_detected = p_value < 0.05
+                        status_chip = "<span class='badge badge-failed'>🔴 Drift Detected</span>" if drift_detected else "<span class='badge badge-done'>🟢 Stable</span>"
+                        
                         drift_report.append({
                             "Feature": col,
-                            "KS Stat": stat,
-                            "P-Value": p_value,
-                            "Drift Detected": "🔴 YES" if drift_detected else "🟢 NO"
+                            "KS Stat": f"{stat:.4f}",
+                            "P-Value": f"{p_value:.4f}",
+                            "Status": "Drift" if drift_detected else "Stable"
                         })
                         
-                        # Visualization
-                        fig = px.histogram(df_ref, x=col, color_discrete_sequence=['blue'], opacity=0.5, nbins=30, title=f"Distribution: {col}")
-                        fig.add_histogram(x=df_curr[col], name='Current', marker_color='red', opacity=0.5)
-                        st.plotly_chart(fig, use_container_width=True)
+                        with st.expander(f"Feature: {col} - {'🔴' if drift_detected else '🟢'}", expanded=False):
+                            fig = px.histogram(df_ref, x=col, color_discrete_sequence=['#2f80ed'], opacity=0.5, nbins=30, title=f"Distribution Shift: {col}")
+                            fig.add_histogram(x=df_curr[col], name='Current', marker_color='#ef4444', opacity=0.5)
+                            fig.update_layout(barmode='overlay')
+                            st.plotly_chart(fig, use_container_width=True)
                     
-                    st.dataframe(pd.DataFrame(drift_report))
+                    st.markdown("### 📋 Drift Summary Table")
+                    st.dataframe(pd.DataFrame(drift_report), use_container_width=True)
 
 
 # --- TAB 1: AUTOML & MODEL HUB ---
@@ -777,534 +1213,762 @@ with tabs[1]:
     # Sub-tabs within AutoML
     automl_tabs = st.tabs(["📊 Classical ML (Tabular)", "🖼️ Computer Vision"])
     
-    # --- SUB-TAB 1.1: CLASSICAL ML ---
+    # --- SUB-TAB 1.1: CLASSICAL ML (WatsonX-Style Pipeline) ---
     with automl_tabs[0]:
-        st.subheader("📋 Training Configuration (Tabular)")
-        
-        # 1. Definição da Tarefa
-        col_t0, col_t1, col_t2 = st.columns([1, 1, 1])
-        with col_t0:
-            learning_type = st.radio("Learning Type", ["Supervised", "Unsupervised"], key="learning_type_selector")
+        # ── Step definitions ──────────────────────────────────────────
+        PIPELINE_STEPS = [
+            ("📂", "Data"),
+            ("🎯", "Task"),
+            ("🤖", "Models"),
+            ("⚡", "Optimize"),
+            ("🛡️", "Validate"),
+            ("🔧", "Advanced"),
+            ("🚀", "Submit"),
+        ]
 
-        with col_t1:
-            if learning_type == "Supervised":
-                task_options = ["classification", "regression", "time_series"]
+        cur_step = st.session_state.get('automl_step', 0)
+        render_pipeline_header(PIPELINE_STEPS, cur_step)
+
+        # ── Shared state container ────────────────────────────────────
+        cfg = st.session_state.get('automl_config', {})
+
+        # ── Defaults that need to exist before any step ────────────────
+        task                = cfg.get('task', 'classification')
+        trainer_temp        = AutoMLTrainer(task_type=task)
+        available_models    = trainer_temp.get_available_models()
+        selected_models     = cfg.get('selected_models', None)
+        training_preset     = cfg.get('training_preset', 'medium')
+        training_strategy   = cfg.get('training_strategy', 'Automatic')
+        manual_params       = cfg.get('manual_params', None)
+        validation_strategy = cfg.get('validation_strategy', 'auto')
+        validation_params   = cfg.get('validation_params', {})
+        optimization_metric = cfg.get('optimization_metric', 'accuracy')
+        selected_opt_mode   = cfg.get('optimization_mode', 'bayesian')
+        n_trials            = cfg.get('n_trials', None)
+        timeout_per_model   = cfg.get('timeout', None)
+        total_time_budget   = cfg.get('time_budget', None)
+        early_stopping      = cfg.get('early_stopping', 10)
+        random_seed_config  = cfg.get('random_state', 42)
+        ensemble_config     = cfg.get('ensemble_config', {})
+        selected_nlp_cols   = cfg.get('selected_nlp_cols', [])
+        nlp_config_automl   = cfg.get('nlp_config', {})
+        enable_stability    = cfg.get('enable_stability', False)
+        selected_stability_tests = cfg.get('stability_tests', [])
+        target_pre          = cfg.get('target', None)
+        date_col_pre        = cfg.get('date_col', None)
+        selected_configs    = cfg.get('selected_configs', [])
+        model_source        = cfg.get('model_source', 'Standard AutoML (Scikit-Learn/XGBoost/Transformers)')
+        sample_df           = None
+        embedding_model     = cfg.get('nlp_config', {}).get('embedding_model', 'all-MiniLM-L6-v2')
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 0 — Data Source
+        # ════════════════════════════════════════════════════════════════
+        if cur_step == 0:
+            st.markdown("<h3 style='margin-bottom:4px;'>📂 Data Source</h3>", unsafe_allow_html=True)
+            st.caption("Select one or more datasets from your Data Lake and configure the split strategy.")
+
+            available_datasets = datalake.list_datasets()
+            if not available_datasets:
+                st.markdown("""
+                <div class='ui-card' style='text-align:center;padding:32px;'>
+                  <div style='font-size:2rem;'>🗄️</div>
+                  <div style='font-weight:600;margin:8px 0;'>No datasets available</div>
+                  <div style='color:#8b949e;font-size:0.85rem;'>Go to the <strong>Data</strong> tab to upload your first dataset.</div>
+                </div>""", unsafe_allow_html=True)
             else:
-                task_options = ["clustering", "anomaly_detection", "dimensionality_reduction"]
-                
-            task = st.selectbox("Task Type", task_options, key="task_selector_train")
-        
-        with col_t2:
-            training_strategy = st.radio("Hyperparameter Configuration", ["Automatic", "Manual"], 
-                                         help="Automatic: System finds best parameters. Manual: You explicitly define them.")
-
-        st.divider()
-
-        # 2. Configuração de Modelos e Parâmetros
-        st.subheader("🎯 Model Selection")
-        
-        # Seletor de Fonte do Modelo (Migrado de Fine-Tune)
-        model_source = st.radio("Model Source", 
-                               ["Standard AutoML (Scikit-Learn/XGBoost/Transformers)", 
-                                "Model Registry (Registered)", 
-                                "Local Upload (.pkl)"],
-                               horizontal=True)
-
-        trainer_temp = AutoMLTrainer(task_type=task)
-        available_models = trainer_temp.get_available_models()
-        
-        selected_models = None
-        manual_params = None
-        
-        # Lógica de Seleção Baseada na Fonte
-        ensemble_config = {} # Initialize empty ensemble config
-
-        if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
-            mode_selection = st.radio("Model Selection", ["Automatic (Preset)", "Manual (Select)", "Custom Ensemble Builder"], horizontal=True)
-            
-            if mode_selection == "Manual (Select)":
-                selected_models = st.multiselect("Choose Models", available_models, default=available_models[:2] if available_models else None)
-                
-            elif mode_selection == "Custom Ensemble Builder":
-                st.markdown("##### 🏗️ Custom Ensemble Builder")
-                st.info("Create an ensemble by combining multiple base models. The system will train the final ensemble.")
-                
-                ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"])
-                
-                # Filter base models (exclude other ensembles/custom models to avoid recursion for now)
-                base_candidates = [m for m in available_models if 'ensemble' not in m and 'custom' not in m]
-                
-                st.markdown("**1. Select Base Estimators**")
-                selected_base_models = st.multiselect(
-                    "Base Estimators (Components)", 
-                    base_candidates, 
-                    default=base_candidates[:3] if len(base_candidates) > 3 else base_candidates
+                sel_ds_list = st.multiselect(
+                    "Choose Datasets from Data Lake",
+                    available_datasets,
+                    default=cfg.get('ds_list', []),
+                    key="wizard_ds_multi"
                 )
-                
-                if len(selected_base_models) < 2:
-                    st.warning("⚠️ Select at least 2 models to form a robust ensemble.")
-                
-                if ensemble_type == "Voting":
-                    st.markdown("**2. Voting Configuration**")
-                    if task == "classification":
-                        voting_type = st.selectbox("Voting Type", ["soft", "hard"], help="Soft: Average probabilities. Hard: Majority class voting.")
-                    else:
-                        voting_type = 'soft' # Not used in regressor but safe to keep
-                        st.caption("Regression always uses averaged predictions.")
-                    
-                    use_weights = st.checkbox("Define Weights (Weighted Voting)", help="Allows assigning different weights for each model in voting.")
-                    voting_weights = None
+                cfg['ds_list'] = sel_ds_list
 
-                
-                if use_weights:
-                    st.caption("Enter weights separated by comma in the same order as selected models.")
-                    weights_input = st.text_input("Weights (e.g.: 1.0, 2.0)", value=",".join(["1.0"] * len(selected_base_models)))
+                target_pre_w  = None
+                date_col_pre_w= None
+
+                if sel_ds_list:
+                    # Sample preview from first dataset
                     try:
-                        voting_weights = [float(w.strip()) for w in weights_input.split(',')]
-                        if len(voting_weights) != len(selected_base_models):
-                            st.error(f"⚠️ Number of weights ({len(voting_weights)}) differs from number of models ({len(selected_base_models)}). Using equal weights.")
-                            voting_weights = None
-                    except:
-                        st.error("⚠️ Invalid format. Use comma separated numbers.")
-                        voting_weights = None
+                        first_ds  = sel_ds_list[0]
+                        first_ver = datalake.list_versions(first_ds)[0]
+                        sample_df = datalake.load_version(first_ds, first_ver, nrows=5)
 
-                ensemble_config = {
-                    'voting_estimators': selected_base_models,
-                    'voting_type': voting_type,
-                    'voting_weights': voting_weights
-                }
-                selected_models = ['custom_voting']
-                
-                if ensemble_type == "Stacking":
-                    st.markdown("**2. Stacking Configuration**")
-                    st.info("Stacking trains a 'Meta-Model' to learn the best combination of base models.")
-                    
-                    # Final estimator selection
-                    meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'linear_regression', 'ridge']
-                    # Filter by task
-                    if task == 'classification':
-                        meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'linear_regression' and m != 'ridge']
-                        if not meta_candidates: meta_candidates = ['logistic_regression']
-                    else:
-                        meta_candidates = [m for m in meta_candidates if m in base_candidates and m != 'logistic_regression']
-                        if not meta_candidates: meta_candidates = ['linear_regression']
+                        with st.expander("👁️ Data Preview", expanded=True):
+                            st.dataframe(sample_df, use_container_width=True)
 
-                    
-                    st.caption(f"Meta-Modelo selecionado: {final_est_name}")
-                    
-                    ensemble_config = {
-                        'stacking_estimators': selected_base_models,
-                        'stacking_final_estimator': final_est_name
-                    }
-                    selected_models = ['custom_stacking']
+                        col_ta, col_dc = st.columns(2)
+                        with col_ta:
+                            # Task-aware target selector shown here for convenience
+                            task_tmp = cfg.get('task', 'classification')
+                            if task_tmp not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
+                                default_target_idx = max(0, len(sample_df.columns) - 1)
+                                target_pre_w = st.selectbox(
+                                    "🎯 Target Column",
+                                    sample_df.columns.tolist(),
+                                    index=default_target_idx,
+                                    key="wizard_target"
+                                )
+                                cfg['target'] = target_pre_w
+                        with col_dc:
+                            if task_tmp == 'time_series':
+                                date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
+                                cfg['date_col'] = date_col_pre_w
+                    except Exception as e:
+                        st.error(f"Error loading preview: {e}")
 
-        elif model_source == "Model Registry (Registered)":
-            reg_models = get_registered_models()
-            if reg_models:
-                base_model_name = st.selectbox("Select Registered Model", [m.name for m in reg_models], key="reg_sel_train")
-                selected_models = [base_model_name]
-                st.info(f"The model '{base_model_name}' will be used as a base for retraining/fine-tuning.")
-            else:
-                st.warning("No registered models found.")
+                    # Per-dataset version + split config
+                    new_configs = []
+                    if len(sel_ds_list) > 0:
+                        ds_cols = st.columns(min(len(sel_ds_list), 3))
+                        for i, ds_name in enumerate(sel_ds_list):
+                            with ds_cols[i % 3]:
+                                versions = datalake.list_versions(ds_name)
+                                ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
+                                split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                                new_configs.append({'name': ds_name, 'version': ver, 'split': split})
+                    cfg['selected_configs'] = new_configs
 
-        elif model_source == "Local Upload (.pkl)":
-            uploaded_pkl = st.file_uploader("Upload base .pkl file", type="pkl", key="pkl_upload_train")
-            if uploaded_pkl:
-                selected_models = ["Uploaded_Model"] # Placeholder, needs custom backend logic
-                st.info("Model loaded for retraining.")
+                    st.markdown('<br>', unsafe_allow_html=True)
+                    data_ready = bool(sel_ds_list)
+                    col_nav_fwd, _ = st.columns([1, 4])
+                    with col_nav_fwd:
+                        if st.button("Next: Define Task →", type="primary", key="step0_next", disabled=not data_ready):
+                            st.session_state['automl_step'] = 1
+                            st.session_state['automl_config'] = cfg
+                            st.rerun()
+                else:
+                    st.info("ℹ️ Select at least one dataset above to continue.")
 
-        st.subheader("🎯 Optimization Configuration")
-        col_opt1, col_opt2 = st.columns(2)
-        with col_opt1:
-            # Hyperparameter Optimization Mode Selector
-            optimization_mode = st.selectbox(
-                "Hyperparameter Optimization Mode",
-                ["Bayesian Optimization (Default)", "Random Search", "Grid Search", "Hyperband"],
-                index=0,
-                help="Bayesian: More efficient. Random: Exploratory. Grid: Exhaustive (slow). Hyperband: Fast for many data."
+        # ════════════════════════════════════════════════════════════════
+        # STEP 1 — Task Type & Learning Mode
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 1:
+            st.markdown("<h3 style='margin-bottom:4px;'>🎯 Task & Learning Type</h3>", unsafe_allow_html=True)
+            st.caption("Select the ML task that best describes your problem.")
+
+            SUPERVISED_TASKS = [
+                ("classification", "🎯", "Classification", "Predict a category or label"),
+                ("regression",     "📈", "Regression",     "Predict a continuous value"),
+                ("time_series",    "⏳", "Time Series",    "Forecast future values from historical sequences"),
+            ]
+            UNSUP_TASKS = [
+                ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
+                ("anomaly_detection",        "🚨", "Anomaly Detection",        "Identify unusual data points"),
+                ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently"),
+            ]
+
+            learn_type = st.radio(
+                "Learning Paradigm",
+                ["Supervised", "Unsupervised"],
+                index=0 if cfg.get('task', 'classification') not in [t[0] for t in UNSUP_TASKS] else 1,
+                horizontal=True,
+                key="wiz_learn_type"
             )
-            
-            # Mapping to backend
-            opt_mode_map = {
-                "Bayesian Optimization (Default)": "bayesian",
-                "Random Search": "random",
-                "Grid Search": "grid",
-                "Hyperband": "hyperband"
-            }
-            selected_opt_mode = opt_mode_map[optimization_mode]
 
-            # Unified preset selector (including 'custom' and 'test')
+            task_list = SUPERVISED_TASKS if learn_type == "Supervised" else UNSUP_TASKS
+            current_task = cfg.get('task', task_list[0][0])
+            if current_task not in [t[0] for t in task_list]:
+                current_task = task_list[0][0]
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            cols_t = st.columns(len(task_list))
+            for i, (tid, ticon, tname, tdesc) in enumerate(task_list):
+                with cols_t[i]:
+                    is_sel = (tid == current_task)
+                    border_style = "border: 2px solid #2f80ed; background: linear-gradient(135deg,rgba(47,128,237,0.1),rgba(139,92,246,0.1));" if is_sel else ""
+                    st.markdown(f"""
+                    <div class='task-card {"selected" if is_sel else ""}' style='{border_style}'>
+                      <div class='task-icon'>{ticon}</div>
+                      <div class='task-name'>{tname}</div>
+                      <div class='task-desc'>{tdesc}</div>
+                    </div>""", unsafe_allow_html=True)
+                    if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"task_btn_{tid}"):
+                        cfg['task'] = tid
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
+
+            cfg['task'] = current_task
+            task = current_task
+            cfg['training_strategy'] = st.radio(
+                "Hyperparameter Mode",
+                ["Automatic", "Manual"],
+                index=0 if cfg.get('training_strategy', 'Automatic') == 'Automatic' else 1,
+                horizontal=True,
+                help="Automatic: Optuna finds the best params. Manual: You define them.",
+                key="wiz_hp_mode"
+            )
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step1_back"):
+                    st.session_state['automl_step'] = 0
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Select Models →", type="primary", key="step1_next"):
+                    st.session_state['automl_step'] = 2
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 2 — Model Selection
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 2:
+            task = cfg.get('task', 'classification')
+            trainer_temp = AutoMLTrainer(task_type=task)
+            available_models = trainer_temp.get_available_models()
+
+            st.markdown("<h3 style='margin-bottom:4px;'>🤖 Model Selection</h3>", unsafe_allow_html=True)
+            st.caption("Choose model source and which algorithms to include in the search.")
+
+            model_source = st.radio(
+                "Model Source",
+                ["Standard AutoML (Scikit-Learn/XGBoost/Transformers)", "Model Registry (Registered)", "Local Upload (.pkl)"],
+                index=["Standard AutoML (Scikit-Learn/XGBoost/Transformers)", "Model Registry (Registered)", "Local Upload (.pkl)"].index(cfg.get('model_source', 'Standard AutoML (Scikit-Learn/XGBoost/Transformers)')),
+                horizontal=True,
+                key="wiz_model_source"
+            )
+            cfg['model_source'] = model_source
+
             if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
-                training_preset = st.select_slider(
-                    "Training Mode (Preset)",
-                    options=["test", "fast", "medium", "high", "custom"],
-                    value="medium",
-                    help="test: Fast test (1 trial). fast: Fast. medium: Balanced. high: Exhaustive. custom: Define your rules."
+                mode_selection = st.radio(
+                    "Selection Mode",
+                    ["Automatic (Preset)", "Manual (Select)", "Custom Ensemble Builder"],
+                    horizontal=True,
+                    key="wiz_mode_sel"
                 )
-            else:
-                # For other modes, we allow customization but start with medium
-                st.info(f"Base mode adapted for {model_source}")
-                # Here we can also allow custom n_trials
-                use_custom_tuning = st.checkbox("Customize Optimization (Trials/Timeout)", value=False)
-                training_preset = "custom" if use_custom_tuning else "medium"
+                cfg['mode_selection'] = mode_selection
 
-            # Conditional inputs for custom mode
-            if training_preset == "custom":
-                st.markdown("##### 🛠️ Custom Configuration")
-                n_trials = st.number_input("Number of Trials (per model)", 1, 1000, 20, key="cust_trials")
-                timeout_per_model = st.number_input("Timeout per model (seconds)", 10, 7200, 600, key="cust_timeout")
-                total_time_budget = st.number_input("Max Total Time (seconds)", 60, 86400, 3600, key="cust_total_time", help="Max time to run the ENTIRE experiment. If exceeded, training stops after the current model.")
-                early_stopping = st.number_input("Early Stopping (Rounds)", 0, 50, 7, key="cust_es")
-                
-                st.markdown("##### ⚡ Advanced Parameters")
-                custom_max_iter = st.number_input("Max Iterations (max_iter)", 100, 100000, 1000, help="Iteration limit for solvers (LogisticRegression, SVM, MLP). Very high values can slow down training.")
-                
-                manual_params = {
-                    'max_iter': custom_max_iter
+                if mode_selection == "Manual (Select)":
+                    sel_models = st.multiselect(
+                        "Choose Models",
+                        available_models,
+                        default=cfg.get('selected_models', available_models[:2]) or available_models[:2],
+                        key="wiz_sel_models"
+                    )
+                    cfg['selected_models'] = sel_models
+
+                elif mode_selection == "Custom Ensemble Builder":
+                    st.markdown("""
+                    <div class='ui-card' style='padding:14px;margin-bottom:12px;'>
+                      <div style='font-weight:600;margin-bottom:4px;'>🏗️ Ensemble Builder</div>
+                      <div style='color:#8b949e;font-size:0.8rem;'>Combine multiple base models into a powerful ensemble.</div>
+                    </div>""", unsafe_allow_html=True)
+                    ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"], key="wiz_ens_type")
+                    base_candidates = [m for m in available_models if 'ensemble' not in m]
+                    sel_base = st.multiselect("Base Estimators", base_candidates,
+                        default=cfg.get('ensemble_config', {}).get('voting_estimators', base_candidates[:3]),
+                        key="wiz_base_models")
+                    if len(sel_base) < 2:
+                        st.warning("⚠️ Select at least 2 base models.")
+
+                    ens_cfg = {}
+                    if ensemble_type == "Voting":
+                        voting_type = st.selectbox("Voting Type", ["soft", "hard"] if task == "classification" else ["soft"], key="wiz_vote_type")
+                        use_wts = st.checkbox("Weighted Voting", key="wiz_use_weights")
+                        voting_weights = None
+                        if use_wts:
+                            wts_str = st.text_input("Weights (comma-separated)", value=",".join(["1.0"] * len(sel_base)), key="wiz_weights")
+                            try:
+                                voting_weights = [float(w.strip()) for w in wts_str.split(",")]
+                            except:
+                                st.error("Invalid weights format.")
+                        ens_cfg = {'voting_estimators': sel_base, 'voting_type': voting_type, 'voting_weights': voting_weights}
+                        cfg['selected_models'] = ['custom_voting']
+                    else:  # Stacking
+                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'ridge', 'linear_regression']
+                        if task == 'classification':
+                            meta_candidates = [m for m in meta_candidates if m not in ['linear_regression', 'ridge']]
+                        else:
+                            meta_candidates = [m for m in meta_candidates if m not in ['logistic_regression']]
+                        if not meta_candidates:
+                            meta_candidates = ['random_forest']
+                        final_est = st.selectbox("Meta-Model", meta_candidates, key="wiz_meta_model")
+                        ens_cfg = {'stacking_estimators': sel_base, 'stacking_final_estimator': final_est}
+                        cfg['selected_models'] = ['custom_stacking']
+
+                    cfg['ensemble_config'] = ens_cfg
+                else:
+                    cfg['selected_models'] = None
+
+            elif model_source == "Model Registry (Registered)":
+                reg_models_list = get_registered_models()
+                if reg_models_list:
+                    base_name = st.selectbox("Registered Model", [m.name for m in reg_models_list], key="wiz_reg_model")
+                    cfg['selected_models'] = [base_name]
+                    st.info(f"Model **{base_name}** will be used as base for retraining.")
+                else:
+                    st.warning("No registered models found. Register a model in the Model Registry tab first.")
+                    cfg['selected_models'] = None
+
+            elif model_source == "Local Upload (.pkl)":
+                uploaded_pkl = st.file_uploader("Upload .pkl file", type="pkl", key="wiz_pkl_upload")
+                if uploaded_pkl:
+                    cfg['selected_models'] = ["Uploaded_Model"]
+                    st.success("Model loaded for retraining.")
+                else:
+                    cfg['selected_models'] = None
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step2_back"):
+                    st.session_state['automl_step'] = 1
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Optimization →", type="primary", key="step2_next"):
+                    st.session_state['automl_step'] = 3
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 3 — Optimization Strategy
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 3:
+            task = cfg.get('task', 'classification')
+            st.markdown("<h3 style='margin-bottom:4px;'>⚡ Optimization Strategy</h3>", unsafe_allow_html=True)
+            st.caption("Define how AutoML searches for the best hyperparameters.")
+
+            # Optimization mode as icon cards
+            OPT_MODES = [
+                ("bayesian",  "🧠", "Bayesian (Default)", "Efficient surrogate model-based search. Best for most use cases."),
+                ("random",    "🎲", "Random Search",      "Randomly sample configurations. Fast and exploratory."),
+                ("grid",      "📐", "Grid Search",        "Exhaustive search over all combinations. Slow but thorough."),
+                ("hyperband", "⚡", "Hyperband",          "Early stopping of unpromising trials. Great for large datasets."),
+            ]
+            opt_mode_map = {"bayesian": "Bayesian Optimization (Default)", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
+            current_opt = cfg.get('optimization_mode', 'bayesian')
+
+            cols_opt = st.columns(4)
+            for i, (oid, oicon, oname, odesc) in enumerate(OPT_MODES):
+                with cols_opt[i]:
+                    is_sel = (oid == current_opt)
+                    border_style = "border: 2px solid #2f80ed; background: linear-gradient(135deg,rgba(47,128,237,0.08),rgba(139,92,246,0.08));" if is_sel else ""
+                    st.markdown(f"""
+                    <div class='task-card' style='min-height:130px;{border_style}'>
+                      <div class='task-icon'>{oicon}</div>
+                      <div class='task-name'>{oname}</div>
+                      <div class='task-desc'>{odesc}</div>
+                    </div>""", unsafe_allow_html=True)
+                    if st.button(f"{'✓' if is_sel else 'Select'}", key=f"opt_{oid}"):
+                        cfg['optimization_mode'] = oid
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
+
+            cfg['optimization_mode'] = current_opt if cfg.get('optimization_mode') == current_opt else cfg.get('optimization_mode', 'bayesian')
+
+            st.markdown('<br>', unsafe_allow_html=True)
+
+            # Training preset (slider)
+            preset_labels = ["test", "fast", "medium", "high", "custom"]
+            preset_descs  = {"test": "⚡ 1 trial for quick pipeline validation", "fast": "🚀 Fast search (~5 trials)",
+                             "medium": "⚖️ Balanced speed/quality (default)", "high": "🎯 Exhaustive search",
+                             "custom": "🔧 Manual trial/timeout configuration"}
+            col_preset, col_metric = st.columns(2)
+            with col_preset:
+                training_preset = st.select_slider(
+                    "Training Mode",
+                    options=preset_labels,
+                    value=cfg.get('training_preset', 'medium'),
+                    key="wiz_preset"
+                )
+                cfg['training_preset'] = training_preset
+                st.caption(preset_descs.get(training_preset, ""))
+
+                if training_preset == "custom":
+                    cfg['n_trials']       = st.number_input("Trials per model", 1, 1000, 20, key="wiz_trials")
+                    cfg['timeout']        = st.number_input("Timeout per model (s)", 10, 7200, 600, key="wiz_timeout")
+                    cfg['time_budget']    = st.number_input("Total time budget (s)", 60, 86400, 3600, key="wiz_total_time")
+                    cfg['early_stopping'] = st.number_input("Early Stopping (rounds)", 0, 50, 7, key="wiz_es")
+                    cfg['manual_params']  = {'max_iter': st.number_input("Max Iterations (max_iter)", 100, 100000, 1000, key="wiz_maxiter")}
+                elif training_preset == "test":
+                    st.warning("⚠️ TEST MODE: 1 trial, short timeout.")
+                    cfg['n_trials'] = 1; cfg['timeout'] = 30; cfg['time_budget'] = 60; cfg['early_stopping'] = 1; cfg['manual_params'] = {}
+                else:
+                    cfg['n_trials'] = None; cfg['timeout'] = None; cfg['time_budget'] = None; cfg['early_stopping'] = 10; cfg['manual_params'] = {}
+
+            with col_metric:
+                metric_options = {
+                    'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
+                    'regression': ['r2', 'rmse', 'mae'],
+                    'clustering': ['silhouette'],
+                    'time_series': ['rmse', 'mae', 'mape'],
+                    'anomaly_detection': ['f1'],
+                    'dimensionality_reduction': ['explained_variance']
                 }
-            elif training_preset == "test":
-                 st.warning("⚠️ TEST MODE: Running with only 1 trial and short timeout for pipeline validation.")
-                 n_trials = 1
-                 timeout_per_model = 30
-                 total_time_budget = 60
-                 early_stopping = 1
-                 manual_params = {}
-            else:
-                n_trials = None
-                timeout_per_model = None
-                total_time_budget = None
-                early_stopping = 10
-                manual_params = {}
+                metric_list = metric_options.get(task, ['accuracy'])
+                cur_metric  = cfg.get('optimization_metric', metric_list[0])
+                if cur_metric not in metric_list: cur_metric = metric_list[0]
+                optimization_metric = st.selectbox(
+                    "Optimization Metric",
+                    metric_list,
+                    index=metric_list.index(cur_metric),
+                    key="wiz_metric"
+                )
+                cfg['optimization_metric'] = optimization_metric
 
-        
-        with col_opt2:
-            st.markdown("##### 🛡️ Validation Strategy")
-            validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold", "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"]
-            
-            # Filter options based on task
+                # Manual HP config if strategy == Manual
+                if cfg.get('training_strategy') == 'Manual':
+                    eff_models = cfg.get('selected_models') or available_models
+                    trainer_tmp2 = AutoMLTrainer(task_type=task)
+                    ref_model = st.selectbox("Configure Model", eff_models, key="wiz_manual_model")
+                    schema = trainer_tmp2.get_model_params_schema(ref_model)
+                    if schema:
+                        st.markdown("**Manual Hyperparameters**")
+                        mp = {}
+                        cols_p = st.columns(3)
+                        for pi, (p_name, p_cfg) in enumerate(schema.items()):
+                            with cols_p[pi % 3]:
+                                if p_cfg[0] == 'int':
+                                    mp[p_name] = st.number_input(p_name, p_cfg[1], p_cfg[2], p_cfg[3], key=f"wiz_mp_{p_name}")
+                                elif p_cfg[0] == 'float':
+                                    mp[p_name] = st.number_input(p_name, p_cfg[1], p_cfg[2], p_cfg[3], format="%.4f", key=f"wiz_mp_{p_name}")
+                                elif p_cfg[0] == 'list':
+                                    options, p_def = p_cfg[1], p_cfg[2]
+                                    mp[p_name] = st.selectbox(p_name, options, index=options.index(p_def) if p_def in options else 0, key=f"wiz_mp_{p_name}")
+                        cfg['manual_params'] = mp
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step3_back"):
+                    st.session_state['automl_step'] = 2
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Validation →", type="primary", key="step3_next"):
+                    st.session_state['automl_step'] = 4
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 4 — Validation Strategy
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 4:
+            task = cfg.get('task', 'classification')
+            st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Validation Strategy</h3>", unsafe_allow_html=True)
+            st.caption("Choose how the model performance is evaluated during hyperparameter search.")
+
+            validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold",
+                                  "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"]
+
             if task == "time_series":
                 val_strategy_ui = "Time Series Split"
-                st.info("Time series must use temporal splitting.")
-                validation_strategy = 'time_series_cv'
+                st.info("⏳ Time series must use temporal splitting.")
             elif task == "classification":
-                val_strategy_ui = st.selectbox("Validation Method", validation_options, index=0)
-            else: # regression, clustering, anomaly
-                # Stratified only makes sense for classification
-                opts = [o for o in validation_options if o != "Stratified K-Fold"]
-                val_strategy_ui = st.selectbox("Validation Method", opts, index=0)
-            
-            validation_params = {}
-            if val_strategy_ui == "Automatic (Recommended)":
-                validation_strategy = 'auto'
-                st.info("System will choose the best strategy based on data size.")
-            elif val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
-                n_folds = st.number_input("Number of Folds", 2, 20, 5, key="val_folds")
-                validation_params['folds'] = n_folds
-                validation_strategy = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
-            elif val_strategy_ui == "Holdout (Train/Test)":
-                test_size = st.slider("Test Size (%)", 10, 50, 20, key="val_holdout", help="Percentage of training dataset reserved for Internal Validation during optimization (do not confuse with Final Test).") / 100.0
-                validation_params['test_size'] = test_size
-                validation_strategy = 'holdout'
-            elif val_strategy_ui == "Auto-Split (Optimized)":
-                st.info("System will decide the best split during optimization.")
-                validation_strategy = 'auto_split'
-            elif val_strategy_ui == "Time Series Split":
-                n_splits = st.number_input("Number of Temporal Splits", 2, 20, 5, key="val_ts_splits")
-                validation_params['folds'] = n_splits
-                validation_strategy = 'time_series_cv'
-            
-            # NLP columns selection
-            st.markdown("##### 🔤 NLP Configuration")
-            
-            # Advanced NLP Configurations
-            # We use a container to render NLP options later,
-            # once we have access to the sample_df (data preview).
-            nlp_container = st.container()
-            nlp_config_automl = {} 
-
-            if task == "time_series":
-                st.info("💡 Temporal split is mandatory for time series.")
-
-        # Novo Seletor de Métrica Alvo (Optimization Metric)
-        metric_options = {
-            'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
-            'regression': ['r2', 'rmse', 'mae'],
-            'clustering': ['silhouette'],
-            'time_series': ['rmse', 'mae', 'mape'],
-            'anomaly_detection': ['f1'],
-            'dimensionality_reduction': ['explained_variance']
-        }
-        
-        target_metric_options = metric_options.get(task, ['accuracy'])
-        optimization_metric = st.selectbox("Target Metric (Optimization)", target_metric_options, index=0, help="Metric that AutoML will try to maximize (or minimize, depending on the metric).")
-        target_metric_name = optimization_metric.upper()
-
-        st.divider()
-        st.subheader("🌱 Reproducibility Configuration (Seed)")
-        seed_mode = st.radio("Seed Mode", 
-                             ["Automatic (Different per model)", 
-                              "Automatic (Same for all)", 
-                              "Manual (Same for all)", 
-                              "Manual (Different per model)"], 
-                             horizontal=True)
-        
-        random_seed_config = 42 # Default
-        
-        effective_models = selected_models if selected_models else available_models
-        
-        if seed_mode == "Automatic (Different per model)":
-            random_seed_config = {m: np.random.randint(0, 999999) for m in effective_models}
-            st.info("🎲 Random seeds will be generated for each model.")
-        elif seed_mode == "Automatic (Same for all)":
-            random_seed_config = np.random.randint(0, 999999)
-            st.info(f"🎲 A single random seed will be used for all: {random_seed_config}")
-        elif seed_mode == "Manual (Same for all)":
-            random_seed_config = st.number_input("🌱 Enter Global Seed", 0, 999999, 42)
-        elif seed_mode == "Manual (Different per model)":
-            st.markdown("##### Enter the Seed for each model:")
-            random_seed_config = {}
-            cols_seed = st.columns(min(len(effective_models), 3))
-            for i, m in enumerate(effective_models):
-                with cols_seed[i % 3]:
-                    random_seed_config[m] = st.number_input(f"Seed: {m}", 0, 999999, 42, key=f"seed_{m}")
-
-        # Hiperparâmetros Manuais integrados nas opções de tuning
-        if training_strategy == "Manual":
-            st.divider()
-            st.subheader("⚙️ Manual Hyperparameter Configuration")
-            st.info("Note: In Manual mode, you define the parameters used as a starting point (enqueue) for the selected models.")
-            
-            # Se múltiplos modelos estiverem selecionados, o usuário pode configurar um por um ou um modelo de referência
-            ref_model = st.selectbox("Model to Configure", selected_models or available_models)
-            
-            # Merge existing manual_params with new manual config
-            current_manual_params = manual_params.copy()
-            current_manual_params['model_name'] = ref_model
-            
-            schema = trainer_temp.get_model_params_schema(ref_model)
-
-            if schema:
-                st.markdown(f"**Parameters for {ref_model}**")
-                cols_p = st.columns(3)
-                for i, (p_name, p_config) in enumerate(schema.items()):
-                    with cols_p[i % 3]:
-                        if p_config[0] == 'int':
-                            manual_params[p_name] = st.number_input(p_name, p_config[1], p_config[2], p_config[3])
-                        elif p_config[0] == 'float':
-                            manual_params[p_name] = st.number_input(p_name, p_config[1], p_config[2], p_config[3], format="%.4f")
-                        elif p_config[0] == 'list':
-                            options, p_def = p_config[1], p_config[2]
-                            manual_params[p_name] = st.selectbox(p_name, options, index=options.index(p_def) if p_def in options else 0)
-        else:
-            manual_params = None
-
-        st.divider()
-
-        # 3. Seleção de Dados
-        st.subheader("📂 Data Selection")
-        available_datasets = datalake.list_datasets()
-        selected_ds_list = st.multiselect("Choose Datasets", available_datasets, key="ds_train_multi")
-        
-        target_pre = None
-        date_col_pre = None
-        sample_df = None
-        
-        if selected_ds_list:
-            try:
-                first_ds = selected_ds_list[0]
-                versions = datalake.list_versions(first_ds)
-                if versions:
-                    first_ver = versions[0]
-                    sample_df = datalake.load_version(first_ds, first_ver, nrows=5)
-                    
-                    col_sel1, col_sel2 = st.columns(2)
-                    with col_sel1:
-                        if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                            target_pre = st.selectbox("🎯 Target Variable", sample_df.columns, key="target_selector_pre")
-                    
-                    with col_sel2:
-                        if task == "time_series":
-                            date_col_pre = st.selectbox("📅 Date Column (REQUIRED)", sample_df.columns, key="ts_date_selector")
-            except Exception as e: st.error(f"Error loading sample: {e}")
-
-        selected_configs = []
-        if selected_ds_list:
-            cols_ds = st.columns(len(selected_ds_list))
-            for i, ds_name in enumerate(selected_ds_list):
-                with cols_ds[i]:
-                    st.markdown(f"**{ds_name}**")
-                    versions = datalake.list_versions(ds_name)
-                    ver = st.selectbox(f"Version", versions, key=f"ver_{ds_name}")
-                    
-                    # Configuração de Papel do Dataset (Granularidade Solicitada)
-                    if validation_strategy == 'holdout':
-                        st.caption("Define dataset role:")
-                        role = st.radio("Role", ["Train + Test (Split)", "Train Only (100%)", "Test Only (100%)"], key=f"role_{ds_name}", help="Final destination of data. 'Test Only' reserves data for final evaluation. 'Train' goes to the training pool.")
-                        
-                        split = 100
-                        if role == "Train + Test (Split)":
-                            split = st.slider(f"% Train", 10, 95, 80, key=f"split_{ds_name}", help="Percentage of this dataset going to the Training pool. The rest goes to Final Test.")
-                        elif role == "Test Only (100%)":
-                            split = 0
-                    else:
-                        # Para estratégias como K-Fold ou Auto-Split, usamos o dataset integralmente no processo (split=100)
-                        # O sistema de validação cuidará da divisão interna.
-                        split = 100
-                        st.info(f"Dataset used entirely for {validation_strategy}")
-                    
-                    selected_configs.append({'name': ds_name, 'version': ver, 'split': split})
-
-        # Preencher o container de NLP agora que temos acesso aos dados (sample ou train)
-        selected_nlp_cols = []
-        with nlp_container:
-            potential_nlp_cols = []
-            if sample_df is not None:
-                potential_nlp_cols = sample_df.select_dtypes(include=['object']).columns.tolist()
-            elif 'train_df' in st.session_state:
-                potential_nlp_cols = st.session_state['train_df'].select_dtypes(include=['object']).columns.tolist()
-            
-            if potential_nlp_cols:
-                selected_nlp_cols = st.multiselect("Text Columns (NLP)", potential_nlp_cols, help="Select the columns containing text for optimized NLP processing.")
-                
-                if selected_nlp_cols:
-                    col_nlp1, col_nlp2 = st.columns(2)
-                    with col_nlp1:
-                        vectorizer_automl = st.selectbox("Vectorization", ["tfidf", "count", "embeddings"], key="automl_vect")
-                        if vectorizer_automl == "embeddings":
-                            embedding_model = st.selectbox("Embedding Model", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], index=0)
-                        else:
-                            ngram_min_automl, ngram_max_automl = st.slider("N-Grams Range", 1, 3, (1, 2), key="automl_ngram")
-                    with col_nlp2:
-                        if vectorizer_automl != "embeddings":
-                            remove_stopwords_automl = st.checkbox("Remove Stopwords (English)", value=True, key="automl_stop")
-                            lematization_automl = st.checkbox("Lemmatization (WordNet - requires NLTK)", value=False, key="automl_lemma")
-                            max_features_automl = st.number_input("Max Features", min_value=100, max_value=None, value=5000, step=1000, key="automl_max_feat", help="Leave high (e.g., 5000+) to capture more vocabulary. Automatically optimized.")
-                        else:
-                            st.info("💡 Embeddings generate dense fixed vectors (e.g., 384 dimensions).")
-
-                    nlp_config_automl = {
-                        "vectorizer": vectorizer_automl,
-                        "embedding_model": embedding_model if vectorizer_automl == "embeddings" else None,
-                        "ngram_range": (ngram_min_automl, ngram_max_automl) if vectorizer_automl != "embeddings" else (1, 1),
-                        "stop_words": remove_stopwords_automl if vectorizer_automl != "embeddings" else False,
-                        "max_features": max_features_automl if vectorizer_automl != "embeddings" else 5000,
-                        "lemmatization": lematization_automl if vectorizer_automl != "embeddings" else False
-                    }
+                val_strategy_ui = st.selectbox("Validation Method", validation_options,
+                    index=max(0, validation_options.index(cfg.get('val_strategy_ui', 'Automatic (Recommended)'))
+                              if cfg.get('val_strategy_ui') in validation_options else 0),
+                    key="wiz_val_method")
             else:
-                if selected_ds_list:
-                    st.info("No text column identified in the sample.")
+                opts = [o for o in validation_options if o != "Stratified K-Fold"]
+                v_default = cfg.get('val_strategy_ui', 'Automatic (Recommended)')
+                if v_default not in opts: v_default = 'Automatic (Recommended)'
+                val_strategy_ui = st.selectbox("Validation Method", opts,
+                    index=opts.index(v_default), key="wiz_val_method_ns")
+
+            cfg['val_strategy_ui'] = val_strategy_ui
+
+            # Visual diagram
+            if val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
+                n_folds = st.slider("Number of Folds", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_folds")
+                cfg['validation_params'] = {'folds': n_folds}
+                cfg['validation_strategy'] = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
+                fold_pct = round(100 / n_folds)
+                fold_bars = "".join([f"<div style='background:{'#2f80ed' if i==0 else '#1c2128'};border:1px solid #30363d;border-radius:4px;flex:1;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:white;'>{('Val' if i==0 else 'Train')}</div>" for i in range(n_folds)])
+                st.markdown(f"""
+                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
+                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>{n_folds}-Fold Cross Validation — each fold acts as validation once</div>
+                  <div style='display:flex;gap:3px;'>{fold_bars}</div>
+                </div>""", unsafe_allow_html=True)
+            elif val_strategy_ui == "Holdout (Train/Test)":
+                test_size_pct = st.slider("Test Split (%)", 10, 50, int(cfg.get('validation_params', {}).get('test_size', 0.2) * 100), key="wiz_holdout")
+                cfg['validation_params'] = {'test_size': test_size_pct / 100.0}
+                cfg['validation_strategy'] = 'holdout'
+                train_w = 100 - test_size_pct
+                st.markdown(f"""
+                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
+                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>Holdout Split: {train_w}% Train / {test_size_pct}% Test</div>
+                  <div style='display:flex;border-radius:6px;overflow:hidden;height:24px;'>
+                    <div style='flex:{train_w};background:#27ae60;display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:white;font-weight:600;'>Train {train_w}%</div>
+                    <div style='flex:{test_size_pct};background:#2f80ed;display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:white;font-weight:600;'>Test {test_size_pct}%</div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            elif val_strategy_ui == "Time Series Split":
+                n_splits = st.number_input("Temporal Splits", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_ts_splits")
+                cfg['validation_params'] = {'folds': n_splits}
+                cfg['validation_strategy'] = 'time_series_cv'
+                ts_bars = "".join([f"<div style='background:{'#27ae60' if i<n_splits-1 else '#2f80ed'};border:1px solid #30363d;border-radius:3px;flex:1;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:white;'>{'T' if i<n_splits-1 else 'V'}</div>" for i in range(n_splits)])
+                st.markdown(f"""
+                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
+                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>Time Series Split — expanding window ({n_splits} splits)</div>
+                  <div style='display:flex;gap:3px;'>{ts_bars}</div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                cfg['validation_strategy'] = 'auto' if val_strategy_ui == "Automatic (Recommended)" else 'auto_split'
+                cfg['validation_params'] = {}
+                st.info("✨ The system will automatically select the best validation strategy based on your dataset size and task type.")
+
+            # NLP Configuration — render here if text columns exist
+            st.markdown('<br>', unsafe_allow_html=True)
+            ds_list_cur = cfg.get('ds_list', [])
+            potential_nlp_cols = []
+            if ds_list_cur:
+                try:
+                    fd = datalake.list_versions(ds_list_cur[0])[0]
+                    sdf = datalake.load_version(ds_list_cur[0], fd, nrows=5)
+                    potential_nlp_cols = sdf.select_dtypes(include=['object']).columns.tolist()
+                except:
+                    pass
+
+            if potential_nlp_cols:
+                with st.expander("🔤 NLP Configuration (Optional)"):
+                    sel_nlp = st.multiselect("Text Columns", potential_nlp_cols,
+                        default=cfg.get('selected_nlp_cols', []), key="wiz_nlp_cols")
+                    cfg['selected_nlp_cols'] = sel_nlp
+                    if sel_nlp:
+                        col_n1, col_n2 = st.columns(2)
+                        with col_n1:
+                            vect = st.selectbox("Vectorizer", ["tfidf", "count", "embeddings"], key="wiz_vect")
+                            if vect == "embeddings":
+                                emb_model = st.selectbox("Embedding Model", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], key="wiz_emb")
+                            else:
+                                ng_min, ng_max = st.slider("N-Gram Range", 1, 3, (1, 2), key="wiz_ngram")
+                        with col_n2:
+                            if vect != "embeddings":
+                                rm_stop = st.checkbox("Remove Stopwords", value=True, key="wiz_stop")
+                                lemma   = st.checkbox("Lemmatization", value=False, key="wiz_lemma")
+                                max_feat= st.number_input("Max Features", 100, 50000, 5000, 500, key="wiz_maxfeat")
+                            else:
+                                st.info("Embeddings: dense fixed-length vectors.")
+                        cfg['nlp_config'] = {
+                            "vectorizer": vect,
+                            "embedding_model": emb_model if vect == "embeddings" else None,
+                            "ngram_range": (ng_min, ng_max) if vect != "embeddings" else (1, 1),
+                            "stop_words": rm_stop if vect != "embeddings" else False,
+                            "max_features": max_feat if vect != "embeddings" else 5000,
+                            "lemmatization": lemma if vect != "embeddings" else False,
+                        }
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step4_back"):
+                    st.session_state['automl_step'] = 3
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Advanced →", type="primary", key="step4_next"):
+                    st.session_state['automl_step'] = 5
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 5 — Advanced Settings (Seed, Stability)
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 5:
+            task = cfg.get('task', 'classification')
+            st.markdown("<h3 style='margin-bottom:4px;'>🔧 Advanced Settings</h3>", unsafe_allow_html=True)
+            st.caption("Fine-tune reproducibility and post-training analysis options.")
+
+            with st.expander("🌱 Reproducibility (Seed)", expanded=True):
+                eff_models = cfg.get('selected_models') or (AutoMLTrainer(task_type=task).get_available_models())
+                seed_mode = st.radio("Seed Mode",
+                    ["Automatic (Different per model)", "Automatic (Same for all)", "Manual (Same for all)", "Manual (Different per model)"],
+                    index=0, horizontal=True, key="wiz_seed_mode")
+                rseed = 42
+                if seed_mode == "Automatic (Different per model)":
+                    rseed = {m: np.random.randint(0, 999999) for m in eff_models}
+                    st.info(f"🎲 Random seeds generated per model.")
+                elif seed_mode == "Automatic (Same for all)":
+                    rseed = np.random.randint(0, 999999)
+                    st.info(f"🎲 Same random seed for all: {rseed}")
+                elif seed_mode == "Manual (Same for all)":
+                    rseed = st.number_input("Global Seed", 0, 999999, cfg.get('random_state', 42) if isinstance(cfg.get('random_state'), int) else 42, key="wiz_seed_val")
+                elif seed_mode == "Manual (Different per model)":
+                    rseed = {}
+                    sc = st.columns(min(len(eff_models), 3))
+                    for si, sm in enumerate(eff_models):
+                        with sc[si % 3]:
+                            rseed[sm] = st.number_input(f"Seed: {sm}", 0, 999999, 42, key=f"wiz_seed_{sm}")
+                cfg['random_state'] = rseed
+
+            with st.expander("⚖️ Post-Training Stability Analysis (Optional)", expanded=False):
+                enable_stab = st.checkbox("Run Stability Analysis after training",
+                    value=cfg.get('enable_stability', False), key="wiz_enable_stab")
+                cfg['enable_stability'] = enable_stab
+                if enable_stab:
+                    stab_opts = ["Data Variation Robustness", "Initialization Robustness", "Hyperparameter Sensitivity", "General Analysis"]
+                    sel_stab = st.multiselect("Tests to Run", stab_opts,
+                        default=cfg.get('stability_tests', ["General Analysis"]), key="wiz_stab_tests")
+                    cfg['stability_tests'] = sel_stab
+                    st.info("📊 Results will be saved to MLflow automatically.")
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step5_back"):
+                    st.session_state['automl_step'] = 4
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Review & Submit →", type="primary", key="step5_next"):
+                    st.session_state['automl_step'] = 6
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 6 — Summary & Data Load & Submit
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 6:
+            task = cfg.get('task', 'classification')
+            st.markdown("<h3 style='margin-bottom:4px;'>🚀 Review & Submit</h3>", unsafe_allow_html=True)
+            st.caption("Review your configuration, load data, and launch the experiment.")
+
+            # Config summary card
+            opt_labels = {"bayesian": "Bayesian Optimization", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
+            sel_mods_disp = ", ".join(cfg.get('selected_models') or ["All (Automatic)"])
+            st.markdown(f"""
+            <div class='summary-card'>
+              <div class='summary-row'><span class='summary-key'>📊 Dataset(s)</span><span class='summary-val'>{", ".join(cfg.get('ds_list', ["-"]))}</span></div>
+              <div class='summary-row'><span class='summary-key'>🎯 Task</span><span class='summary-val'>{task.replace("_", " ").title()}</span></div>
+              <div class='summary-row'><span class='summary-key'>🤖 Models</span><span class='summary-val'>{sel_mods_disp}</span></div>
+              <div class='summary-row'><span class='summary-key'>⚡ Optimization</span><span class='summary-val'>{opt_labels.get(cfg.get('optimization_mode','bayesian'), 'Bayesian')}</span></div>
+              <div class='summary-row'><span class='summary-key'>🏃 Preset</span><span class='summary-val'>{cfg.get('training_preset','medium').capitalize()}</span></div>
+              <div class='summary-row'><span class='summary-key'>🛡️ Validation</span><span class='summary-val'>{cfg.get('val_strategy_ui', 'Automatic (Recommended)')}</span></div>
+              <div class='summary-row'><span class='summary-key'>📈 Metric</span><span class='summary-val'>{cfg.get('optimization_metric','accuracy').upper()}</span></div>
+              <div class='summary-row'><span class='summary-key'>⚖️ Stability</span><span class='summary-val'>{'✅ Enabled' if cfg.get('enable_stability') else '⬜ Disabled'}</span></div>
+            </div>""", unsafe_allow_html=True)
+
+            # --- Load Data ---
+            st.markdown("### 📥 Load & Prepare Data")
+            sel_cfgs = cfg.get('selected_configs', [])
+            if not sel_cfgs:
+                st.error("No datasets configured. Go back to Step 1.")
+            else:
+                if 'train_df' not in st.session_state or st.session_state.get('current_task') != task:
+                    if st.button("📥 Load and Prepare Data", key="wiz_load_btn"):
+                        with st.spinner("Loading & preparing data..."):
+                            t_df, te_df = prepare_multi_dataset(
+                                sel_cfgs, global_split=None,
+                                task_type=task,
+                                date_col=cfg.get('date_col'),
+                                target_col=cfg.get('target')
+                            )
+                            st.session_state['train_df'] = t_df
+                            st.session_state['test_df']  = te_df
+                            st.session_state['current_task']        = task
+                            st.session_state['date_col_active']     = cfg.get('date_col')
+                            st.session_state['target_active']       = cfg.get('target')
+                            st.session_state['n_trials_active']     = cfg.get('n_trials')
+                            st.session_state['early_stopping_active'] = cfg.get('early_stopping', 10)
+                        st.success(f"✅ Data loaded — {t_df.shape[0]:,} train rows × {t_df.shape[1]} cols")
+                        st.rerun()
                 else:
-                    st.info("Select a dataset below to configure NLP.")
+                    t_df = st.session_state['train_df']
+                    st.success(f"✅ Data ready — {t_df.shape[0]:,} rows × {t_df.shape[1]} cols")
 
-        if selected_configs:
-            if st.button("📥 Load and Prepare Data", key="btn_load_train"):
-                # Usar configurações individuais de split (global_split=None)
-                train_df, test_df = prepare_multi_dataset(selected_configs, global_split=None, task_type=task, date_col=date_col_pre, target_col=target_pre)
-                
-                st.session_state['train_df'] = train_df
-                st.session_state['test_df'] = test_df
-                st.session_state['current_task'] = task
-                st.session_state['date_col_active'] = date_col_pre
-                st.session_state['target_active'] = target_pre # Salvar target selecionado
-                st.session_state['n_trials_active'] = n_trials
-                st.session_state['early_stopping_active'] = early_stopping
-                st.success("Data loaded!")
+            # Final target / time-series config (only if data is loaded)
+            target = None
+            forecast_horizon, freq = 1, "D"
 
-        if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
-            train_df = st.session_state['train_df']
-            test_df = st.session_state['test_df']
-            
-            st.divider()
-            st.subheader("⚙️ Final Configuration")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                    # Se já foi selecionado no pré-carregamento, apenas exibir e travar
-                    if st.session_state.get('target_active') and st.session_state['target_active'] in train_df.columns:
-                        target = st.session_state['target_active']
-                        st.info(f"🎯 Target Defined: **{target}** (To change, reload data)")
-                    else:
-                        target = st.selectbox("🎯 Select Target", train_df.columns)
-                else:
-                    target = None
-            
-            with col_f2:
-                if task == "time_series":
-                    freq = st.selectbox("⏱️ Interval", ["Minutes", "Hours", "Days", "Weeks", "Months", "Years"])
-                    forecast_horizon = st.number_input("🔮 Horizon", 1, 100, 7)
-                else: forecast_horizon, freq = 1, "D"
+            if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
+                train_df = st.session_state['train_df']
+                col_f1, col_f2 = st.columns(2)
+                with col_f1:
+                    if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
+                        act_target = st.session_state.get('target_active')
+                        if act_target and act_target in train_df.columns:
+                            target = act_target
+                            st.info(f"🎯 Target: **{target}**")
+                        else:
+                            target = st.selectbox("🎯 Select Target", train_df.columns, key="wiz_final_target")
+                with col_f2:
+                    if task == "time_series":
+                        freq = st.selectbox("⏱️ Frequency", ["Minutes","Hours","Days","Weeks","Months","Years"], key="wiz_freq")
+                        forecast_horizon = st.number_input("🔮 Horizon", 1, 100, 7, key="wiz_horizon")
 
-            # --- Stability Analysis Integration in AutoML Flow ---
-            st.divider()
-            st.subheader("⚖️ Stability & Robustness Analysis (Optional)")
-            enable_stability = st.checkbox("Run Post-Training Stability Analysis", help="Executes additional robustness tests after AutoML finishes.")
-            
-            selected_stability_tests = []
-            if enable_stability:
-                stability_options = [
-                    "Data Variation Robustness", 
-                    "Initialization Robustness", 
-                    "Hyperparameter Sensitivity", 
-                    "General Analysis"
-                ]
-                selected_stability_tests = st.multiselect(
-                    "Select Stability Tests", 
-                    stability_options,
-                    default=["General Analysis"],
-                    help="Select which analyses to run automatically on the best found model."
-                )
-                st.info("📊 Results will be saved to MLflow and a PDF report will be generated.")
+                # --- Submit ---
+                st.divider()
+                exp_name_default = f"{sel_cfgs[0]['name'] if sel_cfgs else 'AutoML'}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
+                exp_name = st.text_input("Experiment Name", value=exp_name_default, key="wiz_exp_name")
+                clean_exp_name = "".join(c for c in exp_name if ord(c) < 128) or "AutoML_Experiment"
 
-            if st.button("🚀 Submit Experiment", key="btn_start_train", type="primary"):
-                if not selected_configs:
-                    st.error("Please select and load a dataset first.")
-                elif 'train_df' not in st.session_state:
-                    st.error("Please load the data first (click '📥 Load and Prepare Data').")
-                else:
-                    exp_tag = selected_configs[0]['name'] if selected_configs else "AutoML"
-                    experiment_name = f"{exp_tag}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
-                    clean_experiment_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
-                    target_metric_name_local = optimization_metric.upper()
+                col_back2, col_sub, _ = st.columns([1, 2, 4])
+                with col_back2:
+                    if st.button("← Back", key="step6_back"):
+                        st.session_state['automl_step'] = 5
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
+                with col_sub:
+                    if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
+                        real_sel_models = cfg.get('selected_models')
+                        real_ens_cfg    = cfg.get('ensemble_config', {})
+                        real_opt_mode   = cfg.get('optimization_mode', 'bayesian')
+                        real_preset     = cfg.get('training_preset', 'medium')
+                        real_n_trials   = cfg.get('n_trials')
+                        real_timeout    = cfg.get('timeout')
+                        real_time_bud   = cfg.get('time_budget')
+                        real_es         = cfg.get('early_stopping', 10)
+                        real_mp         = cfg.get('manual_params')
+                        real_val_strat  = cfg.get('validation_strategy', 'auto')
+                        real_val_params = cfg.get('validation_params', {})
+                        real_seed       = cfg.get('random_state', 42)
+                        real_nlp_cols   = cfg.get('selected_nlp_cols', [])
+                        real_nlp_cfg    = cfg.get('nlp_config', {})
+                        real_stab       = cfg.get('enable_stability', False)
+                        real_stab_tests = cfg.get('stability_tests', [])
 
-                    job_config = {
-                        # Data
-                        'train_df': st.session_state.get('train_df'),
-                        'test_df': st.session_state.get('test_df'),
-                        'target': target,
-                        'task': task,
-                        'date_col': date_col_pre,
-                        'forecast_horizon': forecast_horizon,
-                        'selected_nlp_cols': selected_nlp_cols,
-                        'nlp_config': nlp_config_automl,
-                        # Training
-                        'preset': training_preset,
-                        'n_trials': n_trials,
-                        'timeout': timeout_per_model,
-                        'time_budget': total_time_budget,
-                        'selected_models': selected_models,
-                        'manual_params': manual_params,
-                        'experiment_name': clean_experiment_name,
-                        'random_state': random_seed_config,
-                        'validation_strategy': validation_strategy,
-                        'validation_params': validation_params,
-                        'ensemble_config': ensemble_config,
-                        'optimization_mode': selected_opt_mode,
-                        'optimization_metric': optimization_metric,
-                        'target_metric_name': target_metric_name_local,
-                        'early_stopping': early_stopping,
-                        'stability_config': {'tests': selected_stability_tests, 'n_iterations': 3} if enable_stability else None,
-                        # MLflow
-                        'mlflow_tracking_uri': mlflow.get_tracking_uri(),
-                        'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
-                        'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
-                    }
+                        job_config = {
+                            'train_df': st.session_state.get('train_df'),
+                            'test_df':  st.session_state.get('test_df'),
+                            'target': target,
+                            'task': task,
+                            'date_col': cfg.get('date_col'),
+                            'forecast_horizon': forecast_horizon,
+                            'selected_nlp_cols': real_nlp_cols,
+                            'nlp_config': real_nlp_cfg,
+                            'preset': real_preset,
+                            'n_trials': real_n_trials,
+                            'timeout': real_timeout,
+                            'time_budget': real_time_bud,
+                            'selected_models': real_sel_models,
+                            'manual_params': real_mp,
+                            'experiment_name': clean_exp_name,
+                            'random_state': real_seed,
+                            'validation_strategy': real_val_strat,
+                            'validation_params': real_val_params,
+                            'ensemble_config': real_ens_cfg,
+                            'optimization_mode': real_opt_mode,
+                            'optimization_metric': cfg.get('optimization_metric', 'accuracy'),
+                            'target_metric_name': cfg.get('optimization_metric', 'accuracy').upper(),
+                            'early_stopping': real_es,
+                            'stability_config': {'tests': real_stab_tests, 'n_iterations': 3} if real_stab else None,
+                            'mlflow_tracking_uri': mlflow.get_tracking_uri(),
+                            'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
+                            'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
+                        }
+                        jm = st.session_state['job_manager']
+                        job_id = jm.submit_job(job_config, name=clean_exp_name)
+                        st.success(f"✅ Experiment **{clean_exp_name}** submitted! (ID: `{job_id}`)")
+                        st.info("📊 View live progress in the **Experiments** tab.")
+                        st.balloons()
+                        # Reset wizard for next experiment
+                        st.session_state['automl_step'] = 0
+                        st.session_state['automl_config'] = {}
+            else:
+                col_back3, _ = st.columns([1, 6])
+                with col_back3:
+                    if st.button("← Back", key="step6_back_nodata"):
+                        st.session_state['automl_step'] = 5
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
 
-                    jm = st.session_state['job_manager']
-                    job_id = jm.submit_job(job_config, name=clean_experiment_name)
-                    st.success(f"✅ Experiment **{clean_experiment_name}** submitted! (Job ID: `{job_id}`)")
-                    st.info("📊 View live progress, logs and results in the **Experiments** tab.")
-                    st.balloons()
-
+    # --- SUB-TAB 1.2: COMPUTER VISION ---
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
         st.subheader("Computer Vision AutoML")
@@ -1382,22 +2046,7 @@ with tabs[1]:
 
                 with st.spinner("Training vision model..."):
                     try:
-                        # Container for real-time logs in CV
-                        st.markdown("### 🖥️ CV Execution Logs (Real-time)")
-                        cv_log_expander = st.expander("View Training Logs", expanded=True)
-                        cv_log_placeholder = cv_log_expander.empty()
-                        cv_st_handler = StreamlitLogHandler(cv_log_placeholder)
-                        cv_st_handler.setLevel(logging.INFO)
-                        cv_logger = logging.getLogger('cv_engine')
-                        if not any(isinstance(h, StreamlitLogHandler) for h in cv_logger.handlers):
-                            cv_logger.addHandler(cv_st_handler)
-                        original_cv_level = cv_logger.level
-                        cv_logger.setLevel(logging.INFO)
-                    
                         best_model_cv = trainer.train(data_dir, n_epochs=epochs, lr=lr_cv, callback=cv_callback, mask_dir=mask_dir)
-                        
-                        cv_logger.removeHandler(cv_st_handler)
-                        cv_logger.setLevel(original_cv_level)
                         
                         st.success("Vision Training Complete!")
                         st.session_state['best_cv_model'] = best_model_cv
@@ -1433,11 +2082,6 @@ with tabs[1]:
                             st.warning(f"Failed to log to MLflow: {ml_err}")
 
                     except Exception as e:
-                        try:
-                            cv_logger.removeHandler(cv_st_handler)
-                            cv_logger.setLevel(original_cv_level)
-                        except:
-                            pass
                         st.error(f"CV Training Failed: {e}")
                         st.error("Check if your ZIP file structure matches the task requirements (e.g., ImageFolder structure for classification).")
 
@@ -1489,34 +2133,67 @@ with tabs[1]:
 # --- TAB 3: EXPERIMENTS ---
 with tabs[2]:
     jm: TrainingJobManager = st.session_state['job_manager']
-    
+
     @st.fragment(run_every=2.0)
     def experiments_dashboard():
         jm.poll_updates()
         jobs = jm.list_jobs()
 
-        # Header
-        col_exp_h1, col_exp_h2 = st.columns([3, 1])
-        with col_exp_h1:
-            st.header("🧪 Experiments")
-            st.caption(f"Active jobs: **{jm.active_count()}** · Total: **{len(jobs)}**")
+        # Premium Hero Header
+        run_count   = sum(1 for j in jobs if j.status == JobStatus.RUNNING)
+        total_count = len(jobs)
+        done_count  = sum(1 for j in jobs if j.status == JobStatus.COMPLETED)
+        fail_count  = sum(1 for j in jobs if j.status == JobStatus.FAILED)
+
+        st.markdown(f"""
+        <div class='hero-header'>
+          <div class='hero-title'>🧪 Experiments
+            <span class='version-badge'>{run_count} running</span>
+          </div>
+          <div class='hero-subtitle'>Track, manage and inspect all your training jobs in real time.</div>
+        </div>""", unsafe_allow_html=True)
+
+        col_meta1, col_meta2, col_meta3, col_meta4 = st.columns(4)
+        for col, val, label, color in [
+            (col_meta1, total_count, "Total Jobs",   "#2f80ed"),
+            (col_meta2, run_count,   "Running",       "#27ae60"),
+            (col_meta3, done_count,  "Completed",     "#8b5cf6"),
+            (col_meta4, fail_count,  "Failed",        "#ef4444"),
+        ]:
+            with col:
+                col.markdown(f"""
+                <div class='ui-metric' style='border-left-color:{color};'>
+                  <div class='metric-value'>{val}</div>
+                  <div class='metric-label'>{label}</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown('<br>', unsafe_allow_html=True)
+
+        col_exp_h1, col_exp_h2 = st.columns([4, 1])
         with col_exp_h2:
             if st.button("🔄 Refresh", key="exp_refresh"):
                 st.rerun()
 
         if not jobs:
-            st.info("No experiments yet. Go to **AutoML & Model Hub** → configure settings → click **Submit Experiment**.")
+            st.markdown("""
+            <div class='ui-card' style='text-align:center;padding:40px;'>
+              <div style='font-size:2.5rem;'>🧪</div>
+              <div style='font-weight:600;font-size:1.1rem;margin:12px 0;'>No experiments yet</div>
+              <div style='color:#8b949e;'>Go to <strong>AutoML &amp; Model Hub</strong> and submit your first experiment.</div>
+            </div>""", unsafe_allow_html=True)
             return
 
         # Search / filter bar
-        search_q = st.text_input("🔍 Search experiments", key="exp_search", placeholder="Filter by name...")
+        search_q = st.text_input("🔍 Filter experiments", key="exp_search", placeholder="Filter by name...")
         filter_status = st.multiselect(
-            "Status", 
+            "Status Filter",
             [JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED],
             default=[JobStatus.RUNNING, JobStatus.PAUSED, JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED],
             key="exp_status_filter",
-            format_func=lambda s: {"queued":"🔵 Queued","running":"🟢 Running","paused":"🟡 Paused",
-                                   "completed":"✅ Completed","failed":"🔴 Failed","cancelled":"⚫ Cancelled"}.get(s, s)
+            format_func=lambda s: {
+                "queued": "🔵 Queued", "running": "🟢 Running", "paused": "🟡 Paused",
+                "completed": "✅ Completed", "failed": "🔴 Failed", "cancelled": "⚫ Cancelled"
+            }.get(s, s)
         )
 
         visible_jobs = [
@@ -1526,12 +2203,30 @@ with tabs[2]:
 
         if not visible_jobs:
             st.warning("No experiments match the current filters.")
-        
+
+        BADGE_MAP = {
+            "queued":    ("badge-queued",  "🔵 Queued"),
+            "running":   ("badge-running", "🟢 Running"),
+            "paused":    ("badge-paused",  "🟡 Paused"),
+            "completed": ("badge-done",    "✅ Done"),
+            "failed":    ("badge-failed",  "🔴 Failed"),
+            "cancelled": ("badge-queued",  "⚫ Cancelled"),
+        }
+
         for job in visible_jobs:
-            # Status badge color
-            badge = {"queued":"🔵","running":"🟢","paused":"🟡","completed":"✅","failed":"🔴","cancelled":"⚫"}.get(job.status, "⚪")
-            score_str = f"Best: **{job.best_score:.4f}**" if job.best_score is not None else ""
-            label = f"{badge} **{job.name}** &nbsp;&nbsp; `{job.status.upper()}` &nbsp;&nbsp; ⏱ {job.duration_str}  &nbsp;&nbsp; {score_str}"
+            badge_cls, badge_lbl = BADGE_MAP.get(job.status, ("badge-queued", job.status))
+            score_display = f"Best: <strong>{job.best_score:.4f}</strong>" if job.best_score is not None else "<span style='color:#8b949e'>No score yet</span>"
+            label = f"""
+            <div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'>
+              <div style='display:flex;align-items:center;gap:10px;'>
+                <span style='font-weight:700;font-size:0.95rem;'>{job.name}</span>
+                <span class='badge {badge_cls}'>{badge_lbl}</span>
+              </div>
+              <div style='display:flex;align-items:center;gap:16px;font-size:0.82rem;color:#8b949e;'>
+                <span>⏱ {job.duration_str}</span>
+                <span>{score_display}</span>
+              </div>
+            </div>"""
 
             with st.expander(label, expanded=(job.status in (JobStatus.RUNNING, JobStatus.PAUSED))):
                 # ──── Action buttons ────
@@ -1635,9 +2330,13 @@ with tabs[2]:
                 with detail_tabs[2]:
                     if job.logs:
                         log_text = "\n".join(job.logs[-200:])
-                        st.text_area("Live Logs (last 200 lines)", value=log_text, height=400, key=f"logs_{job.job_id}", disabled=True)
+                        st.markdown(f"<div class='log-terminal'>{log_text}</div>", unsafe_allow_html=True)
                     else:
-                        st.info("No logs yet. Logs appear as training progresses.")
+                        st.markdown("""
+                        <div class='ui-card' style='text-align:center;padding:24px;'>
+                          <div style='font-size:1.5rem;'>🖥️</div>
+                          <div style='color:#8b949e;margin-top:8px;'>No logs yet. Logs appear as training progresses.</div>
+                        </div>""", unsafe_allow_html=True)
 
                 # ── Tab 3: Results ──
                 with detail_tabs[3]:
@@ -1811,11 +2510,14 @@ with tabs[2]:
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
 with tabs[3]:
-    st.header("Model Registry & Deployment")
+    st.markdown(f"""
+    <div class='hero-header'>
+      <div class='hero-title'>📦 Model Registry & Deployment</div>
+      <div class='hero-subtitle'>Versioning, artifact management, and model serving.</div>
+    </div>""", unsafe_allow_html=True)
     
-    st.subheader("Model Deployment Center")
+    st.subheader("🚀 Model Deployment Center")
     
-# 1. Select Model from Registry
     models = get_registered_models()
     if not models:
         st.warning("No models found in Registry. Please register a model from Experiments first.")
@@ -1823,39 +2525,42 @@ with tabs[3]:
         col_dep1, col_dep2 = st.columns([1, 2])
         
         with col_dep1:
-            st.markdown("#### 1. Select Artifact")
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.markdown("##### 🔍 1. Select Artifact")
             model_names = [m.name for m in models]
             selected_model_name = st.selectbox("Registered Model", model_names, key="deploy_model_sel")
             
-            # Get versions
             from mlflow.tracking import MlflowClient
             client = MlflowClient()
             versions = client.search_model_versions(f"name='{selected_model_name}'")
             version_nums = [v.version for v in versions]
             selected_version = st.selectbox("Version", version_nums, key="deploy_ver_sel")
             
-            # Fetch details
             model_details = get_model_details(selected_model_name, selected_version)
-            # model_details is a dictionary, not an object
-            st.info(f"Stage: {model_details.get('current_stage', 'None')}")
-            st.caption(f"Last Updated: {model_details.get('last_updated_timestamp', 'Unknown')}")
+            st.markdown(f"""
+            <div style='background:#0d1117; padding:12px; border-radius:8px; border:1px solid #30363d; margin-top:10px;'>
+              <div style='font-size:0.75rem; color:#8b949e; text-transform:uppercase;'>Current Stage</div>
+              <div style='font-weight:700; color:#2f80ed;'>{model_details.get('current_stage', 'None')}</div>
+              <div style='font-size:0.7rem; color:#8b949e; margin-top:4px;'>Updated: {model_details.get('last_updated_timestamp', 'Unknown')}</div>
+            </div>""", unsafe_allow_html=True)
+            st.markdown("</div>", unsafe_allow_html=True)
 
         with col_dep2:
-            st.markdown("#### 2. Deployment Configuration")
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.markdown("##### ⚙️ 2. Deployment Configuration")
             env = st.radio("Target Environment", ["Development (Local)", "Staging", "Production"], horizontal=True)
             
-            col_res1, col_res2 = st.columns(2)
-            with col_res1:
-                cpu_alloc = st.slider("CPU Allocation", 0.5, 4.0, 1.0, step=0.5)
+            c1, c2 = st.columns(2)
+            with c1:
+                cpu_alloc = st.slider("CPU Units", 0.5, 4.0, 1.0, step=0.5)
                 min_replicas = st.number_input("Min Replicas", 1, 5, 1)
-            with col_res2:
+            with c2:
                 mem_alloc = st.slider("Memory (GB)", 0.5, 16.0, 2.0, step=0.5)
                 max_replicas = st.number_input("Max Replicas", 1, 10, 2)
             
-            if st.button("Deploy / Update Service", type="primary"):
-                with st.spinner(f"Deploying {selected_model_name} v{selected_version} to {env}..."):
-                    # Mock Deployment Process
-                    time.sleep(2)
+            if st.button("🚀 Deploy / Update Service", type="primary", use_container_width=True):
+                with st.spinner(f"Deploying {selected_model_name} v{selected_version}..."):
+                    time.sleep(1.5)
                     endpoint_url = f"http://localhost:8000/predict/{selected_model_name}/{selected_version}"
                     st.session_state['active_endpoint'] = {
                         'url': endpoint_url,
@@ -1865,49 +2570,47 @@ with tabs[3]:
                         'status': 'Healthy'
                     }
                     st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
+            st.markdown("</div>", unsafe_allow_html=True)
         
         st.divider()
         
-        # 3. Integrated Testing Interface (Merged from old Test Models tab)
-        st.markdown("#### 3. Live Inference Test")
+        # 3. Integrated Testing Interface
+        st.subheader("🎮 Inference Playground")
         
         if 'active_endpoint' in st.session_state:
-            st.success(f"Connected to Active Endpoint: `{st.session_state['active_endpoint']['url']}`")
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.markdown(f"**Connected Endpoint**: `{st.session_state['active_endpoint']['url']}` <span class='badge badge-done'>Healthy</span>", unsafe_allow_html=True)
             
-            # Input Method
             input_type = st.radio("Input Format", ["JSON/Text", "CSV File"], horizontal=True)
             
             if input_type == "JSON/Text":
-                input_data = st.text_area("Input JSON", value='{"feature1": 0.5, "feature2": 1.2}', height=150)
-                if st.button("Send Request"):
-                    # Mock Inference
+                input_data = st.text_area("Input Payload", value='{"feature1": 0.5, "feature2": 1.2}', height=100)
+                if st.button("🔌 Send API Request", type="primary"):
                     try:
                         import json
                         data = json.loads(input_data)
-                        # In real scenario: requests.post(endpoint, json=data)
-                        # Here we load model locally to simulate
-                        with st.spinner("Processing..."):
+                        with st.spinner("Invoking model..."):
                             loaded_model = load_registered_model(selected_model_name, selected_version)
-                            # Convert dict to DF
                             df_in = pd.DataFrame([data])
                             pred = loaded_model.predict(df_in)
                             st.json({"prediction": pred.tolist(), "latency_ms": 45, "model_version": selected_version})
                     except Exception as e:
                         st.error(f"Inference Error: {e}")
-                        
+            
             elif input_type == "CSV File":
                 up_file = st.file_uploader("Upload Batch CSV", type="csv", key="deploy_test_csv")
                 if up_file:
                     df_test = pd.read_csv(up_file)
-                    if st.button("Run Batch Prediction"):
-                        with st.spinner("Running batch inference..."):
+                    if st.button("🏃 Run Batch Inference", type="primary"):
+                        with st.spinner("Processing batch..."):
                             loaded_model = load_registered_model(selected_model_name, selected_version)
                             preds = loaded_model.predict(df_test)
                             df_test['prediction'] = preds
-                            st.dataframe(df_test)
+                            st.dataframe(df_test, use_container_width=True)
                             st.info(f"Processed {len(df_test)} records in 0.42s")
+            st.markdown("</div>", unsafe_allow_html=True)
         else:
-                st.info("Deploy a model above to enable live testing.")
+            st.info("Deploy a model above to enable the Live Inference Playground.")
 
 
 
