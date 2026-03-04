@@ -166,9 +166,19 @@ html, body, [class*="css"], .stApp {
   border-radius: 10px;
   padding: 16px;
   border-left: 3px solid var(--accent-blue);
+  transition: transform 0.2s, box-shadow 0.2s;
 }
+.ui-metric:hover { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(47,128,237,0.15); }
 .ui-metric .metric-value { font-size: 1.8rem; font-weight: 700; color: var(--text-primary); }
 .ui-metric .metric-label { font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.8px; }
+
+/* ── Live metric pulse animation ── */
+@keyframes metric-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.6; color: var(--accent-blue); }
+  100% { opacity: 1; }
+}
+.live-metric-value { animation: metric-pulse 1.5s ease-in-out 1; }
 
 /* ── Badges ── */
 .badge {
@@ -193,10 +203,11 @@ html, body, [class*="css"], .stApp {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 14px;
-  padding: 12px 20px;
-  margin-bottom: 24px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
   overflow-x: auto;
   flex-wrap: nowrap;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 .pipeline-step {
   display: flex;
@@ -212,21 +223,30 @@ html, body, [class*="css"], .stApp {
 }
 .pipeline-step:hover { background: var(--bg-surface); }
 .step-circle {
-  width: 34px; height: 34px;
+  width: 36px; height: 36px;
   border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 0.85rem; font-weight: 700;
-  transition: all 0.25s ease;
+  transition: all 0.3s ease;
 }
 .step-circle.pending  { background: var(--bg-surface); border: 2px solid var(--border); color: var(--text-muted); }
-.step-circle.active   { background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); color: white; box-shadow: 0 4px 12px rgba(47,128,237,0.4); }
-.step-circle.done     { background: var(--accent-green); color: white; }
+.step-circle.active   {
+  background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+  color: white;
+  box-shadow: 0 0 0 4px rgba(47,128,237,0.2), 0 4px 12px rgba(47,128,237,0.4);
+  animation: step-pulse 2s ease-in-out infinite;
+}
+.step-circle.done     { background: var(--accent-green); color: white; box-shadow: 0 2px 8px rgba(39,174,96,0.35); }
+@keyframes step-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(47,128,237,0.2), 0 4px 12px rgba(47,128,237,0.4); }
+  50%       { box-shadow: 0 0 0 8px rgba(47,128,237,0.1), 0 4px 20px rgba(47,128,237,0.6); }
+}
 .step-label {
-  font-size: 0.7rem; font-weight: 500;
+  font-size: 0.68rem; font-weight: 500;
   color: var(--text-muted);
   text-align: center; white-space: nowrap;
 }
-.step-label.active { color: var(--accent-blue); font-weight: 600; }
+.step-label.active { color: var(--accent-blue); font-weight: 700; }
 .step-label.done   { color: var(--accent-green); }
 .step-connector {
   flex: 1; height: 2px; min-width: 20px;
@@ -234,8 +254,76 @@ html, body, [class*="css"], .stApp {
   margin: 0;
   position: relative;
   top: -14px;
+  transition: background 0.4s ease;
 }
-.step-connector.done { background: var(--accent-green); }
+.step-connector.done { background: linear-gradient(90deg, var(--accent-green), #2dba6e); }
+.step-connector.active { background: linear-gradient(90deg, var(--accent-green), var(--accent-blue)); }
+
+/* ── Step info panel (glassmorphism) ── */
+.step-info-panel {
+  background: linear-gradient(135deg, rgba(47,128,237,0.06), rgba(139,92,246,0.06));
+  border: 1px solid rgba(47,128,237,0.25);
+  border-left: 3px solid var(--accent-blue);
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  backdrop-filter: blur(8px);
+}
+.step-info-panel .step-info-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent-blue);
+  margin-bottom: 6px;
+}
+.step-info-panel .step-info-desc {
+  font-size: 0.87rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+.step-info-panel .step-info-tips {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.step-tip-chip {
+  background: rgba(47,128,237,0.12);
+  border: 1px solid rgba(47,128,237,0.2);
+  border-radius: 20px;
+  padding: 3px 10px;
+  font-size: 0.72rem;
+  color: var(--accent-blue);
+  font-weight: 500;
+}
+
+/* ── Pipeline overview sidebar tracker ── */
+.pipeline-overview {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+}
+.po-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.po-step:last-child { border-bottom: none; }
+.po-dot {
+  width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.65rem; font-weight: 700; flex-shrink: 0;
+}
+.po-dot.done    { background: var(--accent-green); color: white; }
+.po-dot.active  { background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)); color: white; }
+.po-dot.pending { background: var(--bg-surface); border: 1.5px solid var(--border); color: var(--text-muted); }
+.po-label { font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
+.po-label.active { color: var(--text-primary); font-weight: 600; }
+.po-label.done  { color: var(--accent-green); }
 
 /* ── Task card (model selection) ── */
 .task-card {
@@ -245,14 +333,80 @@ html, body, [class*="css"], .stApp {
   padding: 24px 16px;
   text-align: center;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.25s ease;
   display: flex; flex-direction: column; align-items: center; gap: 10px;
 }
-.task-card:hover { border-color: var(--accent-blue); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(47,128,237,0.12); }
-.task-card.selected { border-color: var(--accent-blue); background: linear-gradient(135deg, rgba(47,128,237,0.1), rgba(139,92,246,0.1)); }
+.task-card:hover { border-color: var(--accent-blue); transform: translateY(-3px); box-shadow: 0 8px 24px rgba(47,128,237,0.15); }
+.task-card.selected { border-color: var(--accent-blue); background: linear-gradient(135deg, rgba(47,128,237,0.1), rgba(139,92,246,0.1)); box-shadow: 0 6px 20px rgba(47,128,237,0.18); }
 .task-card .task-icon { font-size: 2rem; }
-.task-card .task-name { font-size: 0.9rem; font-weight: 600; color: var(--text-primary); }
+.task-card .task-name { font-size: 0.9rem; font-weight: 700; color: var(--text-primary); }
 .task-card .task-desc { font-size: 0.72rem; color: var(--text-muted); }
+
+/* ── Model card ── */
+.model-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 10px;
+  transition: all 0.2s ease;
+}
+.model-card:hover { border-color: var(--accent-blue); box-shadow: 0 4px 16px rgba(47,128,237,0.12); transform: translateY(-1px); }
+.model-card .mc-name { font-weight: 700; font-size: 0.9rem; margin-bottom: 6px; }
+.model-card .mc-desc { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 10px; }
+.speed-bar { height: 6px; border-radius: 3px; background: var(--bg-surface); overflow: hidden; margin: 3px 0; }
+.speed-bar-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple)); }
+.speed-label { font-size: 0.68rem; color: var(--text-muted); display: flex; justify-content: space-between; margin-bottom: 2px; }
+
+/* ── Best pipeline result card ── */
+.pipeline-result-card {
+  background: linear-gradient(135deg, rgba(47,128,237,0.08), rgba(139,92,246,0.08));
+  border: 2px solid var(--accent-blue);
+  border-radius: 14px;
+  padding: 20px 24px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.pipeline-result-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--accent-blue), var(--accent-purple), var(--accent-blue));
+  background-size: 200% 100%;
+  animation: gradient-shift 3s linear infinite;
+}
+@keyframes gradient-shift {
+  0%   { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+.prc-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent-blue); font-weight: 700; margin-bottom: 4px; }
+.prc-model { font-size: 1.4rem; font-weight: 800; color: var(--text-primary); }
+.prc-score { font-size: 0.9rem; color: var(--text-muted); }
+.prc-actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+
+/* ── Training mini-pipeline stage bar ── */
+.mini-pipeline {
+  display: flex; align-items: center; gap: 0;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  margin: 10px 0;
+}
+.mini-step {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.72rem; font-weight: 500;
+  color: var(--text-muted);
+  padding: 3px 8px; border-radius: 6px;
+  white-space: nowrap;
+}
+.mini-step.mp-done    { color: var(--accent-green); }
+.mini-step.mp-active  { color: var(--accent-blue); font-weight: 700; background: rgba(47,128,237,0.1); animation: mini-pulse 1.5s ease-in-out infinite; }
+.mini-step.mp-pending { color: var(--text-muted); opacity: 0.5; }
+@keyframes mini-pulse { 0%,100% { background: rgba(47,128,237,0.1); } 50% { background: rgba(47,128,237,0.22); } }
+.mini-connector { flex: 1; height: 1px; min-width: 10px; background: var(--border); margin: 0 4px; }
+.mini-connector.mp-done { background: var(--accent-green); }
 
 /* ── Inputs / selects / sliders general dark ── */
 .stTextInput input, .stSelectbox div[data-baseweb="select"],
@@ -280,7 +434,7 @@ p, span, li { color: var(--text-primary) !important; }
 /* ── Dataframe / Tables ── */
 .dataframe, .stDataFrame { border-color: var(--border) !important; }
 
-/* ── Log terminal ── */
+/* ── Log terminal with colored lines ── */
 .log-terminal {
   background: #010409;
   border: 1px solid var(--border);
@@ -288,13 +442,20 @@ p, span, li { color: var(--text-primary) !important; }
   padding: 16px;
   font-family: 'Courier New', monospace;
   font-size: 0.78rem;
-  line-height: 1.6;
-  color: #58a6ff;
-  max-height: 400px;
+  line-height: 1.7;
+  max-height: 420px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;
 }
+.log-terminal::-webkit-scrollbar { width: 6px; }
+.log-terminal::-webkit-scrollbar-track { background: #010409; }
+.log-terminal::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+.log-info    { color: #58a6ff; }
+.log-warn    { color: #f59e0b; }
+.log-error   { color: #ef4444; font-weight: 600; }
+.log-success { color: #27ae60; }
+.log-default { color: #8b949e; }
 
 /* ── Step summary card ── */
 .summary-card {
@@ -304,7 +465,7 @@ p, span, li { color: var(--text-primary) !important; }
   padding: 16px 20px;
   margin: 6px 0;
 }
-.summary-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--border-light); }
+.summary-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid var(--border-light); }
 .summary-row:last-child { border-bottom: none; }
 .summary-key { color: var(--text-muted); font-size: 0.82rem; }
 .summary-val { color: var(--text-primary); font-size: 0.82rem; font-weight: 600; }
@@ -325,6 +486,10 @@ p, span, li { color: var(--text-primary) !important; }
   padding: 12px 0 8px;
   background: transparent;
 }
+@keyframes title-glow {
+  0%, 100% { filter: brightness(1); }
+  50%       { filter: brightness(1.18); }
+}
 .hero-title {
   font-size: 1.9rem;
   font-weight: 800;
@@ -333,6 +498,7 @@ p, span, li { color: var(--text-primary) !important; }
   -webkit-text-fill-color: transparent;
   background-clip: text;
   line-height: 1.2;
+  animation: title-glow 4s ease-in-out infinite;
 }
 .hero-subtitle {
   font-size: 0.85rem;
@@ -363,6 +529,14 @@ p, span, li { color: var(--text-primary) !important; }
   background: var(--bg-card) !important;
   border-color: var(--border) !important;
 }
+
+/* ── Stat comparison bar ── */
+.stat-bar-row { display: flex; align-items: center; gap: 10px; margin: 5px 0; font-size: 0.8rem; }
+.stat-bar-label { min-width: 90px; color: var(--text-muted); }
+.stat-bar-track { flex: 1; height: 8px; background: var(--bg-surface); border-radius: 4px; overflow: hidden; }
+.stat-bar-fill  { height: 100%; border-radius: 4px; }
+.stat-bar-val   { min-width: 35px; text-align: right; color: var(--text-primary); font-weight: 600; }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -579,6 +753,144 @@ def render_pipeline_header(steps: list, current: int):
 
     html_parts.append('</div>')
     st.markdown(''.join(html_parts), unsafe_allow_html=True)
+
+
+
+def render_step_info_panel(title: str, description: str, tips: list = None):
+    """Render a glassmorphism info panel explaining the current wizard step."""
+    tips_html = ""
+    if tips:
+        chips = "".join([f"<span class='step-tip-chip'>💡 {t}</span>" for t in tips])
+        tips_html = f"<div class='step-info-tips'>{chips}</div>"
+    st.markdown(f"""
+    <div class='step-info-panel'>
+      <div class='step-info-title'>About this step</div>
+      <div class='step-info-desc'>{description}</div>
+      {tips_html}
+    </div>""", unsafe_allow_html=True)
+
+
+def render_pipeline_overview(steps: list, current: int):
+    """Render a compact vertical pipeline tracker (shown alongside step content)."""
+    html_rows = ""
+    for i, (icon, label) in enumerate(steps):
+        if i < current:
+            dot_cls, lbl_cls, sym = 'po-dot done', 'po-label done', '✓'
+        elif i == current:
+            dot_cls, lbl_cls, sym = 'po-dot active', 'po-label active', str(i + 1)
+        else:
+            dot_cls, lbl_cls, sym = 'po-dot pending', 'po-label', str(i + 1)
+        html_rows += (
+            f"<div class='po-step'>"
+            f"<div class='{dot_cls}'>{sym}</div>"
+            f"<div class='{lbl_cls}'>{icon} {label}</div>"
+            f"</div>"
+        )
+    full_html = (
+        "<div class='pipeline-overview'>"
+        "<div style='font-size:0.72rem;text-transform:uppercase;letter-spacing:1px;"
+        "color:#8b949e;margin-bottom:8px;font-weight:700;'>Pipeline Progress</div>"
+        + html_rows +
+        "</div>"
+    )
+    try:
+        st.html(full_html)
+    except AttributeError:
+        st.markdown(full_html, unsafe_allow_html=True)
+
+
+
+def render_colored_log(log_lines: list):
+    """Render log lines with color coding based on severity keywords."""
+    html_lines = []
+    for line in log_lines:
+        line_esc = line.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        upper = line.upper()
+        if "ERROR" in upper or "FAILED" in upper or "EXCEPTION" in upper:
+            css = "log-error"
+        elif "WARN" in upper or "WARNING" in upper:
+            css = "log-warn"
+        elif "COMPLETE" in upper or "DONE" in upper or "SUCCESS" in upper or "BEST" in upper:
+            css = "log-success"
+        elif "INFO" in upper or "[JOB]" in upper or "TRIAL" in upper or "START" in upper:
+            css = "log-info"
+        else:
+            css = "log-default"
+        html_lines.append(f"<span class='{css}'>{line_esc}</span>")
+    log_html = "<br>".join(html_lines)
+    st.markdown(f"<div class='log-terminal'>{log_html}</div>", unsafe_allow_html=True)
+
+
+def render_training_mini_pipeline(log_lines: list, status: str):
+    """Infer current training stage from logs and render a mini pipeline bar."""
+    STAGES = [
+        ("🔧", "Preprocessing"),
+        ("🔍", "Searching"),
+        ("⚖️", "Evaluating"),
+        ("📊", "Reporting"),
+        ("✅", "Done"),
+    ]
+    # Determine how far along we are based on log content
+    last_logs = " ".join(log_lines[-30:]).upper() if log_lines else ""
+    if status == "completed" or "TRAINING COMPLETE" in last_logs:
+        stage_idx = 4
+    elif "REPORT" in last_logs or "__REPORT__" in last_logs:
+        stage_idx = 3
+    elif "TRIAL" in last_logs or "OPTUNA" in last_logs or "SCORE" in last_logs:
+        stage_idx = 2
+    elif "PREPROCESSING" in last_logs or "FEATURE" in last_logs or "TRANSFORM" in last_logs:
+        stage_idx = 1
+    else:
+        stage_idx = 0 if log_lines else -1
+
+    if stage_idx < 0:
+        return  # Nothing to show yet
+
+    parts = ['<div class="mini-pipeline">']
+    for i, (icon, label) in enumerate(STAGES):
+        if i < stage_idx:
+            cls = "mp-done"
+            sym = "✓"
+        elif i == stage_idx:
+            cls = "mp-active"
+            sym = icon
+        else:
+            cls = "mp-pending"
+            sym = icon
+        parts.append(f"<div class='mini-step {cls}'>{sym} {label}</div>")
+        if i < len(STAGES) - 1:
+            conn_cls = "mp-done" if i < stage_idx else ""
+            parts.append(f"<div class='mini-connector {conn_cls}'></div>")
+    parts.append('</div>')
+    st.markdown("".join(parts), unsafe_allow_html=True)
+
+
+def render_pipeline_progress_ring(trials_done: int, total_est: int):
+    """Render an SVG circular progress ring for trial completion."""
+    if total_est <= 0:
+        total_est = max(trials_done, 1)
+    pct = min(1.0, trials_done / total_est)
+    r, cx, cy = 28, 36, 36
+    circ = 2 * 3.14159 * r
+    dash = pct * circ
+    color = "#2f80ed" if pct < 1.0 else "#27ae60"
+    label_txt = f"{int(pct*100)}%"
+    svg = f"""
+    <svg width="72" height="72" viewBox="0 0 72 72">
+      <circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="#21262d" stroke-width="6"/>
+      <circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{color}" stroke-width="6"
+        stroke-dasharray="{dash:.1f} {circ:.1f}"
+        stroke-dashoffset="{circ/4:.1f}" stroke-linecap="round"
+        transform="rotate(-90 {cx} {cy})"/>
+      <text x="{cx}" y="{cy+5}" text-anchor="middle" fill="{color}"
+        font-size="12" font-weight="700" font-family="Inter,sans-serif">{label_txt}</text>
+    </svg>"""
+    st.markdown(f"""<div class='progress-ring-wrap'>{svg}
+      <div>
+        <div class='progress-ring-value'>{trials_done} trials</div>
+        <div class='progress-ring-label'>of ~{total_est} expected</div>
+      </div>
+    </div>""", unsafe_allow_html=True)
 
 
 def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None):
@@ -1208,7 +1520,11 @@ with tabs[4]:
 
 # --- TAB 1: AUTOML & MODEL HUB ---
 with tabs[1]:
-    st.header("🤖 AutoML & Model Hub")
+    st.markdown("""
+    <div class='hero-header'>
+      <div class='hero-title'>🤖 AutoML &amp; Model Hub</div>
+      <div class='hero-subtitle'>Automated machine learning pipeline — from raw data to a production-ready model.</div>
+    </div>""", unsafe_allow_html=True)
     
     # Sub-tabs within AutoML
     automl_tabs = st.tabs(["📊 Classical ML (Tabular)", "🖼️ Computer Vision"])
@@ -1265,88 +1581,145 @@ with tabs[1]:
         # STEP 0 — Data Source
         # ════════════════════════════════════════════════════════════════
         if cur_step == 0:
-            st.markdown("<h3 style='margin-bottom:4px;'>📂 Data Source</h3>", unsafe_allow_html=True)
-            st.caption("Select one or more datasets from your Data Lake and configure the split strategy.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+              st.markdown("<h3 style='margin-bottom:4px;'>📂 Step 1 — Data Source</h3>", unsafe_allow_html=True)
+              render_step_info_panel(
+                  "Data Source",
+                  "Select one or more datasets from your Data Lake to train on. You can mix multiple datasets — they will be concatenated during loading. Configure the train/test split ratio for each dataset individually.",
+                  ["Use 70-80% for training", "Preview data before selecting target", "Multiple datasets are concatenated"]
+              )
 
-            available_datasets = datalake.list_datasets()
-            if not available_datasets:
-                st.markdown("""
-                <div class='ui-card' style='text-align:center;padding:32px;'>
-                  <div style='font-size:2rem;'>🗄️</div>
-                  <div style='font-weight:600;margin:8px 0;'>No datasets available</div>
-                  <div style='color:#8b949e;font-size:0.85rem;'>Go to the <strong>Data</strong> tab to upload your first dataset.</div>
-                </div>""", unsafe_allow_html=True)
-            else:
-                sel_ds_list = st.multiselect(
-                    "Choose Datasets from Data Lake",
-                    available_datasets,
-                    default=cfg.get('ds_list', []),
-                    key="wizard_ds_multi"
-                )
-                cfg['ds_list'] = sel_ds_list
+              available_datasets = datalake.list_datasets()
+              if not available_datasets:
+                  st.markdown("""
+                  <div class='ui-card' style='text-align:center;padding:32px;'>
+                    <div style='font-size:2rem;'>🗄️</div>
+                    <div style='font-weight:600;margin:8px 0;'>No datasets available</div>
+                    <div style='color:#8b949e;font-size:0.85rem;'>Go to the <strong>Data</strong> tab to upload your first dataset.</div>
+                  </div>""", unsafe_allow_html=True)
+              else:
+                  sel_ds_list = st.multiselect(
+                      "Choose Datasets from Data Lake",
+                      available_datasets,
+                      default=cfg.get('ds_list', []),
+                      key="wizard_ds_multi"
+                  )
+                  cfg['ds_list'] = sel_ds_list
 
-                target_pre_w  = None
-                date_col_pre_w= None
+                  target_pre_w  = None
+                  date_col_pre_w= None
 
-                if sel_ds_list:
-                    # Sample preview from first dataset
-                    try:
-                        first_ds  = sel_ds_list[0]
-                        first_ver = datalake.list_versions(first_ds)[0]
-                        sample_df = datalake.load_version(first_ds, first_ver, nrows=5)
+                  if sel_ds_list:
+                      # Sample preview from first dataset
+                      try:
+                          first_ds  = sel_ds_list[0]
+                          first_ver = datalake.list_versions(first_ds)[0]
+                          sample_df = datalake.load_version(first_ds, first_ver, nrows=200)
 
-                        with st.expander("👁️ Data Preview", expanded=True):
-                            st.dataframe(sample_df, use_container_width=True)
+                          with st.expander("👁️ Data Preview", expanded=True):
+                              st.dataframe(sample_df.head(5), use_container_width=True)
 
-                        col_ta, col_dc = st.columns(2)
-                        with col_ta:
-                            # Task-aware target selector shown here for convenience
-                            task_tmp = cfg.get('task', 'classification')
-                            if task_tmp not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                                default_target_idx = max(0, len(sample_df.columns) - 1)
-                                target_pre_w = st.selectbox(
-                                    "🎯 Target Column",
-                                    sample_df.columns.tolist(),
-                                    index=default_target_idx,
-                                    key="wizard_target"
-                                )
-                                cfg['target'] = target_pre_w
-                        with col_dc:
-                            if task_tmp == 'time_series':
-                                date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
-                                cfg['date_col'] = date_col_pre_w
-                    except Exception as e:
-                        st.error(f"Error loading preview: {e}")
+                          # ── Data Profiling Charts ──
+                          with st.expander("📊 Data Profile", expanded=True):
+                              _pc1, _pc2 = st.columns(2)
+                              with _pc1:
+                                  dtype_counts = sample_df.dtypes.apply(lambda d: 'Numeric' if pd.api.types.is_numeric_dtype(d) else ('DateTime' if pd.api.types.is_datetime64_any_dtype(d) else 'Categorical')).value_counts()
+                                  fig_dtype = px.pie(
+                                      values=dtype_counts.values, names=dtype_counts.index,
+                                      title="Feature Types",
+                                      color_discrete_sequence=['#2f80ed','#8b5cf6','#27ae60'],
+                                      hole=0.45
+                                  )
+                                  fig_dtype.update_layout(
+                                      paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                      font_color='#e6edf3', title_font_size=13, margin=dict(t=40,b=10,l=10,r=10),
+                                      legend=dict(font=dict(size=10))
+                                  )
+                                  st.plotly_chart(fig_dtype, use_container_width=True)
+                              with _pc2:
+                                  missing_pct = (sample_df.isnull().sum() / len(sample_df) * 100).sort_values(ascending=True)
+                                  missing_pct = missing_pct[missing_pct > 0]
+                                  if not missing_pct.empty:
+                                      fig_miss = px.bar(
+                                          x=missing_pct.values, y=missing_pct.index,
+                                          orientation='h', title="Missing Values (%)",
+                                          color=missing_pct.values,
+                                          color_continuous_scale=['#27ae60','#f59e0b','#ef4444']
+                                      )
+                                      fig_miss.update_layout(
+                                          paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                                          font_color='#e6edf3', title_font_size=13, margin=dict(t=40,b=10,l=10,r=10),
+                                          showlegend=False, coloraxis_showscale=False
+                                      )
+                                      st.plotly_chart(fig_miss, use_container_width=True)
+                                  else:
+                                      st.markdown("""
+                                      <div style='text-align:center;padding:30px;'>
+                                        <div style='font-size:2rem;'>✅</div>
+                                        <div style='color:#27ae60;font-weight:600;margin-top:8px;'>No Missing Values</div>
+                                        <div style='color:#8b949e;font-size:0.8rem;'>Dataset is complete!</div>
+                                      </div>""", unsafe_allow_html=True)
 
-                    # Per-dataset version + split config
-                    new_configs = []
-                    if len(sel_ds_list) > 0:
-                        ds_cols = st.columns(min(len(sel_ds_list), 3))
-                        for i, ds_name in enumerate(sel_ds_list):
-                            with ds_cols[i % 3]:
-                                versions = datalake.list_versions(ds_name)
-                                ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
-                                split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
-                                new_configs.append({'name': ds_name, 'version': ver, 'split': split})
-                    cfg['selected_configs'] = new_configs
+                          col_ta, col_dc = st.columns(2)
+                          with col_ta:
+                              task_tmp = cfg.get('task', 'classification')
+                              if task_tmp not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
+                                  default_target_idx = max(0, len(sample_df.columns) - 1)
+                                  target_pre_w = st.selectbox(
+                                      "🎯 Target Column",
+                                      sample_df.columns.tolist(),
+                                      index=default_target_idx,
+                                      key="wizard_target"
+                                  )
+                                  cfg['target'] = target_pre_w
+                          with col_dc:
+                              if task_tmp == 'time_series':
+                                  date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
+                                  cfg['date_col'] = date_col_pre_w
+                      except Exception as e:
+                          st.error(f"Error loading preview: {e}")
 
-                    st.markdown('<br>', unsafe_allow_html=True)
-                    data_ready = bool(sel_ds_list)
-                    col_nav_fwd, _ = st.columns([1, 4])
-                    with col_nav_fwd:
-                        if st.button("Next: Define Task →", type="primary", key="step0_next", disabled=not data_ready):
-                            st.session_state['automl_step'] = 1
-                            st.session_state['automl_config'] = cfg
-                            st.rerun()
-                else:
-                    st.info("ℹ️ Select at least one dataset above to continue.")
+                      # Per-dataset version + split config
+                      new_configs = []
+                      if len(sel_ds_list) > 0:
+                          ds_cols = st.columns(min(len(sel_ds_list), 3))
+                          for i, ds_name in enumerate(sel_ds_list):
+                              with ds_cols[i % 3]:
+                                  versions = datalake.list_versions(ds_name)
+                                  ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
+                                  split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split})
+                      cfg['selected_configs'] = new_configs
+
+                      st.markdown('<br>', unsafe_allow_html=True)
+                      data_ready = bool(sel_ds_list)
+                      col_nav_fwd, _ = st.columns([1, 4])
+                      with col_nav_fwd:
+                          if st.button("Next: Define Task →", type="primary", key="step0_next", disabled=not data_ready):
+                              st.session_state['automl_step'] = 1
+                              st.session_state['automl_config'] = cfg
+                              st.rerun()
+                  else:
+                      st.info("ℹ️ Select at least one dataset above to continue.")
+
 
         # ════════════════════════════════════════════════════════════════
         # STEP 1 — Task Type & Learning Mode
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 1:
-            st.markdown("<h3 style='margin-bottom:4px;'>🎯 Task & Learning Type</h3>", unsafe_allow_html=True)
-            st.caption("Select the ML task that best describes your problem.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+              st.markdown("<h3 style='margin-bottom:4px;'>🎯 Step 2 — Task &amp; Learning Type</h3>", unsafe_allow_html=True)
+              render_step_info_panel(
+                  "Task Type",
+                  "Choose the type of ML problem you want to solve. The task type determines which models, metrics, and optimization strategies are available in the next steps.",
+                  ["Classification for label prediction", "Regression for continuous output", "Time Series for temporal forecasting"]
+              )
 
             SUPERVISED_TASKS = [
                 ("classification", "🎯", "Classification", "Predict a category or label"),
@@ -1421,8 +1794,16 @@ with tabs[1]:
             trainer_temp = AutoMLTrainer(task_type=task)
             available_models = trainer_temp.get_available_models()
 
-            st.markdown("<h3 style='margin-bottom:4px;'>🤖 Model Selection</h3>", unsafe_allow_html=True)
-            st.caption("Choose model source and which algorithms to include in the search.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🤖 Step 3 — Model Selection</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Model Selection",
+                    "Choose which algorithms will compete in the search. You can allow AutoML to explore all available models automatically (recommended for beginners) or hand-pick specific algorithms to focus the search.",
+                    ["'Automatic' tests all models", "Manual selection = faster runs", "Ensemble combines multiple models"]
+                )
 
             model_source = st.radio(
                 "Model Source",
@@ -1530,8 +1911,16 @@ with tabs[1]:
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 3:
             task = cfg.get('task', 'classification')
-            st.markdown("<h3 style='margin-bottom:4px;'>⚡ Optimization Strategy</h3>", unsafe_allow_html=True)
-            st.caption("Define how AutoML searches for the best hyperparameters.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>⚡ Step 4 — Optimization Strategy</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Optimization Strategy",
+                    "Choose how AutoML explores the hyperparameter space. Bayesian optimization is smart and efficient. Random search is fast for exploration. Grid search is exhaustive but slow. Hyperband adds early-stopping to speed up large searches.",
+                    ["Bayesian = best quality/speed balance", "Random = great for quick exploration", "Grid = small search spaces only"]
+                )
 
             # Optimization mode as icon cards
             OPT_MODES = [
@@ -1650,8 +2039,16 @@ with tabs[1]:
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 4:
             task = cfg.get('task', 'classification')
-            st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Validation Strategy</h3>", unsafe_allow_html=True)
-            st.caption("Choose how the model performance is evaluated during hyperparameter search.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Validation Strategy</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Validation Strategy",
+                    "Define how model performance is assessed during the search. K-Fold cross-validation provides a robust estimate by rotating the test set. Holdout is faster but less reliable. For time series, use Time Series Split to preserve temporal order.",
+                    ["K-Fold gives the most reliable estimates", "Holdout is fastest", "Always use Time Series Split for forecasting"]
+                )
 
             validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold",
                                   "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"]
@@ -1772,8 +2169,16 @@ with tabs[1]:
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 5:
             task = cfg.get('task', 'classification')
-            st.markdown("<h3 style='margin-bottom:4px;'>🔧 Advanced Settings</h3>", unsafe_allow_html=True)
-            st.caption("Fine-tune reproducibility and post-training analysis options.")
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🔧 Step 6 — Advanced Settings</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Advanced Settings",
+                    "Configure reproducibility via random seeds and optionally enable post-training stability analysis. Stability tests add extra runs to assess how robust your model is to small changes in data or initialization.",
+                    ["Fix seed = reproducible results", "Stability tests add insight but take longer"]
+                )
 
             with st.expander("🌱 Reproducibility (Seed)", expanded=True):
                 eff_models = cfg.get('selected_models') or (AutoMLTrainer(task_type=task).get_available_models())
@@ -1826,8 +2231,16 @@ with tabs[1]:
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 6:
             task = cfg.get('task', 'classification')
-            st.markdown("<h3 style='margin-bottom:4px;'>🚀 Review & Submit</h3>", unsafe_allow_html=True)
-            st.caption("Review your configuration, load data, and launch the experiment.")
+            _col_main6, _col_track6 = st.columns([3, 1])
+            with _col_track6:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main6:
+                st.markdown("<h3 style='margin-bottom:4px;'>🚀 Step 7 — Review &amp; Submit</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Review & Submit",
+                    "Review the full configuration of your experiment before launching. Once submitted, the training job runs in the background and you can monitor its progress in the Experiments tab. You can also download this config as YAML for reproducibility.",
+                    ["Check target column before submitting", "Training runs in the background", "Download YAML to replay this config"]
+                )
 
             # Config summary card
             opt_labels = {"bayesian": "Bayesian Optimization", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
@@ -1843,6 +2256,23 @@ with tabs[1]:
               <div class='summary-row'><span class='summary-key'>📈 Metric</span><span class='summary-val'>{cfg.get('optimization_metric','accuracy').upper()}</span></div>
               <div class='summary-row'><span class='summary-key'>⚖️ Stability</span><span class='summary-val'>{'✅ Enabled' if cfg.get('enable_stability') else '⬜ Disabled'}</span></div>
             </div>""", unsafe_allow_html=True)
+
+            # YAML Download button
+            try:
+                import yaml
+                _yaml_cfg = {k: v for k, v in cfg.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
+                _yaml_bytes = yaml.dump(_yaml_cfg, default_flow_style=False, allow_unicode=True).encode('utf-8')
+                _dl_col, _rest = st.columns([1, 4])
+                with _dl_col:
+                    st.download_button(
+                        label="⬇️ Download Config (YAML)",
+                        data=_yaml_bytes,
+                        file_name=f"mline_config_{task}_{cfg.get('optimization_mode','auto')}.yaml",
+                        mime="text/yaml",
+                        key="step6_yaml_dl"
+                    )
+            except Exception as _e:
+                pass  # yaml not yet imported — will be loaded at runtime
 
             # --- Load Data ---
             st.markdown("### 📥 Load & Prepare Data")
@@ -2201,6 +2631,31 @@ with tabs[2]:
             if j.status in filter_status and (not search_q or search_q.lower() in j.name.lower())
         ]
 
+        # ── Global comparison chart ──────────────────────────────────────
+        completed_with_score = [j for j in jobs if j.best_score is not None]
+        if len(completed_with_score) >= 2:
+            comp_df = pd.DataFrame([
+                {"Experiment": j.name[:25], "Best Score": j.best_score, "Task": j.config.get('task','?'),
+                 "Metric": j.config.get('optimization_metric','?')}
+                for j in sorted(completed_with_score, key=lambda x: x.best_score, reverse=True)
+            ])
+            with st.expander("📊 Experiment Comparison", expanded=True):
+                fig_cmp = px.bar(
+                    comp_df, x="Best Score", y="Experiment", orientation='h',
+                    color="Best Score", color_continuous_scale=["#30363d","#2f80ed","#8b5cf6"],
+                    title="Best Score Across All Experiments",
+                    hover_data=["Task", "Metric"]
+                )
+                fig_cmp.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#e6edf3', title_font_size=14,
+                    margin=dict(t=40,b=10,l=10,r=10),
+                    yaxis=dict(autorange='reversed'),
+                    coloraxis_showscale=False
+                )
+                fig_cmp.update_traces(marker_line_width=0)
+                st.plotly_chart(fig_cmp, use_container_width=True, key="global_cmp_chart")
+
         if not visible_jobs:
             st.warning("No experiments match the current filters.")
 
@@ -2264,6 +2719,15 @@ with tabs[2]:
 
                 # ── Tab 0: Overview ──
                 with detail_tabs[0]:
+                    _training_stage_bar_col, _ov_info_col = st.columns([2, 1])
+                    with _training_stage_bar_col:
+                        st.markdown("**Training Pipeline Stage**")
+                        render_training_mini_pipeline(job.logs or [], job.status)
+                    with _ov_info_col:
+                        _trials_done = len(job.trials_data) if job.trials_data else 0
+                        _est_trials = job.config.get('n_trials', 20) or 20
+                        render_pipeline_progress_ring(_trials_done, _est_trials)
+
                     ov1, ov2 = st.columns(2)
                     with ov1:
                         st.markdown(f"**Status:** {job.status_label}")
@@ -2276,16 +2740,16 @@ with tabs[2]:
                         if job.mlflow_experiment:
                             st.markdown(f"**Experiment:** `{job.mlflow_experiment}`")
                     with ov2:
-                        cfg = job.config
+                        cfg_job = job.config
                         st.markdown("**Configuration:**")
                         st.json({
-                            "task": cfg.get("task"),
-                            "target": cfg.get("target"),
-                            "preset": cfg.get("preset"),
-                            "n_trials": cfg.get("n_trials"),
-                            "validation": cfg.get("validation_strategy"),
-                            "optimization_metric": cfg.get("optimization_metric"),
-                            "selected_models": cfg.get("selected_models") or "All",
+                            "task": cfg_job.get("task"),
+                            "target": cfg_job.get("target"),
+                            "preset": cfg_job.get("preset"),
+                            "n_trials": cfg_job.get("n_trials"),
+                            "validation": cfg_job.get("validation_strategy"),
+                            "optimization_metric": cfg_job.get("optimization_metric"),
+                            "selected_models": cfg_job.get("selected_models") or "All",
                         }, expanded=False)
 
                 # ── Tab 1: Progress ──
@@ -2329,8 +2793,7 @@ with tabs[2]:
                 # ── Tab 2: Logs ──
                 with detail_tabs[2]:
                     if job.logs:
-                        log_text = "\n".join(job.logs[-200:])
-                        st.markdown(f"<div class='log-terminal'>{log_text}</div>", unsafe_allow_html=True)
+                        render_colored_log(job.logs[-200:])
                     else:
                         st.markdown("""
                         <div class='ui-card' style='text-align:center;padding:24px;'>
