@@ -1059,7 +1059,15 @@ class AutoMLTrainer:
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
-        timeout = timeout if timeout is not None else preset_config.get('timeout')
+        
+        # Handle explicitly disabled time limits (passed as 0 from UI)
+        if timeout == 0:
+            timeout = None
+        else:
+            timeout = timeout if timeout is not None else preset_config.get('timeout')
+            
+        if time_budget == 0:
+            time_budget = None
         
         # Store custom models (uploaded or registered)
         self.custom_models = custom_models if custom_models else {}

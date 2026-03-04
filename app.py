@@ -1970,8 +1970,19 @@ with tabs[1]:
 
                 if training_preset == "custom":
                     cfg['n_trials']       = st.number_input("Trials per model", 1, 1000, 20, key="wiz_trials")
-                    cfg['timeout']        = st.number_input("Timeout per model (s)", 10, 7200, 600, key="wiz_timeout")
-                    cfg['time_budget']    = st.number_input("Total time budget (s)", 60, 86400, 3600, key="wiz_total_time")
+                    
+                    use_timeout = st.checkbox("Set Timeout per model", value=True, key="wiz_use_timeout", help="Disable to let each model train until trials finish.")
+                    if use_timeout:
+                        cfg['timeout']    = st.number_input("Timeout per model (s)", 10, 7200, 600, key="wiz_timeout")
+                    else:
+                        cfg['timeout']    = 0
+                        
+                    use_total_time = st.checkbox("Set Total time budget", value=True, key="wiz_use_time_budget", help="Disable to let the entire pipeline run indefinitely.")
+                    if use_total_time:
+                        cfg['time_budget'] = st.number_input("Total time budget (s)", 60, 86400, 3600, key="wiz_total_time")
+                    else:
+                        cfg['time_budget'] = 0
+                        
                     cfg['early_stopping'] = st.number_input("Early Stopping (rounds)", 0, 50, 7, key="wiz_es")
                     cfg['manual_params']  = {'max_iter': st.number_input("Max Iterations (max_iter)", 100, 100000, 1000, key="wiz_maxiter")}
                 elif training_preset == "test":
