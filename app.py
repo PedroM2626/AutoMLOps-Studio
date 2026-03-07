@@ -967,18 +967,44 @@ with tabs[0]:
         with col_dl1:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.subheader("📤 Upload New Data")
-            uploaded_files = st.file_uploader("Upload CSV Data", type="csv", accept_multiple_files=True, label_visibility="collapsed")
+            uploaded_files = st.file_uploader("Upload Data (CSV, JSON, Parquet, TXT, ZIP)", type=["csv", "json", "parquet", "txt", "zip"], accept_multiple_files=True, label_visibility="collapsed")
             if uploaded_files:
                 for uploaded_file in uploaded_files:
-                    df = pd.read_csv(uploaded_file)
-                    with st.expander(f"👁️ Preview: {uploaded_file.name}"):
-                        st.dataframe(df.head(5), use_container_width=True)
+                    ext = os.path.splitext(uploaded_file.name)[1].lower()
                     
-                    dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(".csv", ""), key=f"name_{uploaded_file.name}")
+                    # Tentar carregar como DataFrame se for tabular
+                    df_preview = None
+                    try:
+                        if ext == '.csv':
+                            df_preview = pd.read_csv(uploaded_file)
+                        elif ext == '.json':
+                            df_preview = pd.read_json(uploaded_file)
+                        elif ext == '.parquet':
+                            df_preview = pd.read_parquet(uploaded_file)
+                    except Exception as e:
+                        st.warning(f"Preview indisponível para {uploaded_file.name}: {e}")
+                    
+                    with st.expander(f"👁️ Preview: {uploaded_file.name}"):
+                        if df_preview is not None:
+                            st.dataframe(df_preview.head(5), use_container_width=True)
+                        elif ext == '.txt':
+                            st.text(uploaded_file.getvalue().decode('utf-8')[:500] + "...")
+                        elif ext == '.zip':
+                            st.info("Arquivo ZIP detectado. Geralmente usado para CV ou dados brutos.")
+                        else:
+                            st.info("Formato não tabular.")
+                    
+                    dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(ext, ""), key=f"name_{uploaded_file.name}")
                     if st.button(f"📥 Save {uploaded_file.name}", key=f"save_{uploaded_file.name}", type="primary"):
-                        path = datalake.save_dataset(df, dataset_name)
+                        if ext in ['.csv', '.json', '.parquet'] and df_preview is not None:
+                            # Salvar como log tabular se conseguimos ler o df
+                            # Isso forçava csv antes, agora vamos usar raw para manter formato
+                            path = datalake.save_raw_file(uploaded_file.getvalue(), dataset_name, uploaded_file.name)
+                            st.session_state['df'] = df_preview
+                        else:
+                            # Salvar arquivo bruto (zip, txt, etc)
+                            path = datalake.save_raw_file(uploaded_file.getvalue(), dataset_name, uploaded_file.name)
                         st.success(f"Dataset '{dataset_name}' saved to lake!")
-                        st.session_state['df'] = df
             st.markdown("</div>", unsafe_allow_html=True)
 
         with col_dl2:
@@ -2202,7 +2228,7 @@ with tabs[1]:
                         default=cfg.get('selected_nlp_cols', []), key="wiz_nlp_cols")
                     cfg['selected_nlp_cols'] = sel_nlp
                     if sel_nlp:
-                        col_n1, col_n2 = st.columns(2)
+                        col_n1, col_n2, col_n3 = st.columns([1,1,1])
                         with col_n1:
                             vect = st.selectbox("Vectorizer", ["tfidf", "count", "embeddings"], key="wiz_vect")
                             if vect == "embeddings":
@@ -2212,15 +2238,26 @@ with tabs[1]:
                         with col_n2:
                             if vect != "embeddings":
                                 rm_stop = st.checkbox("Remove Stopwords", value=True, key="wiz_stop")
+                                if rm_stop:
+                                    lang_opts = ["english", "portuguese", "spanish", "french", "german"]
+                                    lang_def = cfg.get('nlp_config', {}).get('language', 'english')
+                                    lang = st.selectbox("Language", lang_opts, index=lang_opts.index(lang_def) if lang_def in lang_opts else 0, key="wiz_lang")
+                                else:
+                                    lang = "english"
                                 lemma   = st.checkbox("Lemmatization", value=False, key="wiz_lemma")
-                                max_feat= st.number_input("Max Features", 100, 50000, 5000, 500, key="wiz_maxfeat")
                             else:
+                                lang = "english"
                                 st.info("Embeddings: dense fixed-length vectors.")
+                        with col_n3:
+                            if vect != "embeddings":
+                                max_feat= st.number_input("Max Features", 100, 50000, 5000, 500, key="wiz_maxfeat")
+                        
                         cfg['nlp_config'] = {
                             "vectorizer": vect,
                             "embedding_model": emb_model if vect == "embeddings" else None,
                             "ngram_range": (ng_min, ng_max) if vect != "embeddings" else (1, 1),
                             "stop_words": rm_stop if vect != "embeddings" else False,
+                            "language": lang,
                             "max_features": max_feat if vect != "embeddings" else 5000,
                             "lemmatization": lemma if vect != "embeddings" else False,
                         }
@@ -2522,23 +2559,32 @@ with tabs[1]:
                 selected_backbone = 'resnet50' # Default for segmentation/detection
                 st.info(f"Using default architecture for {cv_task}")
             
-            # --- Data Upload ---
-            st.markdown("##### Dataset")
-            cv_upload = st.file_uploader("Upload Image Archive (ZIP)", type="zip", key="cv_zip_upload", 
-                help="Classification: zip of class-named folders. Multi-label: zip of images + CSV. Seg: zip of images + masks folder.")
+            # --- Data Selection from DataLake ---
+            st.markdown("##### Dataset Selection")
+            datasets = datalake.list_datasets()
             
+            # Select Image Archive (ZIP)
+            cv_ds_sel = st.selectbox("Select Image Archive (ZIP dataset)", [""] + datasets, key="cv_ds_sel",
+                help="Classification: zip of class-named folders. Multi-label: zip of images. Seg: zip of images + masks.")
+            cv_upload_path = None
+            if cv_ds_sel:
+                versions = datalake.list_versions(cv_ds_sel)
+                cv_ver_sel = st.selectbox("Version (ZIP)", versions, key="cv_ver_sel")
+                if cv_ver_sel:
+                    cv_upload_path = os.path.join(datalake.base_path, cv_ds_sel, cv_ver_sel)
+
             label_csv_path = None
             if cv_task == 'image_multi_label':
-                st.info("For multi-label, please also upload a CSV containing: filename, label1, label2...")
-                csv_upload = st.file_uploader("Upload Multi-label CSV", type="csv", key="cv_csv_upload")
-                if csv_upload:
-                    # Save to temp
-                    label_csv_path = "temp_multilabel.csv"
-                    with open(label_csv_path, "wb") as f:
-                        f.write(csv_upload.getbuffer())
+                st.info("For multi-label, select the CSV dataset containing: filename, label1, label2...")
+                csv_ds_sel = st.selectbox("Select Multi-label CSV", [""] + datasets, key="cv_csv_ds_sel")
+                if csv_ds_sel:
+                    versions_csv = datalake.list_versions(csv_ds_sel)
+                    csv_ver_sel = st.selectbox("Version (CSV)", versions_csv, key="cv_csv_ver_sel")
+                    if csv_ver_sel:
+                        label_csv_path = os.path.join(datalake.base_path, csv_ds_sel, csv_ver_sel)
 
             data_dir = None
-            if cv_upload:
+            if cv_upload_path and cv_upload_path.endswith('.zip'):
                 import zipfile
                 import shutil
                 temp_extract_dir = "temp_cv_dataset"
@@ -2551,7 +2597,7 @@ with tabs[1]:
                     except: pass
                 
                 os.makedirs(temp_extract_dir, exist_ok=True)
-                with zipfile.ZipFile(cv_upload, 'r') as zip_ref:
+                with zipfile.ZipFile(cv_upload_path, 'r') as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
                 
                 data_dir = temp_extract_dir
@@ -2560,6 +2606,8 @@ with tabs[1]:
                 if len(subdirs) == 1 and not any(f.endswith('.jpg') or f.endswith('.png') for f in os.listdir(data_dir)):
                     data_dir = os.path.join(data_dir, subdirs[0])
                 st.success(f"Data ready (found {len(os.listdir(data_dir))} items in root).")
+            elif cv_upload_path:
+                st.error("Selected image archive must be a ZIP file.")
 
             # --- Augmentation ---
             with st.expander("🛠️ Data Augmentation"):
@@ -2639,15 +2687,53 @@ with tabs[1]:
 
                 with st.spinner(f"Training {selected_backbone} on GPU/CPU..."):
                     try:
-                        best_model_cv = trainer.train(
-                            data_dir=data_dir, n_epochs=epochs, batch_size=batch_size,
-                            lr=lr_cv, callback=cv_callback, mask_dir=None,
-                            augmentation_config=aug_config, label_csv=label_csv_path,
-                            val_split=val_split, optimizer_name=optimizer
-                        )
-                        st.success("✨ Vision Training Complete!")
-                        st.session_state['best_cv_model'] = best_model_cv
-                        st.session_state['cv_trainer'] = trainer
+                        import mlflow
+                        from mlops_utils import get_cv_consumption_code
+                        
+                        run_name = f"CV_{cv_task}_{selected_backbone}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}"
+                        
+                        with mlflow.start_run(run_name=run_name) as run:
+                            # Log configurations
+                            mlflow.log_params({
+                                "cv_task": cv_task,
+                                "backbone": selected_backbone,
+                                "epochs": epochs,
+                                "batch_size": batch_size,
+                                "learning_rate": lr_cv,
+                                "optimizer": optimizer,
+                                "augmentation": str(aug_config),
+                                "val_split": val_split
+                            })
+                            mlflow.set_tag("task_type", cv_task)
+                            mlflow.set_tag("is_cv", "true")
+
+                            best_model_cv = trainer.train(
+                                data_dir=data_dir, n_epochs=epochs, batch_size=batch_size,
+                                lr=lr_cv, callback=cv_callback, mask_dir=None,
+                                augmentation_config=aug_config, label_csv=label_csv_path,
+                                val_split=val_split, optimizer_name=optimizer
+                            )
+                            st.success("✨ Vision Training Complete!")
+                            st.session_state['best_cv_model'] = best_model_cv
+                            st.session_state['cv_trainer'] = trainer
+                            
+                            # Log Final Metrics
+                            if len(hist_data['val_acc']) > 0:
+                                mlflow.log_metric("final_val_acc", hist_data['val_acc'][-1])
+                            if len(hist_data['val_loss']) > 0:
+                                mlflow.log_metric("final_val_loss", hist_data['val_loss'][-1])
+                                
+                            # Log Model
+                            import torch
+                            mlflow.pytorch.log_model(best_model_cv, "model")
+                            
+                            # Generate Code
+                            st.session_state['cv_run_id'] = run.info.run_id
+                            st.divider()
+                            st.markdown("### 🧩 Model Consumption Code")
+                            code = get_cv_consumption_code(selected_backbone, run.info.run_id, cv_task, selected_backbone)
+                            st.code(code, language='python')
+                            
                     except Exception as e:
                         st.error(f"CV Training Failed: {e}")
 
@@ -3195,14 +3281,40 @@ with tabs[3]:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.markdown(f"**Connected Endpoint**: `{st.session_state['active_endpoint']['url']}` <span class='badge badge-done'>Healthy</span>", unsafe_allow_html=True)
             
-            input_type = st.radio("Input Format", ["JSON/Text", "CSV File"], horizontal=True)
+            # Use model tags to determine task type
+            is_cv = False
+            task_type = 'unknown'
+            try:
+                from mlflow.tracking import MlflowClient
+                client = MlflowClient()
+                
+                # Get the registered model version's run ID to fetch tags
+                version_info = client.get_model_version(selected_model_name, selected_version)
+                run_info = client.get_run(version_info.run_id)
+                tags = run_info.data.tags
+                is_cv = tags.get("is_cv", "false") == "true"
+                task_type = tags.get("task_type", "unknown")
+            except Exception as e:
+                pass
             
-            if input_type == "JSON/Text":
-                input_data = st.text_area("Input Payload", value='{"feature1": 0.5, "feature2": 1.2}', height=100)
+            if is_cv:
+                st.info(f"Target is a Computer Vision Model (Task: {task_type}).")
+                input_type = "Image"
+            else:
+                input_type = st.radio("Input Format", ["JSON/Text (Real-Time)", "CSV File (Batch)"], horizontal=True)
+            
+            if input_type == "JSON/Text (Real-Time)":
+                input_data = st.text_area("Input Payload / Text", value='{"feature1": 0.5, "feature2": 1.2}', height=100)
                 if st.button("🔌 Send API Request", type="primary"):
                     try:
                         import json
+                        import pandas as pd
                         data = json.loads(input_data)
+                    except json.JSONDecodeError:
+                        # Assume it's text for NLP depending on the payload
+                        data = {'text_input': input_data}
+                    
+                    try:
                         with st.spinner("Invoking model..."):
                             loaded_model = load_registered_model(selected_model_name, selected_version)
                             df_in = pd.DataFrame([data])
@@ -3211,17 +3323,67 @@ with tabs[3]:
                     except Exception as e:
                         st.error(f"Inference Error: {e}")
             
-            elif input_type == "CSV File":
+            elif input_type == "CSV File (Batch)":
                 up_file = st.file_uploader("Upload Batch CSV", type="csv", key="deploy_test_csv")
                 if up_file:
-                    df_test = pd.read_csv(up_file)
-                    if st.button("🏃 Run Batch Inference", type="primary"):
-                        with st.spinner("Processing batch..."):
-                            loaded_model = load_registered_model(selected_model_name, selected_version)
-                            preds = loaded_model.predict(df_test)
-                            df_test['prediction'] = preds
-                            st.dataframe(df_test, use_container_width=True)
-                            st.info(f"Processed {len(df_test)} records in 0.42s")
+                    try:
+                        import pandas as pd
+                        df_test = pd.read_csv(up_file)
+                        st.write("Preview of Input Data:")
+                        st.dataframe(df_test.head(3))
+                        if st.button("🏃 Run Batch Inference", type="primary"):
+                            with st.spinner("Processing batch..."):
+                                loaded_model = load_registered_model(selected_model_name, selected_version)
+                                preds = loaded_model.predict(df_test)
+                                df_test['prediction'] = preds
+                                st.success("Batch Processing Complete!")
+                                st.dataframe(df_test, use_container_width=True)
+                                
+                                # Option to download
+                                csv = df_test.to_csv(index=False).encode('utf-8')
+                                st.download_button("Download Predictions", csv, f"predictions_{selected_model_name}_v{selected_version}.csv", "text/csv")
+                    except Exception as e:
+                         st.error(f"Batch inference failed: {e}")
+            
+            elif input_type == "Image":
+                test_img = st.file_uploader("Upload an Image", type=["jpg", "jpeg", "png"], key="deploy_cv_image")
+                if test_img:
+                    st.image(test_img, caption="Input Data", width=300)
+                    if st.button("🔍 Analyze Image", type="primary"):
+                        with st.spinner("Invoking Vision Model..."):
+                            try:
+                                import torch
+                                import torchvision.transforms as T
+                                from PIL import Image
+                                loaded_model = load_registered_model(selected_model_name, selected_version)
+                                
+                                img = Image.open(test_img).convert('RGB')
+                                transform = T.Compose([
+                                    T.Resize((224, 224)),
+                                    T.ToTensor(),
+                                ])
+                                img_t = transform(img).unsqueeze(0)
+                                
+                                loaded_model.eval()
+                                with torch.no_grad():
+                                    outputs = loaded_model(img_t)
+                                
+                                if task_type == 'image_classification':
+                                    probs = torch.nn.functional.softmax(outputs, dim=1)[0]
+                                    top_prob, top_class = torch.max(probs, dim=0)
+                                    st.success(f"**Prediction Class Index:** {top_class.item()} (Confidence: {top_prob.item():.2%})")
+                                    st.json({"probs": probs.tolist()})
+                                elif task_type == 'image_segmentation':
+                                    mask = outputs.argmax(dim=1).squeeze().numpy()
+                                    st.success("Segmentation Mask Generated!")
+                                    mask_img = Image.fromarray((mask * (255 // (mask.max() if mask.max() > 0 else 1))).astype('uint8'))
+                                    st.image(mask_img, caption="Predicted Mask")
+                                else:
+                                    st.success("Prediction Generated!")
+                                    st.write(outputs.numpy())
+                            except Exception as e:
+                                st.error(f"Vision Inference Error: {e}")
+                            
             st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.info("Deploy a model above to enable the Live Inference Playground.")

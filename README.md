@@ -2,7 +2,7 @@
 
 ### Enterprise-grade Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v3.4.0-green)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v3.5.0-green)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -37,9 +37,11 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 - **Smart Ingestion**: CSV upload with versioned storage in the local Data Lake.
 - **Integrated Drift Detection**: Statistical analysis (KS Test) and **Deepchecks** integration for automatic reports.
 
-### 2. 🤖 Training Configuration & NLP
-- **Multi-Task Support**: Classification, Regression, Clustering, and Time Series.
-- **NLP & Transformers**: Support for TF-IDF and Hugging Face Transformers.
+### 2. 🤖 Training Configuration, NLP & Vision
+- **Multi-Task Support**: Classification, Regression, Clustering, Time Series, and **Computer Vision** (Classification, Segmentation, Multi-label).
+- **Advanced Controls**: Toggles to focus training on **Ensemble models** (Voting/Stacking) or enable **Deep Learning** models.
+- **NLP & Transformers**: Support for TF-IDF and Hugging Face Transformers. Now with **Multi-language support** (English, Portuguese, Spanish, etc.).
+- **Computer Vision**: Integrated training with MLflow tracking, data augmentation config, and automated consumption code generation.
 - **Advanced Optimization**: Optuna with Bayesian Optimization.
 
 ### 3. 🧪 Experiments System (New v2.0!)
@@ -62,7 +64,9 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 
 ### 6. 📦 Model Registry & Deployment
 - **Registry via MLflow**: Version control and stages (Staging/Production).
-- **Inference Test**: Playground to test registered models with CSV/JSON inputs.
+- **Inference Test & Playground**: 
+    - **Tabular & NLP**: Real-time testing via JSON payload or **Batch Inference** via CSV upload with automatic results download.
+    - **Vision**: Live playground to upload images and see predictions/masks in real-time.
 
 ---
 
@@ -70,7 +74,8 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 
 - `app.py`: Main Streamlit interface with Fragment support.
 - `training_manager.py`: (New!) Concurrent job and subprocess manager.
-- `automl_engine.py`: Training and optimization engine.
+- `automl_engine.py`: Training and optimization engine for Tabular data.
+- `cv_engine.py`: (New!) Deep learning engine for Computer Vision tasks.
 - `mlops_utils.py`: MLflow integration and metadata caching.
 - `stability_engine.py`: Robustness testing engine.
 

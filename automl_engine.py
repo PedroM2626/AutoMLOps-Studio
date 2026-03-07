@@ -388,7 +388,11 @@ class AutoMLDataProcessor:
             vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
             ngram_range = self.nlp_config.get('ngram_range', (1, 3))
             max_features = self.nlp_config.get('max_features', 5000) # Reduced from 20000 to 5000 for speed
-            stop_words = 'english' if self.nlp_config.get('stop_words', True) else None
+            
+            # Map frontend languages to sklearn recognized ones if necessary
+            chosen_language = self.nlp_config.get('language', 'english').lower()
+            if chosen_language == 'portuguese': chosen_language = 'portuguese' # TfidfVectorizer supports it natively
+            stop_words = chosen_language if self.nlp_config.get('stop_words', True) else None
             
             for col in nlp_features:
                 if vectorizer_type == 'embeddings':

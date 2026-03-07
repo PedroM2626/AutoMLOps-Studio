@@ -61,6 +61,53 @@ except Exception as e:
 """
     return code
 
+def get_cv_consumption_code(model_name, run_id, task_type, backbone):
+    """Generates a Python code snippet to consume a trained Computer Vision model."""
+    safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+    
+    code = f"""# --- AutoMLOps Code Sample: Consuming CV Model ({model_name}) ---
+import mlflow
+import torch
+from PIL import Image
+from torchvision import transforms
+
+# 1. Configurar Tracking (se necessário para download remoto)
+mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+
+# 2. Carregar o modelo do MLflow
+model_uri = "runs:/{run_id}/{safe_name}"
+print(f"Carregando modelo de {{model_uri}}...")
+model = mlflow.pytorch.load_model(model_uri)
+model.eval()
+
+# 3. Configurar os mesmos transforms utilizados no treinamento
+# (Ajuste a normalização/resize baseando-se no que a arquitetura {backbone} pede)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+# 4. Fazer predição
+image_path = "caminho/para/sua/imagem.jpg"
+try:
+    img = Image.open(image_path).convert('RGB')
+    tensor_img = transform(img).unsqueeze(0) # Adiciona batch dimension
+    
+    with torch.no_grad():
+        outputs = model(tensor_img)
+        
+    print("Saída Bruta do Modelo (Logits/Outputs):", outputs)
+    
+    # Se classificação/multilabel:
+    if '{task_type}' in ['image_classification', 'image_multi_label']:
+        probs = torch.sigmoid(outputs) if '{task_type}' == 'image_multi_label' else torch.softmax(outputs, dim=1)
+        print("Probabilidades Positivas:", probs)
+except Exception as e:
+    print(f"Erro ao inferir imagem: {{e}}")
+"""
+    return code
+
 import datetime
 
 def generate_model_card(model_name, params, metrics, feature_names=None, task_type="classification", duration=None):
@@ -192,6 +239,21 @@ class DataLake:
         df.to_csv(file_path, index=False)
         return file_path
 
+    def save_raw_file(self, raw_bytes, name, original_filename):
+        """Save a raw file (e.g. zip, json, parquet, txt) with versioning."""
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        version_dir = os.path.join(self.base_path, name)
+        if not os.path.exists(version_dir):
+            os.makedirs(version_dir)
+            
+        ext = os.path.splitext(original_filename)[1]
+        file_path = os.path.join(version_dir, f"v_{timestamp}{ext}")
+        
+        with open(file_path, "wb") as f:
+            f.write(raw_bytes)
+        return file_path
+
     def list_datasets(self):
         if not os.path.exists(self.base_path):
             return []
@@ -205,7 +267,19 @@ class DataLake:
 
     def load_version(self, name, version, **kwargs):
         file_path = os.path.join(self.base_path, name, version)
-        return pd.read_csv(file_path, **kwargs)
+        ext = os.path.splitext(file_path)[1].lower()
+        
+        if ext == '.csv':
+            return pd.read_csv(file_path, **kwargs)
+        elif ext == '.parquet':
+            return pd.read_parquet(file_path, **kwargs)
+        elif ext == '.json':
+            return pd.read_json(file_path, **kwargs)
+        elif ext == '.txt':
+            with open(file_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        else:
+            return file_path # Retorna o caminho para ZIPs e outros formatos não-tabulares
 
 class DriftDetector:
     @staticmethod
