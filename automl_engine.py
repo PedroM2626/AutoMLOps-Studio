@@ -541,11 +541,27 @@ class AutoMLDataProcessor:
         
         return feature_names
 
+# Keys considered 'ensemble' models — excluded when use_ensemble=False
+_ENSEMBLE_MODEL_KEYS = frozenset(['voting_ensemble', 'custom_voting', 'custom_stacking'])
+
+# Keys considered 'deep learning' models — excluded when use_deep_learning=False
+_DL_MODEL_KEYS = frozenset([
+    'mlp',
+    'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base',
+    'albert-base-v2', 'xlnet-base-cased', 'microsoft/deberta-v3-base',
+    'bert-base-uncased-reg', 'distilbert-base-uncased-reg',
+    'roberta-base-reg', 'microsoft/deberta-v3-small',
+])
+
+
 class AutoMLTrainer:
-    def __init__(self, task_type='classification', preset='medium', ensemble_config=None):
+    def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
+                 use_ensemble=True, use_deep_learning=True):
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
+        self.use_ensemble = use_ensemble
+        self.use_deep_learning = use_deep_learning
         self.best_model = None
         self.best_params = None
         self.results = []
@@ -1051,9 +1067,21 @@ class AutoMLTrainer:
         
         return None
 
+    def _filter_models(self, model_list):
+        """Filter model list based on use_ensemble and use_deep_learning flags."""
+        result = []
+        for m in model_list:
+            if not self.use_ensemble and m in _ENSEMBLE_MODEL_KEYS:
+                continue
+            if not self.use_deep_learning and m in _DL_MODEL_KEYS:
+                continue
+            result.append(m)
+        return result
+
     def get_available_models(self):
         """Returns a list of available model names for the current task type."""
-        return self._get_models()
+        all_models = self._get_models()
+        return self._filter_models(all_models)
 
     def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         # Use preset configurations if n_trials/timeout are not provided
@@ -1078,6 +1106,8 @@ class AutoMLTrainer:
         # If selected_models is not provided, use the preset list
         if selected_models is None:
             selected_models = preset_config['models']
+        # Apply use_ensemble / use_deep_learning filter
+        selected_models = self._filter_models(selected_models)
             
         self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
         self.random_state = random_state

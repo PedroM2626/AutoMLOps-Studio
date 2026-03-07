@@ -1815,6 +1815,58 @@ with tabs[1]:
             cfg['model_source'] = model_source
 
             if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
+                # ── Training Focus selector ───────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
+                FOCUS_OPTIONS = [
+                    ('single', '🎯', 'Single Models', 'Train individual models only. Faster, simpler, easier to interpret.'),
+                    ('ensemble', '🏗️', 'Include Ensembles', 'Also train Voting and Stacking ensembles. Usually higher accuracy.'),
+                ]
+                cur_focus = 'ensemble' if cfg.get('use_ensemble', True) else 'single'
+                focus_cols = st.columns(2)
+                for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
+                    with focus_cols[i]:
+                        is_sel = (fid == cur_focus)
+                        border = "border: 2px solid #27ae60; background:linear-gradient(135deg,rgba(39,174,96,0.1),rgba(39,174,96,0.05));" if is_sel else ""
+                        st.markdown(f"""
+                        <div class='task-card' style='min-height:100px;{border}'>
+                          <div class='task-icon'>{ficon}</div>
+                          <div class='task-name'>{fname}</div>
+                          <div class='task-desc'>{fdesc}</div>
+                        </div>""", unsafe_allow_html=True)
+                        if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
+                            cfg['use_ensemble'] = (fid == 'ensemble')
+                            st.session_state['automl_config'] = cfg
+                            st.rerun()
+                cfg['use_ensemble'] = cur_focus == 'ensemble'
+
+                # ── Deep Learning selector ────────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Deep Learning Models</p>", unsafe_allow_html=True)
+                DL_OPTIONS = [
+                    ('classic', '📊', 'Classic ML Only', 'Tree-based models, linear models, SVM, KNN. Fast training, low resource usage.'),
+                    ('deep',    '🧠', 'Include Deep Learning', 'Also search Neural Networks (MLP) and Transformers (BERT, etc.). Much slower but may outperform for NLP/complex tabular.'),
+                ]
+                cur_dl = 'deep' if cfg.get('use_deep_learning', True) else 'classic'
+                dl_cols = st.columns(2)
+                for i, (did, dicon, dname, ddesc) in enumerate(DL_OPTIONS):
+                    with dl_cols[i]:
+                        is_sel = (did == cur_dl)
+                        border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
+                        st.markdown(f"""
+                        <div class='task-card' style='min-height:110px;{border}'>
+                          <div class='task-icon'>{dicon}</div>
+                          <div class='task-name'>{dname}</div>
+                          <div class='task-desc'>{ddesc}</div>
+                        </div>""", unsafe_allow_html=True)
+                        if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
+                            cfg['use_deep_learning'] = (did == 'deep')
+                            st.session_state['automl_config'] = cfg
+                            st.rerun()
+                cfg['use_deep_learning'] = cur_dl == 'deep'
+
+                # ── Model Selection Mode ──────────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
                 mode_selection = st.radio(
                     "Selection Mode",
                     ["Automatic (Preset)", "Manual (Select)", "Custom Ensemble Builder"],
@@ -1824,15 +1876,25 @@ with tabs[1]:
                 cfg['mode_selection'] = mode_selection
 
                 if mode_selection == "Manual (Select)":
+                    # Re-build available models respecting current flags
+                    _tmp_trainer = AutoMLTrainer(
+                        task_type=task,
+                        use_ensemble=cfg.get('use_ensemble', True),
+                        use_deep_learning=cfg.get('use_deep_learning', True)
+                    )
+                    _filtered_models = _tmp_trainer.get_available_models()
                     sel_models = st.multiselect(
                         "Choose Models",
-                        available_models,
-                        default=cfg.get('selected_models', available_models[:2]) or available_models[:2],
+                        _filtered_models,
+                        default=[m for m in (cfg.get('selected_models', _filtered_models[:2]) or _filtered_models[:2]) if m in _filtered_models],
                         key="wiz_sel_models"
                     )
                     cfg['selected_models'] = sel_models
 
                 elif mode_selection == "Custom Ensemble Builder":
+                    if not cfg.get('use_ensemble', True):
+                        st.warning("Ensemble Builder requires 'Include Ensembles' to be selected above. Enabling it automatically.")
+                        cfg['use_ensemble'] = True
                     st.markdown("""
                     <div class='ui-card' style='padding:14px;margin-bottom:12px;'>
                       <div style='font-weight:600;margin-bottom:4px;'>🏗️ Ensemble Builder</div>
@@ -1874,6 +1936,7 @@ with tabs[1]:
                     cfg['ensemble_config'] = ens_cfg
                 else:
                     cfg['selected_models'] = None
+
 
             elif model_source == "Model Registry (Registered)":
                 reg_models_list = get_registered_models()
@@ -2378,6 +2441,8 @@ with tabs[1]:
                             'timeout': real_timeout,
                             'time_budget': real_time_bud,
                             'selected_models': real_sel_models,
+                            'use_ensemble': cfg.get('use_ensemble', True),
+                            'use_deep_learning': cfg.get('use_deep_learning', True),
                             'manual_params': real_mp,
                             'experiment_name': clean_exp_name,
                             'random_state': real_seed,
@@ -2412,164 +2477,239 @@ with tabs[1]:
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
-        st.subheader("Computer Vision AutoML")
-        cv_task = st.selectbox("CV Task", ["image_classification", "image_segmentation", "object_detection"], key="cv_task_selector")
+        st.markdown("""
+        <div class='hero-header' style='background:linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(31, 41, 55, 0.4) 100%);'>
+          <div class='hero-title'>👁️ Vision Studio</div>
+          <div class='hero-subtitle'>Train deep learning vision models for classification, detection, and segmentation.</div>
+        </div>""", unsafe_allow_html=True)
+
+        CV_TASKS = [
+            ("image_classification", "🖼️", "Classification", "Assign a single label to an image."),
+            ("image_multi_label", "🏷️", "Multi-Label", "Assign multiple labels to an image simultaneously."),
+            ("image_segmentation", "🧩", "Segmentation", "Pixel-level classification (masks)."),
+            ("object_detection", "🎯", "Detection", "Find and bound objects in an image."),
+        ]
         
-        col_cv1, col_cv2 = st.columns(2)
-        with col_cv1:
-            st.markdown("##### Dataset Upload")
-            # data_dir input removed in favor of upload
-            cv_upload = st.file_uploader("Upload Dataset (ZIP)", type="zip", key="cv_zip_upload", help="Upload a ZIP file containing your images (and labels/masks if applicable). Structure: root/class_name/image.jpg")
+        st.markdown("<h4 style='margin-bottom:12px;'>1. Select Vision Task</h4>", unsafe_allow_html=True)
+        cur_cv_task = st.session_state.get('wiz_cv_task', 'image_classification')
+        cols_cv = st.columns(4)
+        for i, (tid, ticon, tname, tdesc) in enumerate(CV_TASKS):
+            with cols_cv[i]:
+                is_sel = (tid == cur_cv_task)
+                border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
+                st.markdown(f"""
+                <div class='task-card' style='min-height:130px;{border}'>
+                  <div class='task-icon'>{ticon}</div>
+                  <div class='task-name'>{tname}</div>
+                  <div class='task-desc'>{tdesc}</div>
+                </div>""", unsafe_allow_html=True)
+                if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"cvt_{tid}"):
+                    st.session_state['wiz_cv_task'] = tid
+                    st.rerun()
+        
+        cv_task = st.session_state.get('wiz_cv_task', 'image_classification')
+        st.divider()
+        
+        col_cv_main, col_cv_side = st.columns([2, 1])
+        with col_cv_main:
+            st.markdown("#### 2. Model & Data Configuration")
+            # --- Backbone Selection ---
+            backbones = ['resnet18', 'resnet50', 'mobilenet_v2', 'efficientnet_b0', 'densenet121', 'vgg16']
+            if cv_task in ['image_classification', 'image_multi_label']:
+                selected_backbone = st.selectbox("Network Backbone", backbones, index=0, key="cv_backbone",
+                    help="Choose the CNN architecture to act as the feature extractor.")
+            else:
+                selected_backbone = 'resnet50' # Default for segmentation/detection
+                st.info(f"Using default architecture for {cv_task}")
             
+            # --- Data Upload ---
+            st.markdown("##### Dataset")
+            cv_upload = st.file_uploader("Upload Image Archive (ZIP)", type="zip", key="cv_zip_upload", 
+                help="Classification: zip of class-named folders. Multi-label: zip of images + CSV. Seg: zip of images + masks folder.")
+            
+            label_csv_path = None
+            if cv_task == 'image_multi_label':
+                st.info("For multi-label, please also upload a CSV containing: filename, label1, label2...")
+                csv_upload = st.file_uploader("Upload Multi-label CSV", type="csv", key="cv_csv_upload")
+                if csv_upload:
+                    # Save to temp
+                    label_csv_path = "temp_multilabel.csv"
+                    with open(label_csv_path, "wb") as f:
+                        f.write(csv_upload.getbuffer())
+
             data_dir = None
             if cv_upload:
                 import zipfile
                 import shutil
-                
-                # Create temp dir for extraction
                 temp_extract_dir = "temp_cv_dataset"
-                
                 def remove_readonly(func, path, excinfo):
-                    """Error handler for shutil.rmtree to handle read-only files on Windows."""
                     import stat
                     os.chmod(path, stat.S_IWRITE)
                     func(path)
-
                 if os.path.exists(temp_extract_dir):
-                    try:
-                        shutil.rmtree(temp_extract_dir, onerror=remove_readonly)
-                    except Exception as e:
-                        st.warning(f"Could not fully clear temporary directory: {e}. Attempting to continue...")
+                    try: shutil.rmtree(temp_extract_dir, onerror=remove_readonly)
+                    except: pass
                 
                 os.makedirs(temp_extract_dir, exist_ok=True)
-                
                 with zipfile.ZipFile(cv_upload, 'r') as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
                 
-                st.success(f"Dataset extracted to temporary folder: {temp_extract_dir}")
                 data_dir = temp_extract_dir
-                
-                # Attempt to detect structure
                 subdirs = [d for d in os.listdir(data_dir) if os.path.isdir(os.path.join(data_dir, d))]
-                if len(subdirs) == 1:
-                    # Possibly nested in a root folder
+                # If there's exactly one folder, that's probably the actual root
+                if len(subdirs) == 1 and not any(f.endswith('.jpg') or f.endswith('.png') for f in os.listdir(data_dir)):
                     data_dir = os.path.join(data_dir, subdirs[0])
-                    st.info(f"Detected nested root folder: {subdirs[0]}")
-            
-            mask_dir = None
-            if cv_task == "image_segmentation":
-                st.info("For Segmentation, ensure masks are in a 'masks' folder inside the zip or upload separate mask zip.")
-                # Simplification: Assume masks are inside the main zip or ask for separate upload if critical
-                # mask_dir = st.text_input("Masks Directory (for Segmentation)", "data/images/masks", key="cv_mask_dir")
-            elif cv_task == "object_detection":
-                st.info("For Detection, ensure annotations are in the zip (COCO/YOLO format).")
-                # mask_dir = st.text_input("Annotations Directory (for Detection)", "data/images/annotations", key="cv_annot_dir")
-            
-                
-        with col_cv2:
-            epochs = st.number_input("Epochs", 1, 100, 5, key="cv_epochs")
-            lr_cv = st.number_input("Learning Rate", 0.0001, 0.1, 0.001, format="%.4f", key="cv_lr")
+                st.success(f"Data ready (found {len(os.listdir(data_dir))} items in root).")
 
-        if st.button("🚀 Start CV Training", key="cv_start_btn"):
+            # --- Augmentation ---
+            with st.expander("🛠️ Data Augmentation"):
+                st.write("Apply random transformations to reduce overfitting.")
+                aug_cols = st.columns(3)
+                do_hflip = aug_cols[0].checkbox("Horizontal Flip", True, key="aug_hflip")
+                do_vflip = aug_cols[1].checkbox("Vertical Flip", False, key="aug_vflip")
+                do_jitter = aug_cols[2].checkbox("Color Jitter", True, key="aug_jitter")
+                rot_deg = st.slider("Random Rotation (degrees)", 0, 90, 15, key="aug_rot")
+                do_crop = st.checkbox("Random Resized Crop", False, key="aug_crop")
+                
+                aug_config = {
+                    'horizontal_flip': do_hflip,
+                    'vertical_flip': do_vflip,
+                    'color_jitter': do_jitter,
+                    'random_rotation': rot_deg,
+                    'random_crop': do_crop
+                }
+
+        with col_cv_side:
+            st.markdown("#### 3. Hyperparameters")
+            epochs = st.number_input("Epochs", 1, 100, 10, key="cv_epochs")
+            batch_size = st.selectbox("Batch Size", [4, 8, 16, 32, 64], index=2, key="cv_batch")
+            lr_cv = st.number_input("Learning Rate", 0.0001, 0.1, 0.001, format="%.4f", key="cv_lr")
+            optimizer = st.selectbox("Optimizer", ["adam", "sgd", "rmsprop"], index=0, key="cv_opt")
+            val_split = st.slider("Validation Split (%)", 5, 40, 20, key="cv_val_split") / 100.0
+            
+            st.markdown("<br>", unsafe_allow_html=True)
+            start_btn = st.button("🚀 Start Training", type="primary", use_container_width=True, key="cv_start_btn")
+
+        # ------------------------------------------------------------------
+        # Training Execution
+        # ------------------------------------------------------------------
+        if start_btn:
             if not data_dir:
-                st.error("Please upload a dataset ZIP file first.")
+                st.error("Please upload an image dataset ZIP.")
+            elif cv_task == 'image_multi_label' and not label_csv_path:
+                st.error("Please upload the label CSV for multi-label tasks.")
             else:
                 from cv_engine import CVAutoMLTrainer
+                trainer = CVAutoMLTrainer(task_type=cv_task, backbone=selected_backbone)
                 
-                trainer = CVAutoMLTrainer(task_type=cv_task)
+                st.divider()
+                st.subheader("Training Progress")
                 
-                status_cv = st.empty()
-                progress_cv = st.progress(0)
+                metric_cols = st.columns(4)
+                m_epoch = metric_cols[0].empty()
+                m_train_loss = metric_cols[1].empty()
+                m_val_loss = metric_cols[2].empty()
+                m_val_acc = metric_cols[3].empty()
                 
-                def cv_callback(epoch, acc, loss, duration):
-                    status_cv.write(f"Epoch {epoch}: Acc={acc:.4f}, Loss={loss:.4f}, Time={duration:.2f}s")
-                    progress_cv.progress((epoch + 1) / epochs)
+                chart_container = st.empty()
+                hist_data = {'epoch': [], 'loss': [], 'val_loss': [], 'val_acc': []}
 
-                with st.spinner("Training vision model..."):
+                def cv_callback(epoch, acc, loss, duration, val_acc, val_loss):
+                    m_epoch.metric("Epoch", f"{epoch+1}/{epochs}")
+                    m_train_loss.metric("Train Loss", f"{loss:.4f}")
+                    m_val_loss.metric("Val Loss", f"{val_loss:.4f}" if val_loss else "N/A")
+                    m_val_acc.metric("Val Acc" if cv_task != "image_segmentation" else "Val Score", f"{val_acc:.4f}" if val_acc else "N/A")
+                    
+                    hist_data['epoch'].append(epoch+1)
+                    hist_data['loss'].append(loss)
+                    hist_data['val_loss'].append(val_loss if val_loss else 0)
+                    hist_data['val_acc'].append(val_acc if val_acc else 0)
+                    
+                    if len(hist_data['epoch']) > 1:
+                        import plotly.graph_objects as go
+                        from plotly.subplots import make_subplots
+                        fig = make_subplots(specs=[[{"secondary_y": True}]])
+                        fig.add_trace(go.Scatter(x=hist_data['epoch'], y=hist_data['loss'], name="Train Loss", line=dict(color="#ef4444")), secondary_y=False)
+                        if any(hist_data['val_loss']):
+                            fig.add_trace(go.Scatter(x=hist_data['epoch'], y=hist_data['val_loss'], name="Val Loss", line=dict(color="#f59e0b", dash="dash")), secondary_y=False)
+                        if any(hist_data['val_acc']):
+                            fig.add_trace(go.Scatter(x=hist_data['epoch'], y=hist_data['val_acc'], name="Val Acc", line=dict(color="#27ae60")), secondary_y=True)
+                        fig.update_layout(height=350, margin=dict(l=0, r=0, t=20, b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+                        chart_container.plotly_chart(fig, use_container_width=True)
+
+                with st.spinner(f"Training {selected_backbone} on GPU/CPU..."):
                     try:
-                        best_model_cv = trainer.train(data_dir, n_epochs=epochs, lr=lr_cv, callback=cv_callback, mask_dir=mask_dir)
-                        
-                        st.success("Vision Training Complete!")
+                        best_model_cv = trainer.train(
+                            data_dir=data_dir, n_epochs=epochs, batch_size=batch_size,
+                            lr=lr_cv, callback=cv_callback, mask_dir=None,
+                            augmentation_config=aug_config, label_csv=label_csv_path,
+                            val_split=val_split, optimizer_name=optimizer
+                        )
+                        st.success("✨ Vision Training Complete!")
                         st.session_state['best_cv_model'] = best_model_cv
                         st.session_state['cv_trainer'] = trainer
-                        
-                        # Store class names for inference display
-                        if hasattr(trainer, 'class_names'):
-                            st.session_state['cv_class_names'] = trainer.class_names
-                        
-                        # Log to MLflow
-                        try:
-                            import mlflow
-                            import mlflow.pytorch
-                            
-                            # Use a clean run name without emojis to avoid Windows encoding issues
-                            clean_run_name = f"CV_Task_{cv_task}"
-                            
-                            with mlflow.start_run(run_name=clean_run_name):
-                                mlflow.log_param("task", cv_task)
-                                mlflow.log_param("epochs", epochs)
-                                mlflow.log_param("lr", lr_cv)
-                                if hasattr(trainer, 'class_names'):
-                                    mlflow.log_dict({"class_names": trainer.class_names}, "metadata/classes.json")
-                                
-                                # Log metrics from history
-                                for entry in trainer.history:
-                                    mlflow.log_metric("accuracy", entry['acc'], step=entry['epoch'])
-                                    mlflow.log_metric("loss", entry['loss'], step=entry['epoch'])
-                                
-                                mlflow.pytorch.log_model(best_model_cv, "model")
-                                st.info("Experiment logged to MLflow successfully.")
-                        except Exception as ml_err:
-                            st.warning(f"Failed to log to MLflow: {ml_err}")
-
                     except Exception as e:
                         st.error(f"CV Training Failed: {e}")
-                        st.error("Check if your ZIP file structure matches the task requirements (e.g., ImageFolder structure for classification).")
 
+        # ------------------------------------------------------------------
+        # Inference Test
+        # ------------------------------------------------------------------
         if st.session_state.get('best_cv_model'):
             st.divider()
-            st.subheader("Inference Test")
-            test_img = st.file_uploader("Upload image for prediction", type=['jpg', 'png'], key="cv_test_upload")
-            if test_img:
-                img_path = f"temp_{test_img.name}"
-                with open(img_path, "wb") as f:
-                    f.write(test_img.getbuffer())
-                
-                trainer = st.session_state['cv_trainer']
-                prediction = trainer.predict(img_path)
-                
-                col_res1, col_res2 = st.columns(2)
-                with col_res1:
-                    st.image(test_img, caption="Uploaded Image")
-                
-                with col_res2:
-                    if cv_task == "image_segmentation":
-                        st.write("Segmentation Result:")
+            st.markdown("### 🔍 Model Inference & Explainability")
+            
+            col_inf_l, col_inf_r = st.columns([1, 1])
+            with col_inf_l:
+                test_img = st.file_uploader("Upload an image to test", type=['jpg', 'jpeg', 'png'], key="cv_test_upload")
+                if test_img:
+                    st.image(test_img, caption="Input", use_container_width=True)
+            
+            with col_inf_r:
+                if test_img:
+                    img_path = f"temp_{test_img.name}"
+                    with open(img_path, "wb") as f:
+                        f.write(test_img.getbuffer())
+                    
+                    trainer = st.session_state['cv_trainer']
+                    with st.spinner("Running inference..."):
+                        prediction = trainer.predict(img_path)
+                    
+                    st.markdown("#### Predictions")
+                    if trainer.task_type == 'image_multi_label':
+                        probs = prediction['probabilities']
+                        names = prediction['label_names']
+                        import pandas as pd
+                        import plotly.express as px
+                        df_p = pd.DataFrame({'Label': names, 'Probability': probs})
+                        df_p = df_p.sort_values('Probability', ascending=True).tail(10)
+                        fig = px.bar(df_p, x='Probability', y='Label', orientation='h', color='Probability', color_continuous_scale='Viridis')
+                        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                        fig.add_vline(x=0.5, line_dash="dash", line_color="red", annotation_text="Threshold")
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    elif trainer.task_type == 'image_classification':
+                        probs = prediction['probabilities']
+                        names = prediction.get('class_names', [str(i) for i in range(len(probs))])
+                        df_p = pd.DataFrame({'Class': names, 'Probability': probs})
+                        df_p = df_p.sort_values('Probability', ascending=True).tail(5) # Top 5
+                        fig = px.bar(df_p, x='Probability', y='Class', orientation='h', color='Probability', color_continuous_scale='Blues')
+                        fig.update_layout(height=300, margin=dict(l=0, r=0, t=0, b=0), paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)")
+                        st.plotly_chart(fig, use_container_width=True)
+                        st.metric("Top Result", df_p.iloc[-1]['Class'], f"{df_p.iloc[-1]['Probability']:.1%}")
+                        
+                    elif trainer.task_type == 'image_segmentation':
                         mask_img = Image.fromarray((prediction * (255 // (prediction.max() if prediction.max() > 0 else 1))).astype(np.uint8))
                         st.image(mask_img, caption="Predicted Mask", use_container_width=True)
-                    elif cv_task == "object_detection":
-                        st.write("Detection Result (Boxes):")
-                        # Draw boxes on image
-                        img_draw = Image.open(img_path).convert("RGB")
-                        draw = ImageDraw.Draw(img_draw)
-                        boxes = prediction['boxes'].cpu().numpy()
-                        scores = prediction['scores'].cpu().numpy()
-                        for box, score in zip(boxes, scores):
-                            if score > 0.5: # Threshold
-                                draw.rectangle(box, outline="red", width=3)
-                                draw.text((box[0], box[1]), f"{score:.2f}", fill="red")
-                        st.image(img_draw, caption="Predicted Objects", use_container_width=True)
-                    else:
-                        # Map ID to Class Name if available
-                        class_names = st.session_state.get('cv_class_names')
-                        if class_names and isinstance(prediction, int) and prediction < len(class_names):
-                            st.metric("Predicted Class", class_names[prediction])
-                        else:
-                            st.metric("Predicted Class ID", prediction)
-                
-                try:
-                    os.remove(img_path)
-                except: pass
+
+                    try:
+                        os.remove(img_path)
+                    except: pass
+            
+            st.markdown("#### Architect Insight")
+            from cv_engine import get_cv_explanation
+            cfg_used = {'lr': st.session_state.get('cv_lr', 'N/A'), 'batch_size': st.session_state.get('cv_batch', 'N/A')}
+            insight = get_cv_explanation(trainer.backbone, cfg_used)
+            st.info(f"🧠 **Model Insight:** {insight}")
 
 # --- TAB 3: EXPERIMENTS ---
 with tabs[2]:

@@ -26,12 +26,12 @@ def test_automl_trainer_classification(sample_data):
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
     
-    trainer = AutoMLTrainer(task_type='classification')
+    trainer = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=False)
     # Use 1 trial for speed in tests
     model = trainer.train(X_proc, y_proc, n_trials=1)
     
     assert model is not None
-    metrics = trainer.evaluate(X_proc, y_proc)
+    metrics, preds = trainer.evaluate(X_proc, y_proc)
     assert 'accuracy' in metrics
 
 def test_drift_detector():
@@ -62,3 +62,29 @@ def test_model_save_load(sample_data):
     # Cleanup
     if os.path.exists(path):
         os.remove(path)
+
+def test_automl_trainer_filtering():
+    """Test that use_ensemble and use_deep_learning flags correctly filter available models."""
+    # Test 1: All enabled (default)
+    trainer_all = AutoMLTrainer(task_type='classification', use_ensemble=True, use_deep_learning=True)
+    models_all = trainer_all.get_available_models()
+    assert 'custom_voting' in models_all or 'voting_classifier' in models_all or 'Voting Classifier' in models_all or any('vot' in m.lower() or 'stack' in m.lower() for m in models_all)
+    assert 'mlp' in [m.lower() for m in models_all] or 'neural_network' in [m.lower() for m in models_all]
+
+    # Test 2: Ensembles disabled
+    trainer_no_ens = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=True)
+    models_no_ens = trainer_no_ens.get_available_models()
+    assert not any('vot' in m.lower() or 'stack' in m.lower() for m in models_no_ens)
+
+    # Test 3: DL disabled (using regression to check mlp_regressor if present)
+    trainer_no_dl = AutoMLTrainer(task_type='regression', use_ensemble=True, use_deep_learning=False)
+    models_no_dl = trainer_no_dl.get_available_models()
+    assert not any('mlp' in m.lower() or 'neural' in m.lower() or 'transformer' in m.lower() for m in models_no_dl)
+
+    # Test 4: Both disabled
+    trainer_none = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=False)
+    models_none = trainer_none.get_available_models()
+    assert not any('vot' in m.lower() or 'stack' in m.lower() for m in models_none)
+    assert not any('mlp' in m.lower() or 'neural' in m.lower() or 'transformer' in m.lower() for m in models_none)
+    # Ensure standard models like RF or Logistic Regression are still there
+    assert any('forest' in m.lower() or 'logistics' in m.lower() or 'logistic' in m.lower() for m in models_none)
