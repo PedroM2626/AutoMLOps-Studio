@@ -562,8 +562,8 @@ with st.sidebar:
         🚀 AutoMLOps Studio
       </div>
       <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
-        <span style='font-size:0.7rem;color:#8b949e;'>Enterprise ML Platform</span>
-        <span class='version-badge'>v2.0</span>
+        <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
+        <span class='version-badge'>v3.5.0</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -908,22 +908,61 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
     for config in selected_configs:
         df_ds = datalake.load_version(config['name'], config['version'])
         
+        # Apply schema overrides if provided
+        if 'schema_overrides' in config:
+            overrides = config['schema_overrides']
+            cols_to_drop = [row['Nome da coluna'] for row in overrides if not row.get('Incluir', True)]
+            df_ds = df_ds.drop(columns=[c for c in cols_to_drop if c in df_ds.columns], errors='ignore')
+            
+            for row in overrides:
+                if row.get('Incluir', True):
+                    col_name = row['Nome da coluna']
+                    target_type = row.get('Tipo', 'object')
+                    if col_name in df_ds.columns:
+                        try:
+                            if target_type == 'datetime64[ns]':
+                                df_ds[col_name] = pd.to_datetime(df_ds[col_name], errors='coerce')
+                            else:
+                                df_ds[col_name] = df_ds[col_name].astype(target_type)
+                        except Exception as e:
+                            print(f"Schema cast error on {col_name} to {target_type}: {e}")
+        
         if global_split is not None:
             split_ratio = global_split
         else:
-            split_ratio = config['split'] / 100.0
+            split_ratio = config.get('split', 80) / 100.0
+            
+        strat = config.get('split_strategy', 'Aleatório (Random)')
         
         if split_ratio >= 1.0:
             train_dfs.append(df_ds)
         elif split_ratio <= 0.0:
             test_dfs.append(df_ds)
         else:
-            if task_type == 'time_series' and date_col and date_col in df_ds.columns:
+            if strat == 'Cronológico (Chronological)' or (task_type == 'time_series' and date_col and date_col in df_ds.columns):
                 # Temporal split
-                df_ds = df_ds.sort_values(by=date_col)
+                time_col = config.get('time_column', date_col)
+                if time_col and time_col in df_ds.columns:
+                    df_ds = df_ds.sort_values(by=time_col)
                 split_idx = int(len(df_ds) * split_ratio)
                 tr = df_ds.iloc[:split_idx]
                 te = df_ds.iloc[split_idx:]
+            elif strat == 'Manual (Pre-defined split column)':
+                # Expects a column indicating split - we will approximate it using the defined split ratio for now if not purely boolean
+                manual_col = config.get('manual_split_column')
+                if manual_col and manual_col in df_ds.columns:
+                    # simplistic assumption 1/True = train, 0/False = test, fallback if string
+                    if df_ds[manual_col].dtype == bool:
+                        tr = df_ds[df_ds[manual_col] == True]
+                        te = df_ds[df_ds[manual_col] == False]
+                    else:
+                        tr = df_ds[df_ds[manual_col].astype(str).str.lower().isin(['train', '1', 'true', 'tr'])]
+                        te = df_ds[~df_ds.index.isin(tr.index)]
+                    df_ds = df_ds.drop(columns=[manual_col])
+                    tr = tr.drop(columns=[manual_col], errors='ignore')
+                    te = te.drop(columns=[manual_col], errors='ignore')
+                else: # Fallback to random
+                    tr, te = train_test_split(df_ds, train_size=split_ratio, random_state=42)
             else:
                 # Stratified split if target is present and task is classification
                 stratify_col = None
@@ -968,41 +1007,68 @@ with tabs[0]:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.subheader("📤 Upload New Data")
             uploaded_files = st.file_uploader("Upload Data (CSV, JSON, Parquet, TXT, ZIP)", type=["csv", "json", "parquet", "txt", "zip"], accept_multiple_files=True, label_visibility="collapsed")
+            
+            # --- Advanced Parser Options ---
+            with st.expander("⚙️ Manual Dataset Parsing", expanded=False):
+                col_p1, col_p2 = st.columns(2)
+                with col_p1:
+                    parse_format = st.selectbox("Formato do arquivo", ["Auto (Extensão)", "Delimitado (CSV)", "JSON Lines", "Arquivo parquet", "Texto sem formatação"])
+                    parse_delim = st.selectbox("Delimitador", [",", ";", "\\t (Guia)", " ", "|", "Personalizado"])
+                    if parse_delim == "Personalizado":
+                        custom_delim = st.text_input("Delimitador Personalizado", ",")
+                        actual_delim = custom_delim
+                    else:
+                        delim_map = {",": ",", ";": ";", "\\t (Guia)": "\t", " ": " ", "|": "|"}
+                        actual_delim = delim_map.get(parse_delim, ",")
+                with col_p2:
+                    parse_enc = st.selectbox("Codificação", ["utf-8", "utf-8-sig", "latin1", "ascii", "utf-16", "windows-1252"])
+                    parse_header = st.selectbox("Cabeçalhos de coluna", ["Todos os arquivos têm os mesmos cabeçalhos", "Nenhum cabeçalho"])
+                    actual_header = 0 if "Todos" in parse_header else None
+                    replace_existing = st.checkbox("Substituir se já existir", value=True)
+
             if uploaded_files:
                 for uploaded_file in uploaded_files:
                     ext = os.path.splitext(uploaded_file.name)[1].lower()
                     
-                    # Tentar carregar como DataFrame se for tabular
                     df_preview = None
                     try:
-                        if ext == '.csv':
-                            df_preview = pd.read_csv(uploaded_file)
-                        elif ext == '.json':
-                            df_preview = pd.read_json(uploaded_file)
-                        elif ext == '.parquet':
+                        # Determine actual format
+                        fmt = ext
+                        if parse_format == "Delimitado (CSV)": fmt = '.csv'
+                        elif parse_format == "JSON Lines": fmt = '.json'
+                        elif parse_format == "Arquivo parquet": fmt = '.parquet'
+                        elif parse_format == "Texto sem formatação": fmt = '.txt'
+
+                        if fmt == '.csv':
+                            df_preview = pd.read_csv(uploaded_file, sep=actual_delim, encoding=parse_enc, header=actual_header)
+                        elif fmt == '.json':
+                            df_preview = pd.read_json(uploaded_file, orient='records', lines=True)
+                        elif fmt == '.parquet':
                             df_preview = pd.read_parquet(uploaded_file)
                     except Exception as e:
                         st.warning(f"Preview indisponível para {uploaded_file.name}: {e}")
                     
-                    with st.expander(f"👁️ Preview: {uploaded_file.name}"):
+                    with st.expander(f"👁️ Preview: {uploaded_file.name}", expanded=True):
                         if df_preview is not None:
                             st.dataframe(df_preview.head(5), use_container_width=True)
-                        elif ext == '.txt':
-                            st.text(uploaded_file.getvalue().decode('utf-8')[:500] + "...")
+                        elif ext == '.txt' or fmt == '.txt':
+                            uploaded_file.seek(0)
+                            st.text(uploaded_file.getvalue().decode(parse_enc, errors='ignore')[:500] + "...")
                         elif ext == '.zip':
                             st.info("Arquivo ZIP detectado. Geralmente usado para CV ou dados brutos.")
                         else:
-                            st.info("Formato não tabular.")
+                            st.info("Formato não tabular ou erro ao processar.")
                     
                     dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(ext, ""), key=f"name_{uploaded_file.name}")
                     if st.button(f"📥 Save {uploaded_file.name}", key=f"save_{uploaded_file.name}", type="primary"):
-                        if ext in ['.csv', '.json', '.parquet'] and df_preview is not None:
-                            # Salvar como log tabular se conseguimos ler o df
-                            # Isso forçava csv antes, agora vamos usar raw para manter formato
-                            path = datalake.save_raw_file(uploaded_file.getvalue(), dataset_name, uploaded_file.name)
+                        if df_preview is not None:
+                            # Use Datake storage - saves as CSV by default locally
+                            csv_buffer = io.StringIO()
+                            df_preview.to_csv(csv_buffer, index=False)
+                            path = datalake.save_raw_file(csv_buffer.getvalue().encode('utf-8'), dataset_name, uploaded_file.name.replace(ext, '.csv'))
                             st.session_state['df'] = df_preview
                         else:
-                            # Salvar arquivo bruto (zip, txt, etc)
+                            uploaded_file.seek(0)
                             path = datalake.save_raw_file(uploaded_file.getvalue(), dataset_name, uploaded_file.name)
                         st.success(f"Dataset '{dataset_name}' saved to lake!")
             st.markdown("</div>", unsafe_allow_html=True)
@@ -1710,17 +1776,60 @@ with tabs[1]:
 
                       # Per-dataset version + split config
                       new_configs = []
-                      if len(sel_ds_list) > 0:
-                          ds_cols = st.columns(min(len(sel_ds_list), 3))
-                          for i, ds_name in enumerate(sel_ds_list):
-                              with ds_cols[i % 3]:
-                                  versions = datalake.list_versions(ds_name)
-                                  ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
-                                  split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                      
+                      st.markdown("#### Configuração de Esquema (Schema)", unsafe_allow_html=True)
+                      st.info("Ajuste os tipos de dados preenchidos automaticamente. Desmarque colunas que devem ser ignoradas no treinamento.")
+                      
+                      schema_df = pd.DataFrame({
+                          "Incluir": [True] * len(sample_df.columns),
+                          "Nome da coluna": sample_df.columns,
+                          "Tipo": [str(t) for t in sample_df.dtypes],
+                          "Valores de exemplo": [str(sample_df[c].iloc[0]) if len(sample_df) > 0 else "" for c in sample_df.columns]
+                      })
+                      
+                      edited_schema = st.data_editor(
+                          schema_df,
+                          column_config={
+                              "Incluir": st.column_config.CheckboxColumn("Incluir", help="Incluir no treinamento?", default=True),
+                              "Tipo": st.column_config.SelectboxColumn("Tipo", help="Ocultar tipo do Pandas", options=["object", "int64", "float64", "bool", "datetime64[ns]"]),
+                          },
+                          disabled=["Nome da coluna", "Valores de exemplo"],
+                          hide_index=True,
+                          key="wizard_schema_editor"
+                      )
+                      cfg['schema_overrides'] = edited_schema.to_dict('records')
+                      
+                      st.markdown("#### Tipo de Divisão de Dados (Split)", unsafe_allow_html=True)
+                      split_strategy = st.radio(
+                          "Estratégia de Validação", 
+                          ["Aleatório (Random)", "Cronológico (Chronological)", "Manual (Pre-defined split column)"],
+                          horizontal=True,
+                          key="wizard_split_strat"
+                      )
+                      cfg['split_strategy'] = split_strategy
+                      
+                      ds_cols = st.columns(min(len(sel_ds_list), 3))
+                      for i, ds_name in enumerate(sel_ds_list):
+                          with ds_cols[i % 3]:
+                              versions = datalake.list_versions(ds_name)
+                              ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
+                              
+                              # Render split progress bar logic based on images
+                              split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                              
+                              st.markdown(f"**Split visual:** <span style='color:#2f80ed'>Training: {split}%</span> | <span style='color:#f59e0b'>Validation: {int((100-split)/2)}%</span> | <span style='color:#8b5cf6'>Testing: {100-split-int((100-split)/2)}%</span>", unsafe_allow_html=True)
+                              
+                              if split_strategy == "Cronológico (Chronological)":
+                                  time_col = st.selectbox(f"Coluna de Tempo p/ {ds_name}", sample_df.columns, key=f"wiz_time_{ds_name}")
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'time_column': time_col})
+                              elif split_strategy == "Manual (Pre-defined split column)":
+                                  manual_col = st.selectbox(f"Coluna de Flag de Split p/ {ds_name}", sample_df.columns, key=f"wiz_manual_{ds_name}")
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'manual_split_column': manual_col})
+                              else:
                                   new_configs.append({'name': ds_name, 'version': ver, 'split': split})
                       cfg['selected_configs'] = new_configs
-
                       st.markdown('<br>', unsafe_allow_html=True)
+                      
                       data_ready = bool(sel_ds_list)
                       col_nav_fwd, _ = st.columns([1, 4])
                       with col_nav_fwd:

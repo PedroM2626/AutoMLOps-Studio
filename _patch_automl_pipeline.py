@@ -116,13 +116,56 @@ NEW_BLOCK = r'''    # --- SUB-TAB 1.1: CLASSICAL ML (WatsonX-Style Pipeline) ---
 
                     # Per-dataset version + split config
                     new_configs = []
-                    if len(sel_ds_list) > 0:
-                        ds_cols = st.columns(min(len(sel_ds_list), 3))
-                        for i, ds_name in enumerate(sel_ds_list):
-                            with ds_cols[i % 3]:
-                                versions = datalake.list_versions(ds_name)
-                                ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
-                                split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                    
+                    st.markdown("#### Configuração de Esquema (Schema)", unsafe_allow_html=True)
+                    st.info("Ajuste os tipos de dados preenchidos automaticamente. Desmarque colunas que devem ser ignoradas no treinamento.")
+                    
+                    schema_df = pd.DataFrame({
+                        "Incluir": [True] * len(sample_df.columns),
+                        "Nome da coluna": sample_df.columns,
+                        "Tipo": [str(t) for t in sample_df.dtypes],
+                        "Valores de exemplo": [str(sample_df[c].iloc[0]) if len(sample_df) > 0 else "" for c in sample_df.columns]
+                    })
+                    
+                    edited_schema = st.data_editor(
+                        schema_df,
+                        column_config={
+                            "Incluir": st.column_config.CheckboxColumn("Incluir", help="Incluir no treinamento?", default=True),
+                            "Tipo": st.column_config.SelectboxColumn("Tipo", help="Ocultar tipo do Pandas", options=["object", "int64", "float64", "bool", "datetime64[ns]"]),
+                        },
+                        disabled=["Nome da coluna", "Valores de exemplo"],
+                        hide_index=True,
+                        key="wizard_schema_editor"
+                    )
+                    cfg['schema_overrides'] = edited_schema.to_dict('records')
+                    
+                    st.markdown("#### Tipo de Divisão de Dados (Split)", unsafe_allow_html=True)
+                    split_strategy = st.radio(
+                        "Estratégia de Validação", 
+                        ["Aleatório (Random)", "Cronológico (Chronological)", "Manual (Pre-defined split column)"],
+                        horizontal=True,
+                        key="wizard_split_strat"
+                    )
+                    cfg['split_strategy'] = split_strategy
+                    
+                    ds_cols = st.columns(min(len(sel_ds_list), 3))
+                    for i, ds_name in enumerate(sel_ds_list):
+                        with ds_cols[i % 3]:
+                            versions = datalake.list_versions(ds_name)
+                            ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
+                            
+                            # Render split progress bar logic based on images
+                            split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                            
+                            st.markdown(f"**Split visual:** <span style='color:#2f80ed'>Training: {split}%</span> | <span style='color:#f59e0b'>Validation: {int((100-split)/2)}%</span> | <span style='color:#8b5cf6'>Testing: {100-split-int((100-split)/2)}%</span>", unsafe_allow_html=True)
+                            
+                            if split_strategy == "Cronológico (Chronological)":
+                                time_col = st.selectbox(f"Coluna de Tempo p/ {ds_name}", sample_df.columns, key=f"wiz_time_{ds_name}")
+                                new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'time_column': time_col})
+                            elif split_strategy == "Manual (Pre-defined split column)":
+                                manual_col = st.selectbox(f"Coluna de Flag de Split p/ {ds_name}", sample_df.columns, key=f"wiz_manual_{ds_name}")
+                                new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'manual_split_column': manual_col})
+                            else:
                                 new_configs.append({'name': ds_name, 'version': ver, 'split': split})
                     cfg['selected_configs'] = new_configs
 

@@ -1,6 +1,6 @@
 # 🚀 AutoMLOps Studio
 
-### Enterprise-grade Automated Machine Learning & MLOps Platform
+### Comprehensive Automated Machine Learning & MLOps Platform
 
 [![Version](https://img.shields.io/badge/Version-v3.5.0-green)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
@@ -34,7 +34,9 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 ## ✨ Features & Technical Details
 
 ### 1. 📊 Data Management & Drift Analysis
-- **Smart Ingestion**: CSV upload with versioned storage in the local Data Lake.
+- **Smart Ingestion**: CSV, JSON, Parquet, and TXT upload with versioned storage in the local Data Lake.
+- **Manual Dataset Parsing**: Control over delimiters, encoding, and file formats during upload.
+- **Interactive Schema Editor**: Inclusion/Exclusion of columns and manual data type overrides before training.
 - **Integrated Drift Detection**: Statistical analysis (KS Test) and **Deepchecks** integration for automatic reports.
 
 ### 2. 🤖 Training Configuration, NLP & Vision
@@ -43,6 +45,7 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 - **NLP & Transformers**: Support for TF-IDF and Hugging Face Transformers. Now with **Multi-language support** (English, Portuguese, Spanish, etc.).
 - **Computer Vision**: Integrated training with MLflow tracking, data augmentation config, and automated consumption code generation.
 - **Advanced Optimization**: Optuna with Bayesian Optimization.
+- **Advanced Splitting Strategies**: Random, Chronological (time-based), and Manual (col-based) splits with visual representation.
 
 ### 3. 🧪 Experiments System (New v2.0!)
 - **Concurrent Training**: Submit multiple training sessions simultaneously (Big Tech style).
