@@ -29,6 +29,18 @@ import logging
 
 # StreamlitLogHandler is replaced by TrainingJobManager queue-based logging.
 
+# Caching heavy data fetch operations
+@st.cache_data(ttl=10)
+def get_cached_all_runs():
+    return get_all_runs()
+
+@st.cache_resource(ttl=10)
+def get_cached_registered_models():
+    return get_registered_models()
+
+@st.cache_data(ttl=10)
+def get_cached_datasets():
+    return DataLake("./data_lake").list_datasets()
 
 # 🎨 Page config & full dark design system
 try:
@@ -701,10 +713,8 @@ with st.sidebar:
 # 🎨 Hero Header
 st.markdown("""
 <div class='hero-header'>
-  <div class='hero-title'>🚀 AutoMLOps Studio
-    <span class='version-badge'>v2.0.0</span>
-  </div>
-  <div class='hero-subtitle'>Enterprise-grade Automated Machine Learning &amp; MLOps Platform</div>
+  <div class='hero-title'>AutoMLOps Studio</div>
+  <div class='hero-subtitle'>Automated Machine Learning & MLOps Platform</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -1076,7 +1086,7 @@ with tabs[0]:
         with col_dl2:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.subheader("🔍 Explore & Load")
-            datasets = datalake.list_datasets()
+            datasets = get_cached_datasets()
             selected_ds = st.selectbox("Select Dataset", [""] + datasets, key="data_load_sel")
             if selected_ds:
                 versions = datalake.list_versions(selected_ds)
@@ -1815,7 +1825,11 @@ with tabs[1]:
                               ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
                               
                               # Render split progress bar logic based on images
-                              split = st.slider(f"% Train — {ds_name}", 10, 100, 80, key=f"wiz_split_{ds_name}")
+                              split = st.slider(
+                                  f"% Train — {ds_name}", 10, 100, 80, 
+                                  key=f"wiz_split_{ds_name}",
+                                  help="Global Train/Test split: This defines the absolute holdout test set used ONLY for final evaluation after the entire AutoML training finishes. (Internal cross-validation is configured in Step 5)."
+                              )
                               
                               st.markdown(f"**Split visual:** <span style='color:#2f80ed'>Training: {split}%</span> | <span style='color:#f59e0b'>Validation: {int((100-split)/2)}%</span> | <span style='color:#8b5cf6'>Testing: {100-split-int((100-split)/2)}%</span>", unsafe_allow_html=True)
                               
@@ -2254,9 +2268,9 @@ with tabs[1]:
             with _col_main:
                 st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Validation Strategy</h3>", unsafe_allow_html=True)
                 render_step_info_panel(
-                    "Validation Strategy",
-                    "Define how model performance is assessed during the search. K-Fold cross-validation provides a robust estimate by rotating the test set. Holdout is faster but less reliable. For time series, use Time Series Split to preserve temporal order.",
-                    ["K-Fold gives the most reliable estimates", "Holdout is fastest", "Always use Time Series Split for forecasting"]
+                    "Validation Strategy vs Data Lake Split",
+                    "The Data Lake split (Step 1) is used to create a final, completely unseen 'Test Set'. This step configures the *internal cross-validation* used by the AutoML engine during hyperparameter tuning.",
+                    ["K-Fold is slower but rotates the validation set", "Holdout just splits a fraction of the training data", "Always use Time Series Split for temporal data"]
                 )
 
             validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold",
@@ -2910,7 +2924,7 @@ with tabs[1]:
 with tabs[2]:
     jm: TrainingJobManager = st.session_state['job_manager']
 
-    @st.fragment(run_every=2.0)
+    @st.fragment(run_every=5.0)
     def experiments_dashboard():
         jm.poll_updates()
         jobs = jm.list_jobs()
@@ -3017,19 +3031,25 @@ with tabs[2]:
         for job in visible_jobs:
             badge_cls, badge_lbl = BADGE_MAP.get(job.status, ("badge-queued", job.status))
             score_display = f"Best: <strong>{job.best_score:.4f}</strong>" if job.best_score is not None else "<span style='color:#8b949e'>No score yet</span>"
-            label = f"""
-            <div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;'>
+            
+            # Plain static text for the expander title (avoids UI state destruction on autorefresh)
+            plain_label = f"{badge_lbl} | {job.name}"
+            
+            # Styled html to show inside the expander
+            styled_header = f"""
+            <div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px; margin-bottom: 12px;'>
               <div style='display:flex;align-items:center;gap:10px;'>
-                <span style='font-weight:700;font-size:0.95rem;'>{job.name}</span>
+                <span style='font-weight:700;font-size:1.1rem;'>{job.name}</span>
                 <span class='badge {badge_cls}'>{badge_lbl}</span>
               </div>
-              <div style='display:flex;align-items:center;gap:16px;font-size:0.82rem;color:#8b949e;'>
+              <div style='display:flex;align-items:center;gap:16px;font-size:0.9rem;color:#8b949e;'>
                 <span>⏱ {job.duration_str}</span>
                 <span>{score_display}</span>
               </div>
             </div>"""
 
-            with st.expander(label, expanded=(job.status in (JobStatus.RUNNING, JobStatus.PAUSED))):
+            with st.expander(plain_label, expanded=(job.status in (JobStatus.RUNNING, JobStatus.PAUSED))):
+                st.markdown(styled_header, unsafe_allow_html=True)
                 # ──── Action buttons ────
                 btn_cols = st.columns([1, 1, 1, 1, 1, 2])
                 with btn_cols[0]:
@@ -3126,7 +3146,7 @@ with tabs[2]:
                         st.markdown("#### Best Results by Model")
                         sum_rows = []
                         for mn, mi in job.model_summaries.items():
-                            row = {"Model": mn, "Best Score": f"{mi.get('score', 0):.4f}",
+                            row = {"Model": mn, "Best Score": f"{mi.get('score', 0):.4f}", "ScoreVal": mi.get('score', 0),
                                    "Trial": mi.get("trial_name", "?"), "Duration (s)": f"{mi.get('duration', 0):.2f}"}
                             if 'metrics' in mi:
                                 for mk, mv in mi['metrics'].items():
@@ -3134,7 +3154,17 @@ with tabs[2]:
                                         row[mk.upper()] = f"{mv:.4f}"
                             sum_rows.append(row)
                         if sum_rows:
-                            st.dataframe(pd.DataFrame(sum_rows), use_container_width=True)
+                            df_sum = pd.DataFrame(sum_rows)
+                            
+                            # Interactive Bar Graph
+                            fig_bar = px.bar(df_sum, x="Model", y="ScoreVal", color="Model",
+                                             title="Best Score by Model", text_auto=".4f")
+                            fig_bar.update_layout(showlegend=False, xaxis_title="", yaxis_title="Optimization Metric Score")
+                            st.plotly_chart(fig_bar, use_container_width=True, key=f"bar_{job.job_id}")
+                            
+                            # Clean up for display
+                            df_display = df_sum.drop(columns=['ScoreVal'])
+                            st.dataframe(df_display, use_container_width=True)
 
                 # ── Tab 2: Logs ──
                 with detail_tabs[2]:
@@ -3352,6 +3382,14 @@ with tabs[3]:
               <div style='font-weight:700; color:#2f80ed;'>{model_details.get('current_stage', 'None')}</div>
               <div style='font-size:0.7rem; color:#8b949e; margin-top:4px;'>Updated: {model_details.get('last_updated_timestamp', 'Unknown')}</div>
             </div>""", unsafe_allow_html=True)
+            
+            st.markdown("<div style='margin-top: 16px; font-weight: 600;'>💻 How to Consume</div>", unsafe_allow_html=True)
+            code_snippet = f'''import mlflow
+# Load model as a PyFuncModel.
+loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected_version}")
+'''
+            st.code(code_snippet, language="python")
+            
             st.markdown("</div>", unsafe_allow_html=True)
 
         with col_dep2:

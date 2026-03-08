@@ -2092,6 +2092,7 @@ class AutoMLTrainer:
         try:
             # Recuperar run_id do melhor trial global
             best_run_id = study.best_trial.user_attrs.get('run_id')
+            self.best_run_id = best_run_id
             if best_model_name and best_run_id:
                 from mlops_utils import get_consumption_code
                 self.best_consumption_code = get_consumption_code(best_model_name, best_run_id, self.task_type, feature_names=self.feature_names)
@@ -2100,6 +2101,7 @@ class AutoMLTrainer:
         except Exception as e:
             logger.warning(f"Failed to generate best consumption code: {e}")
             self.best_consumption_code = None
+            self.best_run_id = None
 
         return self.best_model
 

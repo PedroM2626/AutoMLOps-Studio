@@ -269,14 +269,15 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
         consumption_code = getattr(trainer, 'best_consumption_code', None)
 
         # Get MLflow run ID
-        run_id = None
-        try:
-            import mlflow
-            active = mlflow.active_run()
-            if active:
-                run_id = active.info.run_id
-        except Exception:
-            pass
+        run_id = getattr(trainer, 'best_run_id', None)
+        if not run_id:
+            try:
+                import mlflow
+                active = mlflow.active_run()
+                if active:
+                    run_id = active.info.run_id
+            except Exception:
+                pass
 
         # Evaluate on test set
         eval_metrics = None
