@@ -3278,6 +3278,8 @@ with tabs[2]:
                                         st.markdown("**Stability Analysis**")
                                         for s_type, s_data in rep['stability'].items():
                                             with st.expander(f"Test: {s_type}"):
+                                                if isinstance(s_data, dict):
+                                                    st.json(s_data)
                                                 else:
                                                     st.dataframe(s_data)
                                         
