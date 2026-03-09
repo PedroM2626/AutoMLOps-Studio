@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 
 # Instalar as dependências do Python
-# Usando --no-cache-dir para reduzir o tamanho da imagem
+# Using --no-cache-dir to reduce image size
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copiar o restante do código do projeto

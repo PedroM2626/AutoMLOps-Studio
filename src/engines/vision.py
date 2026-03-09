@@ -532,15 +532,15 @@ class CVAutoMLTrainer:
 # ---------------------------------------------------------------------------
 def get_cv_explanation(model_name, params):
     explanations = {
-        'resnet18':       'ResNet-18 usa skip connections (conexoes residuais) que evitam o desaparecimento do gradiente, permitindo treinar redes mais profundas com eficiencia.',
-        'resnet50':       'ResNet-50 e uma versao mais profunda e poderosa do ResNet, com 3 camadas internas por bloco residual (Bottleneck), excelente para datasets maiores.',
-        'mobilenet_v2':   'MobileNetV2 usa convolucoes separaveis em profundidade para reduzir drasticamente os parametros, ideal para dispositivos com recursos limitados.',
-        'efficientnet_b0':'EfficientNet-B0 escala largura, profundidade e resolucao de forma balanceada, atingindo alta acuracia com menor custo computacional.',
-        'densenet121':    'DenseNet-121 conecta cada camada a todas as anteriores, promovendo reutilizacao de features e gradientes mais ricos durante o backprop.',
-        'vgg16':          'VGG16 usa uma arquitetura sequencial simples e profunda com kernels 3x3, facil de entender mas mais pesada em parametros.',
-        'deeplabv3':      'DeepLabV3 usa Atrous Spatial Pyramid Pooling (ASPP) para capturar objetos em multiplas escalas na segmentacao semantica.',
-        'faster_rcnn':    'Faster R-CNN usa uma Region Proposal Network (RPN) integrada para localizar e classificar objetos simultaneamente.',
-        'lr':       f"O learning rate de {params.get('lr', 'N/A')} controla a velocidade de ajuste dos pesos. Muito alto causa divergencia; muito baixo torna o treino lento.",
-        'batch_size': f"Batch size de {params.get('batch_size', 'N/A')} define quantas imagens o modelo ve antes de atualizar os pesos."
+        'resnet18':       'ResNet-18 uses skip connections (residual connections) that prevent gradient vanishing, allowing deeper networks to be trained efficiently.',
+        'resnet50':       'ResNet-50 is a deeper and more powerful version of ResNet, with 3 internal layers per residual block (Bottleneck), excellent for larger datasets.',
+        'mobilenet_v2':   'MobileNetV2 uses depthwise separable convolutions to drastically reduce parameters, ideal for resource-constrained devices.',
+        'efficientnet_b0':'EfficientNet-B0 scales width, depth, and resolution in a balanced way, achieving high accuracy with lower computational cost.',
+        'densenet121':    'DenseNet-121 connects each layer to all previous ones, promoting feature reuse and richer gradients during backprop.',
+        'vgg16':          'VGG16 uses a simple and deep sequential architecture with 3x3 kernels, easy to understand but heavier in parameters.',
+        'deeplabv3':      'DeepLabV3 uses Atrous Spatial Pyramid Pooling (ASPP) to capture objects at multiple scales in semantic segmentation.',
+        'faster_rcnn':    'Faster R-CNN uses an integrated Region Proposal Network (RPN) to locate and classify objects simultaneously.',
+        'lr':       f"The learning rate of {params.get('lr', 'N/A')} controls the weight adjustment speed. Too high causes divergence; too low makes training slow.",
+        'batch_size': f"Batch size of {params.get('batch_size', 'N/A')} defines how many images the model sees before updating weights."
     }
-    return explanations.get(model_name, 'Modelo robusto para extracao de caracteristicas visuais.')
+    return explanations.get(model_name, 'Robust model for visual feature extraction.')

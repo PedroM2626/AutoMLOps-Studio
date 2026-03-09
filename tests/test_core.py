@@ -1,8 +1,9 @@
 import pytest
 import pandas as pd
 import numpy as np
-from automl_engine import AutoMLDataProcessor, AutoMLTrainer
-from mlops_utils import DriftDetector
+from src.core.processor import AutoMLDataProcessor
+from src.engines.classical import AutoMLTrainer
+from src.core.drift import DriftDetector
 import os
 
 @pytest.fixture
@@ -44,7 +45,7 @@ def test_drift_detector():
     assert drifts['a']['drift_detected'] == True
 
 def test_model_save_load(sample_data):
-    from automl_engine import save_pipeline, load_pipeline
+    from src.engines.classical import save_pipeline, load_pipeline
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
     trainer = AutoMLTrainer(task_type='classification')

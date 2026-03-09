@@ -122,8 +122,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             os.environ['MLFLOW_TRACKING_PASSWORD'] = dh_pass
 
         # Import engine
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from automl_engine import AutoMLDataProcessor, AutoMLTrainer
+        from src.core.processor import AutoMLDataProcessor
+        from src.engines.classical import AutoMLTrainer
 
         task         = config.get('task', 'classification')
         target       = config.get('target')

@@ -1,0 +1,165 @@
+import os
+import datetime
+
+def get_consumption_code(model_name, run_id, task_type, feature_names=None):
+    """Generates a Python code snippet to consume the trained model."""
+    safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    
+    # Gerar dicionário de colunas para o DataFrame de exemplo
+    if feature_names and len(feature_names) > 0:
+        cols_str = ",\n    ".join([f'"{col}": [0.0]' for col in feature_names[:10]]) # Show the first 10
+        if len(feature_names) > 10:
+            cols_str += f",\n    # ... and {len(feature_names)-10} more columns"
+    else:
+        cols_str = "# \"feature_1\": [1.0], \n    # \"feature_2\": [\"value\"]"
+
+    code = f"""# --- AutoMLOps Code Sample: Consuming {model_name} ---
+import mlflow
+import pandas as pd
+import numpy as np
+
+# 1. Configure Tracking (if necessary)
+mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+
+# 2. Load model from MLflow
+# You can also use 'models:/{model_name}/latest' if you have registered the model
+model_uri = "runs:/{run_id}/{safe_name}"
+model = mlflow.sklearn.load_model(model_uri)
+
+print(f"Model {{model_uri}} loaded successfully!")
+
+# 3. Prepare sample data (Adjust according to your columns)
+# Example based on training:
+sample_data = pd.DataFrame({{
+    {cols_str}
+}})
+
+# 4. Make prediction
+try:
+    predictions = model.predict(sample_data)
+    print("Prediction Result:", predictions)
+    
+    # If classification, you might also want probabilities:
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(sample_data)
+        print("Probabilities:", probs)
+except Exception as e:
+    print("Error predicting (Check if input data matches training):", e)
+    print("TIP: Use AutoMLDataProcessor to transform raw data before predict.")
+"""
+    return code
+
+def get_cv_consumption_code(model_name, run_id, task_type, backbone):
+    """Generates a Python code snippet to consume a trained Computer Vision model."""
+    safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    
+    code = f"""# --- AutoMLOps Code Sample: Consuming CV Model ({model_name}) ---
+import mlflow
+import torch
+from PIL import Image
+from torchvision import transforms
+
+# 1. Configure Tracking (if necessary for remote download)
+mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+
+# 2. Load model from MLflow
+model_uri = "runs:/{run_id}/{safe_name}"
+print(f"Loading model from {{model_uri}}...")
+model = mlflow.pytorch.load_model(model_uri)
+model.eval()
+
+# 3. Configure the same transforms used during training
+# (Adjust normalization/resize based on what {backbone} architecture requires)
+transform = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+])
+
+# 4. Make prediction
+image_path = "path/to/your/image.jpg"
+try:
+    img = Image.open(image_path).convert('RGB')
+    tensor_img = transform(img).unsqueeze(0) # Add batch dimension
+    
+    with torch.no_grad():
+        outputs = model(tensor_img)
+        
+    print("Raw Model Output (Logits/Outputs):", outputs)
+    
+    # If classification/multilabel:
+    if '{task_type}' in ['image_classification', 'image_multi_label']:
+        probs = torch.sigmoid(outputs) if '{task_type}' == 'image_multi_label' else torch.softmax(outputs, dim=1)
+        print("Positive Probabilities:", probs)
+except Exception as e:
+    print(f"Error inferring image: {{e}}")
+"""
+    return code
+
+def generate_model_card(model_name, params, metrics, feature_names=None, task_type="classification", duration=None):
+    """
+    Generates an automated Model Card in Markdown format.
+    """
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+    
+    # Format Params
+    params_md = "\n".join([f"- **{k}**: `{v}`" for k, v in params.items()]) if params else "- N/A"
+    
+    # Format Metrics
+    metrics_md = "\n".join([f"- **{k}**: `{v:.4f}`" if isinstance(v, float) else f"- **{k}**: `{v}`" for k, v in metrics.items() if k not in ['confusion_matrix', 'consumption_code']])
+    
+    # Format Features
+    if feature_names:
+        feats_list = feature_names[:20]
+        feats_str = ", ".join([f"`{f}`" for f in feats_list])
+        if len(feature_names) > 20:
+             feats_str += f", and {len(feature_names) - 20} more..."
+        features_md = f"The model was trained with {len(feature_names)} features. Main features (top 20):\n{feats_str}"
+    else:
+        features_md = "Feature names not provided or not available."
+
+    template = f"""# Model Card: {model_name}
+
+> This document was automatically generated by **AutoMLOps Studio**.
+
+## 📖 Summary
+- **Model Name:** `{model_name}`
+- **Task Type:** `{task_type}`
+- **Generation Date:** {now}
+- **Training Time (Approx):** `{duration:.2f} seconds` if duration else 'N/A'
+
+---
+
+## ⚙️ Configuration (Hyperparameters)
+The hyperparameters below were found to be optimal during the search (Optuna):
+{params_md}
+
+---
+
+## 📊 Performance (Validation)
+The metrics below represent the model's performance on the validation set during the experiment:
+{metrics_md}
+
+---
+
+## 🧬 Data and Features
+{features_md}
+
+### Data Considerations
+It is recommended to ensure that the data submitted for inference passes through the same transformation pipeline (Scaling, Imputation, etc.) used in training via `AutoMLDataProcessor`.
+
+---
+
+## ⚠️ Limitations and Ethical Considerations
+Since this model was built automatically (AutoML):
+1. **Hidden Bias:** The model will reflect biases present in the training data. It is vital to audit historical data before trusting the model for critical decisions.
+2. **Data Drift:** If the distribution of input data in production significantly diverges from the data used in this training, performance (reported above) is not guaranteed. Active monitoring is recommended.
+3. **Explainability:** Advanced *Ensemble* models or Neural Networks can be opaque. Refer to the Feature Importance plots (SHAP/Coefficients) attached to this experiment for more clarity on how decisions are made.
+
+---
+*Generated by AutoMLOps Studio - Model Card Builder*
+"""
+    return template

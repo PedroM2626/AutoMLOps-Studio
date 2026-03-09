@@ -1,14 +1,18 @@
-from automl_engine import AutoMLDataProcessor, AutoMLTrainer
-# from cv_engine import CVAutoMLTrainer, get_cv_explanation # Moved to local scope
+from src.core.processor import AutoMLDataProcessor
+from src.engines.classical import AutoMLTrainer
+# from src.engines.vision import CVAutoMLTrainer, get_cv_explanation # Migrated structure
 import streamlit as st
 import pandas as pd
 import numpy as np
-from mlops_utils import (
-    MLFlowTracker, DriftDetector, ModelExplainer, get_model_registry, 
-    DataLake, register_model_from_run, get_registered_models, get_all_runs,
+from src.tracking.mlflow import (
+    MLFlowTracker, get_model_registry, 
+    register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model, get_run_details
 )
-from training_manager import TrainingJobManager, JobStatus
+from src.core.data_lake import DataLake
+from src.core.drift import DriftDetector
+from src.utils.explainers import ModelExplainer
+from src.tracking.manager import TrainingJobManager, JobStatus
 import shap
 import joblib # type: ignore
 import os
@@ -921,13 +925,13 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         # Apply schema overrides if provided
         if 'schema_overrides' in config:
             overrides = config['schema_overrides']
-            cols_to_drop = [row['Nome da coluna'] for row in overrides if not row.get('Incluir', True)]
+            cols_to_drop = [row['Column Name'] for row in overrides if not row.get('Include', True)]
             df_ds = df_ds.drop(columns=[c for c in cols_to_drop if c in df_ds.columns], errors='ignore')
             
             for row in overrides:
-                if row.get('Incluir', True):
-                    col_name = row['Nome da coluna']
-                    target_type = row.get('Tipo', 'object')
+                if row.get('Include', True):
+                    col_name = row['Column Name']
+                    target_type = row.get('Type', 'object')
                     if col_name in df_ds.columns:
                         try:
                             if target_type == 'datetime64[ns]':
@@ -942,7 +946,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         else:
             split_ratio = config.get('split', 80) / 100.0
             
-        strat = config.get('split_strategy', 'Aleatório (Random)')
+        strat = config.get('split_strategy', 'Random')
         
         if split_ratio >= 1.0:
             train_dfs.append(df_ds)
@@ -1022,19 +1026,19 @@ with tabs[0]:
             with st.expander("⚙️ Manual Dataset Parsing", expanded=False):
                 col_p1, col_p2 = st.columns(2)
                 with col_p1:
-                    parse_format = st.selectbox("Formato do arquivo", ["Auto (Extensão)", "Delimitado (CSV)", "JSON Lines", "Arquivo parquet", "Texto sem formatação"])
-                    parse_delim = st.selectbox("Delimitador", [",", ";", "\\t (Guia)", " ", "|", "Personalizado"])
-                    if parse_delim == "Personalizado":
-                        custom_delim = st.text_input("Delimitador Personalizado", ",")
+                    parse_format = st.selectbox("File Format", ["Auto (Extension)", "Delimited (CSV)", "JSON Lines", "Parquet file", "Plain text"])
+                    parse_delim = st.selectbox("Delimiter", [",", ";", "\\t (Tab)", " ", "|", "Custom"])
+                    if parse_delim == "Custom":
+                        custom_delim = st.text_input("Custom Delimiter", ",")
                         actual_delim = custom_delim
                     else:
-                        delim_map = {",": ",", ";": ";", "\\t (Guia)": "\t", " ": " ", "|": "|"}
+                        delim_map = {",": ",", ";": ";", "\\t (Tab)": "\t", " ": " ", "|": "|"}
                         actual_delim = delim_map.get(parse_delim, ",")
                 with col_p2:
-                    parse_enc = st.selectbox("Codificação", ["utf-8", "utf-8-sig", "latin1", "ascii", "utf-16", "windows-1252"])
-                    parse_header = st.selectbox("Cabeçalhos de coluna", ["Todos os arquivos têm os mesmos cabeçalhos", "Nenhum cabeçalho"])
-                    actual_header = 0 if "Todos" in parse_header else None
-                    replace_existing = st.checkbox("Substituir se já existir", value=True)
+                    parse_enc = st.selectbox("Encoding", ["utf-8", "utf-8-sig", "latin1", "ascii", "utf-16", "windows-1252"])
+                    parse_header = st.selectbox("Column headers", ["All files have the same headers", "No header"])
+                    actual_header = 0 if "All" in parse_header else None
+                    replace_existing = st.checkbox("Replace if already exists", value=True)
 
             if uploaded_files:
                 for uploaded_file in uploaded_files:
@@ -1044,10 +1048,10 @@ with tabs[0]:
                     try:
                         # Determine actual format
                         fmt = ext
-                        if parse_format == "Delimitado (CSV)": fmt = '.csv'
+                        if parse_format == "Delimited (CSV)": fmt = '.csv'
                         elif parse_format == "JSON Lines": fmt = '.json'
-                        elif parse_format == "Arquivo parquet": fmt = '.parquet'
-                        elif parse_format == "Texto sem formatação": fmt = '.txt'
+                        elif parse_format == "Parquet file": fmt = '.parquet'
+                        elif parse_format == "Plain text": fmt = '.txt'
 
                         if fmt == '.csv':
                             df_preview = pd.read_csv(uploaded_file, sep=actual_delim, encoding=parse_enc, header=actual_header)
@@ -1056,7 +1060,7 @@ with tabs[0]:
                         elif fmt == '.parquet':
                             df_preview = pd.read_parquet(uploaded_file)
                     except Exception as e:
-                        st.warning(f"Preview indisponível para {uploaded_file.name}: {e}")
+                        st.warning(f"Preview unavailable for {uploaded_file.name}: {e}")
                     
                     with st.expander(f"👁️ Preview: {uploaded_file.name}", expanded=True):
                         if df_preview is not None:
@@ -1065,9 +1069,9 @@ with tabs[0]:
                             uploaded_file.seek(0)
                             st.text(uploaded_file.getvalue().decode(parse_enc, errors='ignore')[:500] + "...")
                         elif ext == '.zip':
-                            st.info("Arquivo ZIP detectado. Geralmente usado para CV ou dados brutos.")
+                            st.info("ZIP file detected. Generally used for CV or raw data.")
                         else:
-                            st.info("Formato não tabular ou erro ao processar.")
+                            st.info("Non-tabular format or error processing.")
                     
                     dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(ext, ""), key=f"name_{uploaded_file.name}")
                     if st.button(f"📥 Save {uploaded_file.name}", key=f"save_{uploaded_file.name}", type="primary"):
@@ -1787,32 +1791,34 @@ with tabs[1]:
                       # Per-dataset version + split config
                       new_configs = []
                       
-                      st.markdown("#### Configuração de Esquema (Schema)", unsafe_allow_html=True)
-                      st.info("Ajuste os tipos de dados preenchidos automaticamente. Desmarque colunas que devem ser ignoradas no treinamento.")
+                      st.markdown("#### Schema Configuration", unsafe_allow_html=True)
+                      st.info("Adjust the automatically inferred data types. Uncheck columns that should be ignored during training.")
                       
                       schema_df = pd.DataFrame({
-                          "Incluir": [True] * len(sample_df.columns),
-                          "Nome da coluna": sample_df.columns,
-                          "Tipo": [str(t) for t in sample_df.dtypes],
-                          "Valores de exemplo": [str(sample_df[c].iloc[0]) if len(sample_df) > 0 else "" for c in sample_df.columns]
+                          "Include": [True] * len(sample_df.columns),
+                          "Column Name": sample_df.columns,
+                          "Type": [str(t) for t in sample_df.dtypes],
+                          "Sample Values": [str(sample_df[c].iloc[0]) if len(sample_df) > 0 else "" for c in sample_df.columns]
                       })
                       
                       edited_schema = st.data_editor(
                           schema_df,
                           column_config={
-                              "Incluir": st.column_config.CheckboxColumn("Incluir", help="Incluir no treinamento?", default=True),
-                              "Tipo": st.column_config.SelectboxColumn("Tipo", help="Ocultar tipo do Pandas", options=["object", "int64", "float64", "bool", "datetime64[ns]"]),
+                              "Include": st.column_config.CheckboxColumn("Include", help="Include in training?", default=True),
+                              "Type": st.column_config.SelectboxColumn("Type", help="Hide Pandas type", options=["object", "int64", "float64", "bool", "datetime64[ns]"]),
                           },
-                          disabled=["Nome da coluna", "Valores de exemplo"],
+                          disabled=["Column Name", "Sample Values"],
                           hide_index=True,
                           key="wizard_schema_editor"
                       )
-                      cfg['schema_overrides'] = edited_schema.to_dict('records')
+                      # Map back to expected keys in schema_overrides
+                      overrides = edited_schema.to_dict('records')
+                      cfg['schema_overrides'] = overrides
                       
-                      st.markdown("#### Tipo de Divisão de Dados (Split)", unsafe_allow_html=True)
+                      st.markdown("#### Data Split Strategy", unsafe_allow_html=True)
                       split_strategy = st.radio(
-                          "Estratégia de Validação", 
-                          ["Aleatório (Random)", "Cronológico (Chronological)", "Manual (Pre-defined split column)"],
+                          "Validation Strategy", 
+                          ["Random", "Chronological", "Manual (Pre-defined split column)"],
                           horizontal=True,
                           key="wizard_split_strat"
                       )
@@ -1833,11 +1839,11 @@ with tabs[1]:
                               
                               st.markdown(f"**Split visual:** <span style='color:#2f80ed'>Training: {split}%</span> | <span style='color:#f59e0b'>Validation: {int((100-split)/2)}%</span> | <span style='color:#8b5cf6'>Testing: {100-split-int((100-split)/2)}%</span>", unsafe_allow_html=True)
                               
-                              if split_strategy == "Cronológico (Chronological)":
-                                  time_col = st.selectbox(f"Coluna de Tempo p/ {ds_name}", sample_df.columns, key=f"wiz_time_{ds_name}")
+                              if split_strategy == "Chronological":
+                                  time_col = st.selectbox(f"Time Column for {ds_name}", sample_df.columns, key=f"wiz_time_{ds_name}")
                                   new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'time_column': time_col})
                               elif split_strategy == "Manual (Pre-defined split column)":
-                                  manual_col = st.selectbox(f"Coluna de Flag de Split p/ {ds_name}", sample_df.columns, key=f"wiz_manual_{ds_name}")
+                                  manual_col = st.selectbox(f"Split Flag Column for {ds_name}", sample_df.columns, key=f"wiz_manual_{ds_name}")
                                   new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'manual_split_column': manual_col})
                               else:
                                   new_configs.append({'name': ds_name, 'version': ver, 'split': split})
@@ -2811,7 +2817,7 @@ with tabs[1]:
                 with st.spinner(f"Training {selected_backbone} on GPU/CPU..."):
                     try:
                         import mlflow
-                        from mlops_utils import get_cv_consumption_code
+                        from src.utils.helpers import get_cv_consumption_code
                         
                         run_name = f"CV_{cv_task}_{selected_backbone}_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}"
                         

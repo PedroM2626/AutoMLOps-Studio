@@ -1,26 +1,18 @@
 import os
 import logging
 import importlib.util
-
-# Reduce TensorFlow noise
-os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
-
-# Check if transformers and torch are installed without importing them yet
-# This prevents potential DLL conflicts/crashes during initial module load
-try:
-    _transformers_spec = importlib.util.find_spec("transformers")
-    _torch_spec = importlib.util.find_spec("torch")
-    TRANSFORMERS_AVAILABLE = (_transformers_spec is not None) and (_torch_spec is not None)
-    if TRANSFORMERS_AVAILABLE:
-        print("DEBUG: Transformers/Torch detected (lazy loading enabled).")
-    else:
-        print("DEBUG: Transformers/Torch not found.")
-except Exception as e:
-    TRANSFORMERS_AVAILABLE = False
-    print(f"DEBUG: Error checking transformers availability: {e}")
-
+import time
+import warnings
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import mlflow
+import optuna
+import joblib
+from PIL import Image
+import io
+
 from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit, KFold, StratifiedKFold
 from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
 from sklearn.impute import SimpleImputer
@@ -48,515 +40,47 @@ from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
     mean_squared_error, mean_absolute_error, r2_score, confusion_matrix,
-    silhouette_score, mean_absolute_percentage_error, balanced_accuracy_score,
-    cohen_kappa_score, log_loss, matthews_corrcoef, explained_variance_score,
-    median_absolute_error, mean_squared_log_error, calinski_harabasz_score,
-    davies_bouldin_score
+    balanced_accuracy_score, cohen_kappa_score, matthews_corrcoef, log_loss,
+    median_absolute_error, explained_variance_score, mean_absolute_percentage_error,
+    mean_squared_log_error, silhouette_score, calinski_harabasz_score, davies_bouldin_score
 )
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, MeanShift, Birch, SpectralClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
+from sklearn.exceptions import ConvergenceWarning
+from sklearn.model_selection import cross_val_predict
+
 import xgboost as xgb
 import lightgbm as lgb
-import re
 try:
     import catboost as cb
     CATBOOST_AVAILABLE = True
 except ImportError:
     CATBOOST_AVAILABLE = False
-import optuna
-import joblib
-import os
-import logging
-import time
-import warnings
-import matplotlib.pyplot as plt
-import seaborn as sns
-import mlflow
-from sklearn.exceptions import ConvergenceWarning
-from sklearn.model_selection import cross_val_predict
-from stability_engine import StabilityAnalyzer
-import io
-from PIL import Image
 
-# Lazy load for optional libraries
-def get_deepchecks_suite(task_type):
-    try:
-        from deepchecks.tabular.suites import data_integrity
-        return data_integrity()
-    except ImportError:
-        return None
+# Modular imports
+from src.core.processor import AutoMLDataProcessor
+from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS
+from src.engines.stability import StabilityAnalyzer
+from src.tracking.mlflow import MLFlowTracker
+from src.utils.helpers import get_consumption_code, generate_model_card
+from src.utils.explainers import ModelExplainer
 
+# Reduce TensorFlow noise
+os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 
-# Silence convergence warnings and other repetitive warnings
+try:
+    _transformers_spec = importlib.util.find_spec("transformers")
+    _torch_spec = importlib.util.find_spec("torch")
+    TRANSFORMERS_AVAILABLE = (_transformers_spec is not None) and (_torch_spec is not None)
+except Exception:
+    TRANSFORMERS_AVAILABLE = False
+
+# Silence convergence warnings
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
-    def __init__(self, model_name='bert-base-uncased', task='classification', epochs=3, learning_rate=2e-5):
-        self.model_name = model_name
-        self.task = task
-        self.epochs = epochs
-        self.learning_rate = learning_rate
-        self.model = None
-        self.tokenizer = None
-        self.device = None # Lazy initialization to avoid early torch import
-
-    def fit(self, X, y=None):
-        logger.info(f"TransformersWrapper.fit called for {self.model_name}")
-        if not TRANSFORMERS_AVAILABLE:
-            raise ImportError("Transformers library not found.")
-            
-        try:
-            logger.info("Importing torch/transformers...")
-            import torch
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            logger.info("Imports successful.")
-        except ImportError as e:
-            logger.error(f"Failed to import transformers/torch at runtime: {e}")
-            raise e
-            
-        if self.device is None:
-            logger.info("Checking CUDA availability...")
-            self.device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Device selected: {self.device}")
-        
-        # Check if input is likely vectorized (sparse or dense matrix)
-        # Handle 'passthrough' mode where X might be a numpy array of strings
-        is_vectorized = False
-        is_raw_text = False
-        
-        logger.info(f"Checking input type: {type(X)}")
-        if hasattr(X, "shape"):
-             logger.info(f"Checking input shape: {X.shape}")
-             
-             # If it's an array of strings/objects, it's raw text
-             if X.dtype == 'object' or X.dtype.type is np.str_ or X.dtype.type is np.bytes_:
-                 is_raw_text = True
-                 logger.info("Input detected as Raw Text (dtype object/string).")
-             elif len(X.shape) > 1 and X.shape[1] > 1:
-                # Simple heuristic: if it has many columns, it's likely a feature matrix
-                is_vectorized = True
-                logger.info("Input detected as Vectorized Data.")
-            
-        if is_vectorized and not is_raw_text:
-            logger.warning(f"TransformersWrapper ({self.model_name}) received vectorized data (shape {X.shape}). Skipping fine-tuning as it requires raw text.")
-            
-            # Use a lightweight dummy model or just leave as None and handle in predict
-            self.model = None 
-            logger.info("Skipping training due to vectorized input.")
-            return self
-
-        logger.info("Proceeding with training (raw text assumption)...")
-        # If we somehow got text (e.g. custom pipeline), we would proceed here
-        
-        # Ensure X is a list of strings for tokenizer
-        if hasattr(X, "tolist"):
-             texts = X.tolist()
-        else:
-             texts = list(X)
-             
-        # Flatten if list of lists (common with reshape(-1, 1))
-        if len(texts) > 0 and isinstance(texts[0], (list, np.ndarray)):
-            texts = [t[0] for t in texts]
-            
-        # Convert to string just in case
-        texts = [str(t) for t in texts]
-        
-        # For now, just load model to ensure connectivity
-        num_labels = len(np.unique(y)) if y is not None and self.task == 'classification' else 1
-        logger.info(f"Loading tokenizer and model {self.model_name}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name, num_labels=num_labels).to(self.device)
-        
-        # Mock Training Loop (Short)
-        logger.info("Simulating training loop (1 batch)...")
-        # In a real implementation, we would tokenize and train here.
-        # inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt").to(self.device)
-        # ... training code ...
-        
-        logger.info(f"TransformersWrapper: Loaded {self.model_name} on {self.device}")
-        return self
-
-    def predict(self, X):
-        if self.model is None:
-            # If model wasn't trained (e.g. due to vectorized input), raise error 
-            # so AutoMLTrainer catches it and assigns bad score, rather than random.
-            raise RuntimeError("TransformersWrapper model is not trained (likely due to vectorized input).")
-            
-        # Mock prediction for interface testing
-        return np.zeros(len(X)) if self.task == 'regression' else np.random.randint(0, 2, size=len(X))
-
-class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard'):
-        self.target_column = target_column
-        self.task_type = task_type
-        self.date_col = date_col
-        self.forecast_horizon = forecast_horizon
-        self.nlp_config = nlp_config if nlp_config else {}
-        self.scaler_type = scaler_type
-        self.preprocessor = None
-        self.nlp_cols = []
-
-    def _clean_text_feature(self, df, col):
-        """Applies text cleaning to a specific column in DataFrame."""
-        if col in df.columns:
-            cleaning_mode = self.nlp_config.get('cleaning_mode', 'standard')
-            logger.info(f"Cleaning text from column: {col} (Mode: {cleaning_mode})")
-            
-            def clean_text_optimized(text):
-                text = str(text).lower()
-                # Remove URLs
-                text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
-                # Remove mentions and hashtags
-                text = re.sub(r'\@\w+|\#','', text)
-                
-                if cleaning_mode == 'god_mode':
-                    # Remove repetitive characters (e.g., goooood -> good)
-                    text = re.sub(r'(.)\1+', r'\1\1', text)
-                    # Keep punctuation that matters for sentiment (! and ?)
-                    text = re.sub(r'[^a-z\s\!\?]', '', text)
-                else:
-                    # Standard cleaning: only letters and spaces
-                    text = re.sub(r'[^a-z\s]', '', text)
-                
-                # Remove extra spaces
-                text = " ".join(text.split())
-                return text
-            
-            # Apply cleaning in-place (efficiently)
-            df[col] = df[col].apply(clean_text_optimized)
-        return df
-
-    def _apply_ts_features(self, df, y=None):
-        """Applies time-series specific feature engineering to a DataFrame."""
-        df = df.copy()
-        
-        # 1. Temporal Features
-        if self.date_col and self.date_col in df.columns:
-            try:
-                df[self.date_col] = pd.to_datetime(df[self.date_col])
-                df['hour'] = df[self.date_col].dt.hour
-                df['dayofweek'] = df[self.date_col].dt.dayofweek
-                df['quarter'] = df[self.date_col].dt.quarter
-                df['month'] = df[self.date_col].dt.month
-                df['year'] = df[self.date_col].dt.year
-                df['dayofyear'] = df[self.date_col].dt.dayofyear
-                df['dayofmonth'] = df[self.date_col].dt.day
-                df['weekofyear'] = df[self.date_col].dt.isocalendar().week.astype(int)
-            except Exception as e:
-                logger.warning(f"Could not extract temporal features: {e}")
-
-        # 2. Lag Features & Rolling Stats
-        target_vals = None
-        if y is not None:
-            target_vals = y
-        elif self.target_column and self.target_column in df.columns:
-            target_vals = df[self.target_column]
-            
-        if target_vals is not None:
-            target_vals_numeric = pd.to_numeric(target_vals, errors='coerce')
-            if not target_vals_numeric.isna().all():
-                target_vals = target_vals_numeric
-                if self.target_column and self.target_column in df.columns:
-                    df[self.target_column] = target_vals
-                
-                for i in range(self.forecast_horizon, self.forecast_horizon + 5):
-                    df[f'lag_{i}'] = target_vals.shift(i)
-                
-                df[f'rolling_mean_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).mean()
-                df[f'rolling_std_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).std()
-                df = df.dropna()
-            
-        return df
-
-    def _apply_nlp_features(self, df, nlp_cols):
-        """Deprecated: NLP features are now handled in the main pipeline."""
-        return df
-
-    def fit_transform(self, df, nlp_cols=None):
-        self.nlp_cols = nlp_cols if nlp_cols else []
-        
-        # --- Data Quality Check (Deepchecks) ---
-        self.quality_report_html = None
-        try:
-            from deepchecks.tabular import Dataset as DeepDataset
-            from deepchecks.tabular.suites import data_integrity
-            
-            # Identify label for deepchecks
-            label = self.target_column if self.target_column in df.columns else None
-            
-            # Simple check if data is large enough
-            if len(df) > 10:
-                logger.info("Running Data Integrity check with Deepchecks...")
-                ds = DeepDataset(df, label=label, cat_features=df.select_dtypes(include=['object', 'category']).columns.tolist())
-                integ_suite = data_integrity()
-                suite_result = integ_suite.run(ds)
-                
-                # Save report as HTML string for UI
-                self.quality_report_html = suite_result.save_as_html(render_static=True)
-                logger.info("Data Integrity check completed.")
-        except Exception as e:
-            logger.warning(f"Deepchecks failed: {e}")
-
-        # NLP Cleaning first
-        if self.nlp_cols:
-            for col in self.nlp_cols:
-                df = self._clean_text_feature(df, col)
-                # Fill NaNs for vectorizer
-                if col in df.columns:
-                     df[col] = df[col].fillna("")
-
-        # Time Series Feature Engineering
-        if self.task_type == 'time_series':
-            df = self._apply_ts_features(df)
-
-        if self.target_column and self.target_column in df.columns:
-            X = df.drop(columns=[self.target_column])
-            y = df[self.target_column]
-        else:
-            X = df
-            y = None
-        
-        # Exclude date_col from processing
-        process_cols = [c for c in X.columns if c != self.date_col]
-        
-        nlp_features = [c for c in self.nlp_cols if c in process_cols]
-        non_nlp_cols = [c for c in process_cols if c not in nlp_features]
-        
-        X_to_process = X[non_nlp_cols]
-        
-        # Identify column types
-        numeric_features = X_to_process.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns.tolist()
-        all_categorical = X_to_process.select_dtypes(include=['object', 'category']).columns.tolist()
-
-        # Drop constant columns
-        constant_cols = [col for col in X_to_process.columns if X_to_process[col].nunique() <= 1]
-        if constant_cols:
-            numeric_features = [c for c in numeric_features if c not in constant_cols]
-            all_categorical = [c for c in all_categorical if c not in constant_cols]
-        
-        # Split categorical
-        low_card_features = []
-        high_card_features = []
-        
-        for col in all_categorical:
-            if X_to_process[col].nunique() <= 15:
-                low_card_features.append(col)
-            else:
-                high_card_features.append(col)
-
-        # Preprocessing Pipelines
-        if self.scaler_type == 'minmax':
-            scaler = MinMaxScaler()
-        elif self.scaler_type == 'robust':
-            scaler = RobustScaler()
-        else:
-            scaler = StandardScaler()
-
-        numeric_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='median')),
-            ('scaler', scaler)
-        ])
-
-        low_card_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
-        ])
-        
-        high_card_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('ordinal', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
-        ])
-
-        # Bundle preprocessing
-        transformers = []
-        if numeric_features:
-            transformers.append(('num', numeric_transformer, numeric_features))
-        if low_card_features:
-            transformers.append(('cat_low', low_card_transformer, low_card_features))
-        if high_card_features:
-            transformers.append(('cat_high', high_card_transformer, high_card_features))
-
-        # NLP Transformers
-        if nlp_features:
-            from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
-            
-            vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
-            ngram_range = self.nlp_config.get('ngram_range', (1, 3))
-            max_features = self.nlp_config.get('max_features', 5000) # Reduced from 20000 to 5000 for speed
-            
-            # Map frontend languages to sklearn recognized ones if necessary
-            chosen_language = self.nlp_config.get('language', 'english').lower()
-            if chosen_language == 'portuguese': chosen_language = 'portuguese' # TfidfVectorizer supports it natively
-            stop_words = chosen_language if self.nlp_config.get('stop_words', True) else None
-            
-            for col in nlp_features:
-                if vectorizer_type == 'embeddings':
-                    # Support for Sentence-Transformers
-                    try:
-                        from sentence_transformers import SentenceTransformer
-                        from sklearn.base import BaseEstimator, TransformerMixin
-                        
-                        class STTransformer(BaseEstimator, TransformerMixin):
-                            def __init__(self, model_name='all-MiniLM-L6-v2'):
-                                self.model_name = model_name
-                                self.model = None
-                            def fit(self, X, y=None):
-                                if self.model is None:
-                                    self.model = SentenceTransformer(self.model_name)
-                                return self
-                            def transform(self, X):
-                                # Ensure X is list of strings
-                                texts = [str(t) for t in X]
-                                return self.model.encode(texts, show_progress_bar=False)
-                            def get_feature_names_out(self, input_features=None):
-                                # Dummy feature names for embeddings (usually 384 for MiniLM)
-                                return [f"ST_emb_{i}" for i in range(384)]
-                        
-                        vectorizer = STTransformer(model_name=self.nlp_config.get('embedding_model', 'all-MiniLM-L6-v2'))
-                    except ImportError:
-                        logger.warning("sentence-transformers not installed. Falling back to TF-IDF.")
-                        vectorizer = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range, stop_words=stop_words)
-                
-                elif vectorizer_type == 'count':
-                    vectorizer = CountVectorizer(
-                        max_features=max_features,
-                        ngram_range=ngram_range,
-                        stop_words=stop_words
-                    )
-                elif vectorizer_type == 'passthrough':
-                     # Custom transformer to pass text as-is (for BERT)
-                     from sklearn.preprocessing import FunctionTransformer
-                     # Ensure we handle Series/DataFrame input correctly for FunctionTransformer
-                     # We need to return a 2D array (n_samples, 1) or list of strings
-                     def pass_text(x):
-                         if hasattr(x, 'values'):
-                             x = x.values
-                         if hasattr(x, 'to_numpy'):
-                             x = x.to_numpy()
-                         return x.reshape(-1, 1)
-                         
-                     vectorizer = FunctionTransformer(pass_text, validate=False)
-                else:
-                    # Apply specific settings for god_mode if requested, or user config
-                    is_god_mode = self.nlp_config.get('cleaning_mode') == 'god_mode'
-                    
-                    vectorizer = TfidfVectorizer(
-                        max_features=max_features,
-                        ngram_range=ngram_range,
-                        stop_words=stop_words,
-                        sublinear_tf=self.nlp_config.get('sublinear_tf', True), # Default True for TF-IDF usually good
-                        strip_accents='unicode' if is_god_mode else None
-                    )
-                transformers.append((f'nlp_{col}', vectorizer, col))
-
-        # Sparse Threshold - IMPORTANT: Keep sparse for NLP
-        sparse_thresh = 1.0 if nlp_features else 0
-        self.preprocessor = ColumnTransformer(transformers=transformers, sparse_threshold=sparse_thresh)
-
-        try:
-            X_processed = self.preprocessor.fit_transform(X)
-        except Exception as e:
-            logger.error(f"Error in fit_transform: {e}")
-            raise e
-        
-        if X_processed.shape[0] == 0:
-            raise ValueError("Processing resulted in 0 rows.")
-            
-        # Ensure output is dense only if NO NLP features (to save memory)
-        if not nlp_features and hasattr(X_processed, "toarray"):
-            X_processed = X_processed.toarray()
-            
-        # Handle target encoding
-        y_processed = None
-        if y is not None:
-            if y.dtype == 'object' or y.dtype.name == 'category':
-                self.label_encoder = LabelEncoder()
-                y_processed = self.label_encoder.fit_transform(y)
-            else:
-                y_processed = y
-
-        return X_processed, y_processed
-
-    def transform(self, df):
-        # NLP Cleaning
-        if self.nlp_cols:
-            for col in self.nlp_cols:
-                df = self._clean_text_feature(df, col)
-                if col in df.columns:
-                     df[col] = df[col].fillna("")
-
-        # Time Series Feature Engineering
-        if self.task_type == 'time_series':
-            df = self._apply_ts_features(df)
-
-        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
-            return None, None
-
-        if self.target_column and self.target_column in df.columns:
-            X = df.drop(columns=[self.target_column])
-            y = df[self.target_column]
-            # Handle categorical target
-            if hasattr(self, 'label_encoder') and self.label_encoder:
-                try:
-                    y = self.label_encoder.transform(y)
-                except:
-                    pass 
-        else:
-            X = df
-            y = None
-        
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X)
-
-        try:
-            X_processed = self.preprocessor.transform(X)
-        except Exception as e:
-            logger.error(f"Error in ColumnTransformer.transform: {e}")
-            raise e
-
-        # Ensure dense only if NO NLP features
-        if not self.nlp_cols and hasattr(X_processed, "toarray"):
-            X_processed = X_processed.toarray()
-            
-        return X_processed, y
-
-    def get_feature_names(self):
-        """Returns the names of the features after preprocessing."""
-        if self.preprocessor is None:
-            return []
-        
-        feature_names = []
-        for name, transformer, columns in self.preprocessor.transformers_:
-            if name == 'remainder' and transformer == 'drop':
-                continue
-            
-            if hasattr(transformer, 'get_feature_names_out'):
-                # For OneHotEncoder and others that change the number of columns
-                names = transformer.get_feature_names_out(columns)
-                feature_names.extend(names)
-            else:
-                # For StandardScaler, SimpleImputer, etc. that keep the number of columns
-                feature_names.extend(columns)
-        
-        return feature_names
-
-# Keys considered 'ensemble' models — excluded when use_ensemble=False
-_ENSEMBLE_MODEL_KEYS = frozenset(['voting_ensemble', 'custom_voting', 'custom_stacking'])
-
-# Keys considered 'deep learning' models — excluded when use_deep_learning=False
-_DL_MODEL_KEYS = frozenset([
-    'mlp',
-    'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base',
-    'albert-base-v2', 'xlnet-base-cased', 'microsoft/deberta-v3-base',
-    'bert-base-uncased-reg', 'distilbert-base-uncased-reg',
-    'roberta-base-reg', 'microsoft/deberta-v3-small',
-])
-
 
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
@@ -1088,6 +612,7 @@ class AutoMLTrainer:
         return self._filter_models(all_models)
 
     def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
+        self.random_state = random_state
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -1153,7 +678,7 @@ class AutoMLTrainer:
                 return "dummy_run_id"
 
         try:
-            from mlops_utils import MLFlowTracker
+            from src.tracking.mlflow import MLFlowTracker
             tracker = MLFlowTracker(experiment_name)
             logger.info(f"MLFlowTracker initialized for experiment: {experiment_name}")
         except Exception as e:
@@ -1412,7 +937,7 @@ class AutoMLTrainer:
                 logger.info(f"Run {full_trial_name} registered with ID: {run_id}")
                 
                 # Gerar amostra de código para o relatório/callback
-                from mlops_utils import get_consumption_code
+                from src.utils.helpers import get_consumption_code
                 trial_metrics['consumption_code'] = get_consumption_code(full_trial_name, run_id, self.task_type, feature_names=self.feature_names)
 
             except Exception as e:
@@ -1580,7 +1105,7 @@ class AutoMLTrainer:
                 if best_trial_for_model:
                     logger.info(f"Best trial for {m_name}: Trial {best_trial_for_model.number} (Score: {best_score_for_model:.4f})")
                     
-                    # Recuperar métricas salvas durante o trial (incluindo consumption_code)
+                    # Retrieve metrics saved during the trial (including consumption_code)
                     trial_metrics = self.model_summaries.get(m_name, {}).get('metrics', {})
                     
                     # 2. Re-instantiate the best model
@@ -1820,8 +1345,28 @@ class AutoMLTrainer:
                                 plots[f'feature_importance_{m_name}'] = fig_fi
                         except Exception as fi_err:
                             logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
-                        # plt.close(fig_reg) # Keep open for passing to callback? No, pyplot is stateful.
-                        # Better: Return the Figure object.
+
+                    # --- Explainability (SHAP) ---
+                    try:
+                        logger.info(f"Generating SHAP summary for {m_name}...")
+                        explainer = ModelExplainer(best_model_instance, effective_X_plot, task_type=self.task_type)
+                        # We use a smaller sample for SHAP if data is large
+                        X_shap = effective_X_plot
+                        if hasattr(effective_X_plot, "shape") and effective_X_plot.shape[0] > 100:
+                            if isinstance(effective_X_plot, pd.DataFrame):
+                                X_shap = effective_X_plot.sample(100, random_state=42)
+                            else:
+                                try:
+                                    idx = np.random.choice(effective_X_plot.shape[0], 100, replace=False)
+                                    X_shap = effective_X_plot[idx]
+                                except: pass
+
+                        fig_shap = explainer.plot_importance(X_shap)
+                        if fig_shap:
+                            plots[f"shap_summary_{m_name}"] = fig_shap
+                            logger.info(f"SHAP summary generated for {m_name}")
+                    except Exception as shap_err:
+                        logger.warning(f"Failed to generate SHAP summary for {m_name}: {shap_err}")
                         
                 # --- Stability Analysis ---
                 stability_results = {}
@@ -1953,7 +1498,7 @@ class AutoMLTrainer:
                                         logger.warning(f"Failed to log figure {plot_name} to MLflow: {e}")
                                 
                                 # Generate and Log Model Card
-                                from mlops_utils import generate_model_card
+                                from src.utils.helpers import generate_model_card
                                 import os
                                 try:
                                     mc_content = generate_model_card(
@@ -2094,7 +1639,7 @@ class AutoMLTrainer:
             best_run_id = study.best_trial.user_attrs.get('run_id')
             self.best_run_id = best_run_id
             if best_model_name and best_run_id:
-                from mlops_utils import get_consumption_code
+                from src.utils.helpers import get_consumption_code
                 self.best_consumption_code = get_consumption_code(best_model_name, best_run_id, self.task_type, feature_names=self.feature_names)
             else:
                 self.best_consumption_code = None
