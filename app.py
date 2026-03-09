@@ -580,7 +580,7 @@ with st.sidebar:
       </div>
       <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
         <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
-        <span class='version-badge'>v4.0.0</span>
+        <span class='version-badge'>v4.2.1</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2984,6 +2984,8 @@ with tabs[2]:
 
     @st.fragment(run_every=5.0)
     def experiments_dashboard():
+        import pandas as pd
+        import plotly.express as px
         from src.tracking.manager import JobStatus
         jm.poll_updates()
         jobs = jm.list_jobs()
