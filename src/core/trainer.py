@@ -5,7 +5,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 logger = logging.getLogger(__name__)
 
 # Keys considered 'ensemble' models — excluded when use_ensemble=False
-_ENSEMBLE_MODEL_KEYS = frozenset(['voting_ensemble', 'custom_voting', 'custom_stacking'])
+_ENSEMBLE_MODEL_KEYS = frozenset(['voting_ensemble', 'stacking_ensemble', 'custom_voting', 'custom_stacking'])
 
 # Keys considered 'deep learning' models — excluded when use_deep_learning=False
 _DL_MODEL_KEYS = frozenset([

@@ -1821,9 +1821,9 @@ with tabs[1]:
                       overrides = edited_schema.to_dict('records')
                       cfg['schema_overrides'] = overrides
                       
-                      st.markdown("#### Data Split Strategy", unsafe_allow_html=True)
+                      st.markdown("#### Global Dataset Holdout (Final Evaluation)", unsafe_allow_html=True)
                       split_strategy = st.radio(
-                          "Validation Strategy", 
+                          "Holdout Mapping Mode", 
                           ["Random", "Chronological", "Manual (Pre-defined split column)"],
                           horizontal=True,
                           key="wizard_split_strat"
@@ -1840,7 +1840,7 @@ with tabs[1]:
                               split = st.slider(
                                   f"% Train — {ds_name}", 10, 100, 80, 
                                   key=f"wiz_split_{ds_name}",
-                                  help="Global Train/Test split: This defines the absolute holdout test set used ONLY for final evaluation after the entire AutoML training finishes. (Internal cross-validation is configured in Step 5)."
+                                  help="Global Holdout: This defines the absolute test set (shards/rows) used ONLY for final evaluation after the entire AutoML training finishes. (Internal cross-validation is configured in Step 5)."
                               )
                               
                               st.markdown(f"**Split visual:** <span style='color:#2f80ed'>Training: {split}%</span> | <span style='color:#f59e0b'>Validation: {int((100-split)/2)}%</span> | <span style='color:#8b5cf6'>Testing: {100-split-int((100-split)/2)}%</span>", unsafe_allow_html=True)
@@ -1933,6 +1933,32 @@ with tabs[1]:
                 help="Automatic: Optuna finds the best params. Manual: You define them.",
                 key="wiz_hp_mode"
             )
+
+            # Manual HP configuration moved from Step 3 to Step 2
+            if cfg.get('training_strategy') == 'Manual':
+                eff_models = cfg.get('selected_models') or available_models
+                trainer_hp_wiz = AutoMLTrainer(task_type=task)
+                st.markdown("---")
+                st.markdown("#### ⚙️ Manual Hyperparameter Configuration")
+                ref_model_hp = st.selectbox("Algorithm to Configure", eff_models, key="wiz_step2_manual_model")
+                hp_schema = trainer_hp_wiz.get_model_params_schema(ref_model_hp)
+                if hp_schema:
+                    st.info(f"Define fixed parameters for `{ref_model_hp}`. These will be used instead of Optuna optimization.")
+                    mp_step2 = {}
+                    cols_hp2 = st.columns(3)
+                    for hpi, (hp_name, hp_cfg) in enumerate(hp_schema.items()):
+                        with cols_hp2[hpi % 3]:
+                            if hp_cfg[0] == 'int':
+                                mp_step2[hp_name] = st.number_input(hp_name, hp_cfg[1], hp_cfg[2], hp_cfg[3], key=f"wiz_step2_{hp_name}")
+                            elif hp_cfg[0] == 'float':
+                                mp_step2[hp_name] = st.number_input(hp_name, hp_cfg[1], hp_cfg[2], hp_cfg[3], format="%.4f", key=f"wiz_step2_{hp_name}")
+                            elif hp_cfg[0] == 'list':
+                                options_hp, p_def_hp = hp_cfg[1], hp_cfg[2]
+                                mp_step2[hp_name] = st.selectbox(hp_name, options_hp, index=options_hp.index(p_def_hp) if p_def_hp in options_hp else 0, key=f"wiz_step2_{hp_name}")
+                    cfg['manual_params'] = mp_step2
+                else:
+                    st.info(f"No manual parameters available for `{ref_model_hp}`. Using system defaults.")
+                    cfg['manual_params'] = {}
 
             st.markdown('<br>', unsafe_allow_html=True)
             col_back, col_fwd, _ = st.columns([1, 1, 5])
@@ -2275,26 +2301,6 @@ with tabs[1]:
                 )
                 cfg['optimization_metric'] = optimization_metric
 
-                # Manual HP config if strategy == Manual
-                if cfg.get('training_strategy') == 'Manual':
-                    eff_models = cfg.get('selected_models') or available_models
-                    trainer_tmp2 = AutoMLTrainer(task_type=task)
-                    ref_model = st.selectbox("Configure Model", eff_models, key="wiz_manual_model")
-                    schema = trainer_tmp2.get_model_params_schema(ref_model)
-                    if schema:
-                        st.markdown("**Manual Hyperparameters**")
-                        mp = {}
-                        cols_p = st.columns(3)
-                        for pi, (p_name, p_cfg) in enumerate(schema.items()):
-                            with cols_p[pi % 3]:
-                                if p_cfg[0] == 'int':
-                                    mp[p_name] = st.number_input(p_name, p_cfg[1], p_cfg[2], p_cfg[3], key=f"wiz_mp_{p_name}")
-                                elif p_cfg[0] == 'float':
-                                    mp[p_name] = st.number_input(p_name, p_cfg[1], p_cfg[2], p_cfg[3], format="%.4f", key=f"wiz_mp_{p_name}")
-                                elif p_cfg[0] == 'list':
-                                    options, p_def = p_cfg[1], p_cfg[2]
-                                    mp[p_name] = st.selectbox(p_name, options, index=options.index(p_def) if p_def in options else 0, key=f"wiz_mp_{p_name}")
-                        cfg['manual_params'] = mp
 
             st.markdown('<br>', unsafe_allow_html=True)
             col_back, col_fwd, _ = st.columns([1, 1, 5])
@@ -2318,7 +2324,7 @@ with tabs[1]:
             with _col_track:
                 render_pipeline_overview(PIPELINE_STEPS, cur_step)
             with _col_main:
-                st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Validation Strategy</h3>", unsafe_allow_html=True)
+                st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Internal Training Validation (CV)</h3>", unsafe_allow_html=True)
                 render_step_info_panel(
                     "Validation Strategy vs Data Lake Split",
                     "The Data Lake split (Step 1) is used to create a final, completely unseen 'Test Set'. This step configures the *internal cross-validation* used by the AutoML engine during hyperparameter tuning.",
@@ -3260,6 +3266,11 @@ with tabs[2]:
                                         st.table(met_df)
                                     st.markdown(f"**MLflow Run:** `{rep.get('run_id', 'N/A')}`")
                                     st.markdown(f"**Best Trial:** {rep.get('best_trial_number', 'N/A')}")
+                                    
+                                    constituents = rep.get('constituents', [])
+                                    if constituents:
+                                        st.markdown("**Ensemble Constituents:**")
+                                        st.caption(", ".join(constituents))
 
                                     # Stability results
                                     if rep.get('stability'):
@@ -3267,10 +3278,73 @@ with tabs[2]:
                                         st.markdown("**Stability Analysis**")
                                         for s_type, s_data in rep['stability'].items():
                                             with st.expander(f"Test: {s_type}"):
-                                                if isinstance(s_data, dict):
-                                                    st.json(s_data)
                                                 else:
                                                     st.dataframe(s_data)
+                                        
+                                        # --- NEW: Deployment & Test Integrated ---
+                                        st.divider()
+                                        st.markdown("#### 🚀 Deployment & Test")
+                                        dep_col, test_col = st.columns(2)
+                                        with dep_col:
+                                            st.markdown("**Hugging Face Hub**")
+                                            hf_repo = st.text_input("HF Repo ID (e.g. user/model)", key=f"hf_repo_{job.job_id}_{m_name}")
+                                            hf_token = st.text_input("HF Token", type="password", key=f"hf_token_{job.job_id}_{m_name}")
+                                            if st.button("🚀 Push to HF", key=f"hf_push_{job.job_id}_{m_name}"):
+                                                if hf_repo and hf_token:
+                                                    with st.spinner("Pushing to Hugging Face..."):
+                                                        # Logic similar to what was in experiments_dashboard previously
+                                                        try:
+                                                            import mlflow
+                                                            from src.deploy.hf_deploy import deploy_to_huggingface
+                                                            import tempfile, os
+                                                            run_id = rep.get('run_id')
+                                                            if run_id:
+                                                                with tempfile.TemporaryDirectory() as tmp_dir:
+                                                                    local_path = mlflow.artifacts.download_artifacts(run_id=run_id, dst_path=tmp_dir)
+                                                                    # Check for model folder
+                                                                    model_folder = os.path.join(local_path, "model")
+                                                                    deploy_path = model_folder if os.path.exists(model_folder) else local_path
+                                                                    url = deploy_to_huggingface(deploy_path, hf_repo, hf_token)
+                                                                    st.success(f"Deployed! [View on HF Hub]({url})")
+                                                            else:
+                                                                st.error("No Run ID found for this model.")
+                                                        except Exception as e:
+                                                            st.error(f"HF Deployment failed: {e}")
+                                                else:
+                                                    st.warning("Please provide Repo ID and Token.")
+                                        
+                                        with test_col:
+                                            st.markdown("**Inference Playground**")
+                                            st.caption("Enter a JSON row or CSV values to test the model.")
+                                            test_input = st.text_area("Input Data", "{}", key=f"test_in_{job.job_id}_{m_name}")
+                                            if st.button("🔮 Predict", key=f"pred_btn_{job.job_id}_{m_name}"):
+                                                try:
+                                                    import json
+                                                    import pandas as pd
+                                                    import mlflow.sklearn
+                                                    run_id = rep.get('run_id')
+                                                    if run_id:
+                                                        model_uri = f"runs:/{run_id}/model"
+                                                        loaded_model = mlflow.sklearn.load_model(model_uri)
+                                                        # Try to parse as JSON list of dicts or single dict
+                                                        try:
+                                                            data_raw = json.loads(test_input)
+                                                            if isinstance(data_raw, dict): data_raw = [data_raw]
+                                                            df_input = pd.DataFrame(data_raw)
+                                                        except:
+                                                            # Try CSV-like string
+                                                            import io
+                                                            df_input = pd.read_csv(io.StringIO(test_input))
+                                                        
+                                                        preds = loaded_model.predict(df_input)
+                                                        st.json({"prediction": preds.tolist()})
+                                                        if hasattr(loaded_model, "predict_proba"):
+                                                            proba = loaded_model.predict_proba(df_input)
+                                                            st.json({"probabilities": proba.tolist()})
+                                                    else:
+                                                        st.error("No Run ID found.")
+                                                except Exception as e:
+                                                    st.error(f"Prediction error: {e}")
 
                                 with r2:
                                     plots = rep.get('plots', {})

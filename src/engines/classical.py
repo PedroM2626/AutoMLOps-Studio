@@ -107,12 +107,15 @@ class AutoMLTrainer:
                 'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting', 'bagging']
             },
             'high': {
-                'n_trials': 3, # Reduced to avoid long wait times
-                'timeout': 3600, # 1 hour
-                'cv': 5, # Reduced from 10 to 5 for speed
-                # Use a representative subset for interface simulation speed
-                'models': ['voting_ensemble', 'sgd_classifier', 'bert-base-uncased', 'xgboost']
-                # Full list: ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 'bert-base-uncased', 'distilbert-base-uncased', 'roberta-base']
+                'n_trials': 100, 
+                'timeout': 7200, 
+                'cv': 5,
+                'models': [
+                    'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 
+                    'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 
+                    'voting_ensemble', 'stacking_ensemble', 'hist_gradient_boosting', 'bagging',
+                    'bert-base-uncased', 'distilbert-base-uncased'
+                ]
             },
             'custom': {
                 'n_trials': 20, # Default if not provided manually
@@ -382,7 +385,16 @@ class AutoMLTrainer:
                 'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
                 'roberta-base': lambda t: TransformersWrapper(model_name='roberta-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
-                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None
+                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'stacking_ensemble': lambda t: StackingClassifier(
+                    estimators=[
+                        ('rf', RandomForestClassifier(n_estimators=100, random_state=random_state)),
+                        ('xgb', xgb.XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=random_state)),
+                        ('lgb', lgb.LGBMClassifier(random_state=random_state))
+                    ],
+                    final_estimator=LogisticRegression(),
+                    n_jobs=-1
+                )
             }
         elif self.task_type == 'regression':
             models_config = {
@@ -520,7 +532,16 @@ class AutoMLTrainer:
                 'ransac': lambda t: RANSACRegressor(random_state=random_state),
                 'theil_sen': lambda t: TheilSenRegressor(random_state=random_state),
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
-                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None
+                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'stacking_ensemble': lambda t: StackingRegressor(
+                    estimators=[
+                        ('rf', RandomForestRegressor(n_estimators=100, random_state=random_state)),
+                        ('xgb', xgb.XGBRegressor(random_state=random_state)),
+                        ('lgb', lgb.LGBMRegressor(random_state=random_state))
+                    ],
+                    final_estimator=LinearRegression(),
+                    n_jobs=-1
+                )
             }
         elif self.task_type == 'clustering':
             models_config = {
@@ -1259,6 +1280,16 @@ class AutoMLTrainer:
                         
                         if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
                             y_proba_plot = best_model_instance.predict_proba(X_r_val)
+                            
+                        # Extract constituent models for ensembles
+                        m_constituents = []
+                        if hasattr(best_model_instance, 'estimators_'):
+                            if hasattr(best_model_instance, 'estimators'):
+                                for name, _ in best_model_instance.estimators:
+                                    m_constituents.append(name)
+                            else:
+                                for est in best_model_instance.estimators_:
+                                    m_constituents.append(type(est).__name__)
                             
                         # Restore original estimators if changed
                         if m_name == 'random_forest' and 'orig_estimators' in locals():
@@ -2201,6 +2232,24 @@ class AutoMLTrainer:
             },
             'spectral': {
                 'spectral_n_clusters': ('int', 2, 20, 3)
+            },
+            'hist_gradient_boosting': {
+                'hgb_max_iter': ('int', 10, 1000, 100),
+                'hgb_lr': ('float', 0.01, 0.3, 0.1),
+                'hgb_max_depth': ('int', 1, 50, 10),
+                'hgb_max_leaf_nodes': ('int', 20, 255, 31),
+                'hgb_l2': ('float', 0.0, 10.0, 0.0)
+            },
+            'bagging': {
+                'bagging_n_estimators': ('int', 5, 200, 10),
+                'bagging_max_samples': ('float', 0.1, 1.0, 1.0),
+                'bagging_max_features': ('float', 0.1, 1.0, 1.0)
+            },
+            'voting_ensemble': {
+                'voting_type': ('list', ['hard', 'soft'], 'hard')
+            },
+            'stacking_ensemble': {
+                'stacking_cv': ('int', 2, 10, 5)
             }
         }
 
