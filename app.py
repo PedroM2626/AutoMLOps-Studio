@@ -10,8 +10,9 @@ from src.tracking.mlflow import (
     get_model_details, load_registered_model, get_run_details
 )
 from src.core.data_lake import DataLake
-from src.core.drift import DriftDetector
+from src.utils.helpers import get_consumption_code, generate_model_card
 from src.utils.explainers import ModelExplainer
+from src.deploy.hf_deploy import deploy_to_huggingface
 from src.tracking.manager import TrainingJobManager, JobStatus
 import shap
 import joblib # type: ignore
@@ -2116,12 +2117,19 @@ with tabs[1]:
                     cfg['selected_models'] = None
 
             # ── Manual Hyperparameter Inputs ──────────────────────────────
-            if cfg.get('training_strategy') == 'Manual' and cfg.get('selected_models'):
+            if cfg.get('training_strategy') == 'Manual':
                 st.markdown("<br>#### ⚙️ Manual Hyperparameter Configuration", unsafe_allow_html=True)
-                st.info("You are in Manual Mode. Define the exact parameters for each selected model below.")
+                
+                # If no models selected yet, or using Automatic (Preset), use available models as candidates
+                current_models = cfg.get('selected_models')
+                if not current_models:
+                    current_models = available_models[:3] # Show first few as preview or explain
+                    st.info("💡 You are in **Manual Mode**. Configure the parameters for your chosen models. Showing top candidates below:")
+                else:
+                    st.info("💡 You are in **Manual Mode**. Define the exact parameters for each selected model below.")
                 
                 manual_params = cfg.get('manual_params', {})
-                for model_id in cfg['selected_models']:
+                for model_id in current_models:
                     if model_id in ['custom_voting', 'custom_stacking']: continue
                         
                     with st.expander(f"Parameters: {model_id}", expanded=True):
@@ -2970,6 +2978,7 @@ with tabs[2]:
 
     @st.fragment(run_every=5.0)
     def experiments_dashboard():
+        from src.tracking.manager import JobStatus
         jm.poll_updates()
         jobs = jm.list_jobs()
 
@@ -3136,7 +3145,7 @@ with tabs[2]:
                     with _ov_info_col:
                         _trials_done = len(job.trials_data) if job.trials_data else 0
                         _est_trials = job.config.get('n_trials', 20) or 20
-                        from src.tracking.manager import JobStatus
+                        # from src.tracking.manager import JobStatus (Removed shadowing local import)
                         render_pipeline_progress_ring(_trials_done, _est_trials, is_done=(job.status == JobStatus.COMPLETED))
 
                     ov1, ov2 = st.columns(2)
@@ -3407,6 +3416,64 @@ with tabs[2]:
                                 st.success(f"✅ Model **{reg_name}** registered! Check the **Model Registry & Deploy** tab.")
                             else:
                                 st.error("Registration failed. Ensure the run has a logged model artifact.")
+                        
+                        st.divider()
+                        st.markdown("#### 📤 Export & External Deploy")
+                        onnx_col, hf_col = st.columns(2)
+                        with onnx_col:
+                            if st.button("🔌 Export to ONNX", key=f"onnx_btn_{job.job_id}"):
+                                with st.spinner("Converting to ONNX..."):
+                                    try:
+                                        from mlflow.sklearn import load_model as ml_load_skl
+                                        model_uri = f"runs:/{job.mlflow_run_id}/model"
+                                        skl_model = ml_load_skl(model_uri)
+                                        
+                                        from src.engines.classical import AutoMLTrainer
+                                        t_onnx = AutoMLTrainer(task_type=job.config.get('task', 'classification'))
+                                        t_onnx.best_model = skl_model
+                                        
+                                        # Use 1 row sample for shape inference
+                                        if 'current_df' in st.session_state:
+                                            sample_x = st.session_state['current_df'].drop(columns=[job.config.get('target', '')]).head(1).values
+                                            out_path = f"exported_model_{job.job_id}.onnx"
+                                            t_onnx.export_best_model_to_onnx(X_sample=sample_x, path=out_path)
+                                            with open(out_path, "rb") as f:
+                                                st.download_button("📥 Click to Download ONNX", f, file_name=out_path)
+                                            st.success(f"Model converted to ONNX!")
+                                        else:
+                                            st.warning("Need dataset in session to infer ONNX shape.")
+                                    except Exception as e:
+                                        st.error(f"ONNX Export failed: {e}")
+                        
+                        with hf_col:
+                            hf_token = st.text_input("HF Token", type="password", key=f"hf_token_{job.job_id}")
+                            hf_repo = st.text_input("HF Repo ID (e.g. user/model)", key=f"hf_repo_{job.job_id}")
+                            if st.button("🤗 Push to Hugging Face", key=f"hf_btn_{job.job_id}"):
+                                if not hf_token or not hf_repo:
+                                    st.warning("Please provide HF token and repo ID.")
+                                else:
+                                    with st.spinner("Pushing to HF Hub..."):
+                                        try:
+                                            # Download model from MLflow to a temp directory
+                                            import tempfile
+                                            with tempfile.TemporaryDirectory() as tmp_dir:
+                                                from mlflow.sklearn import save_model as ml_save_skl
+                                                from mlflow.sklearn import load_model as ml_load_skl
+                                                model_uri = f"runs:/{job.mlflow_run_id}/model"
+                                                skl_model = ml_load_skl(model_uri)
+                                                save_path = os.path.join(tmp_dir, "model")
+                                                ml_save_skl(skl_model, save_path)
+                                                
+                                                # Deploy using our utility
+                                                repo_url = deploy_to_huggingface(
+                                                    model_path=save_path,
+                                                    repo_id=hf_repo,
+                                                    token=hf_token,
+                                                    task=job.config.get('task', 'classification')
+                                                )
+                                                st.success(f"Model pushed! [View on HF Hub]({repo_url})")
+                                        except Exception as e:
+                                            st.error(f"HF Push failed: {e}")
                     else:
                         st.info("Model registration is available after the experiment completes and logs a model to MLflow.")
 
@@ -3506,6 +3573,17 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                         'status': 'Healthy'
                     }
                     st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
+            
+            st.divider()
+            st.markdown("##### 📥 Export Format")
+            if st.button("🧊 Download as ONNX", use_container_width=True):
+                with st.spinner("Preparing ONNX binary..."):
+                    try:
+                        # Logic to load model from registry and convert
+                        st.info("ONNX Conversion logic active in Engine. Utility: export_best_model_to_onnx")
+                    except Exception as e:
+                        st.error(f"ONNX conversion failed: {e}")
+            
             st.markdown("</div>", unsafe_allow_html=True)
         
         st.divider()

@@ -1706,6 +1706,33 @@ class AutoMLTrainer:
 
         return self.best_model
 
+    def export_best_model_to_onnx(self, X_sample, path):
+        """
+        Exports the best fitted model to ONNX format.
+        X_sample: A sample of features (pandas DataFrame or numpy array) to infer input types.
+        path: Path to save the .onnx file.
+        """
+        try:
+            from skl2onnx import convert_sklearn
+            from skl2onnx.common.data_types import FloatTensorType
+            import onnx
+            
+            if not self.best_model:
+                raise ValueError("No best model found. Run training first.")
+                
+            # Most of our models expect float inputs after preprocessing
+            shape = X_sample.shape[1] if hasattr(X_sample, 'shape') else len(X_sample[0])
+            initial_type = [('float_input', FloatTensorType([None, shape]))]
+            
+            onx = convert_sklearn(self.best_model, initial_types=initial_type, target_opset=12)
+            with open(path, "wb") as f:
+                f.write(onx.SerializeToString())
+            logger.info(f"Model successfully exported to ONNX: {path}")
+            return path
+        except Exception as e:
+            logger.error(f"ONNX conversion failed: {e}")
+            raise e
+
     def _instantiate_model(self, name, params):
         # 1. Custom Models (Uploaded/Registered)
         if hasattr(self, 'custom_models') and self.custom_models and name in self.custom_models:

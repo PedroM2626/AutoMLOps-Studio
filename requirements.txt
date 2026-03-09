@@ -33,3 +33,4 @@ skl2onnx==1.18.0
 onnxruntime==1.20.1
 sentence-transformers==3.4.1
 onnxmltools==1.12.0
+huggingface_hub==0.28.1
