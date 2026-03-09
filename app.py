@@ -579,7 +579,7 @@ with st.sidebar:
       </div>
       <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
         <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
-        <span class='version-badge'>v3.5.0</span>
+        <span class='version-badge'>v4.0.0</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -838,11 +838,11 @@ def render_colored_log(log_lines: list):
 def render_training_mini_pipeline(log_lines: list, status: str):
     """Infer current training stage from logs and render a mini pipeline bar."""
     STAGES = [
-        ("🔧", "Preprocessing"),
-        ("🔍", "Searching"),
-        ("⚖️", "Evaluating"),
-        ("📊", "Reporting"),
-        ("✅", "Done"),
+        ("🔧", "Data Preparation"),
+        ("🔍", "Model Selection"),
+        ("⚖️", "Tuning & Optimization"),
+        ("📊", "Validation & Analysis"),
+        ("✅", "Finalized"),
     ]
     # Determine how far along we are based on log content
     last_logs = " ".join(log_lines[-30:]).upper() if log_lines else ""
@@ -879,11 +879,16 @@ def render_training_mini_pipeline(log_lines: list, status: str):
     st.markdown("".join(parts), unsafe_allow_html=True)
 
 
-def render_pipeline_progress_ring(trials_done: int, total_est: int):
+def render_pipeline_progress_ring(trials_done: int, total_est: int, is_done: bool = False):
     """Render an SVG circular progress ring for trial completion."""
-    if total_est <= 0:
+    if is_done:
+        pct = 1.0
+    elif total_est <= 0:
         total_est = max(trials_done, 1)
-    pct = min(1.0, trials_done / total_est)
+        pct = min(1.0, trials_done / total_est)
+    else:
+        pct = min(1.0, trials_done / total_est)
+    
     r, cx, cy = 28, 36, 36
     circ = 2 * 3.14159 * r
     dash = pct * circ
@@ -1942,6 +1947,7 @@ with tabs[1]:
                     st.rerun()
 
         # ════════════════════════════════════════════════════════════════
+        # ════════════════════════════════════════════════════════════════
         # STEP 2 — Model Selection
         # ════════════════════════════════════════════════════════════════
         elif cur_step == 2:
@@ -2092,7 +2098,6 @@ with tabs[1]:
                 else:
                     cfg['selected_models'] = None
 
-
             elif model_source == "Model Registry (Registered)":
                 reg_models_list = get_registered_models()
                 if reg_models_list:
@@ -2100,7 +2105,6 @@ with tabs[1]:
                     cfg['selected_models'] = [base_name]
                     st.info(f"Model **{base_name}** will be used as base for retraining.")
                 else:
-                    st.warning("No registered models found. Register a model in the Model Registry tab first.")
                     cfg['selected_models'] = None
 
             elif model_source == "Local Upload (.pkl)":
@@ -2110,6 +2114,31 @@ with tabs[1]:
                     st.success("Model loaded for retraining.")
                 else:
                     cfg['selected_models'] = None
+
+            # ── Manual Hyperparameter Inputs ──────────────────────────────
+            if cfg.get('training_strategy') == 'Manual' and cfg.get('selected_models'):
+                st.markdown("<br>#### ⚙️ Manual Hyperparameter Configuration", unsafe_allow_html=True)
+                st.info("You are in Manual Mode. Define the exact parameters for each selected model below.")
+                
+                manual_params = cfg.get('manual_params', {})
+                for model_id in cfg['selected_models']:
+                    if model_id in ['custom_voting', 'custom_stacking']: continue
+                        
+                    with st.expander(f"Parameters: {model_id}", expanded=True):
+                        if model_id == 'random_forest':
+                            n_est = st.number_input("n_estimators", 10, 2000, manual_params.get('rf_n_estimators', 100), key=f"p_rf_n_{model_id}")
+                            max_d = st.number_input("max_depth", 1, 200, manual_params.get('rf_max_depth', 20), key=f"p_rf_d_{model_id}")
+                            manual_params['rf_n_estimators'] = n_est
+                            manual_params['rf_max_depth'] = max_d
+                        elif model_id == 'xgboost':
+                            n_est = st.number_input("n_estimators", 10, 2000, manual_params.get('xgb_n_estimators', 100), key=f"p_xgb_n_{model_id}")
+                            lr = st.number_input("learning_rate", 0.0001, 1.0, manual_params.get('xgb_lr', 0.1), format="%.4f", key=f"p_xgb_l_{model_id}")
+                            manual_params['xgb_n_estimators'] = n_est
+                            manual_params['xgb_lr'] = lr
+                        else:
+                            st.write("Using default parameters. (More models coming in v4.1)")
+                
+                cfg['manual_params'] = manual_params
 
             st.markdown('<br>', unsafe_allow_html=True)
             col_back, col_fwd, _ = st.columns([1, 1, 5])
@@ -2148,6 +2177,15 @@ with tabs[1]:
                 ("hyperband", "⚡", "Hyperband",          "Early stopping of unpromising trials. Great for large datasets."),
             ]
             opt_mode_map = {"bayesian": "Bayesian Optimization (Default)", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
+            
+            # Instance Control
+            st.markdown("<p style='font-weight:600;margin-top:16px;margin-bottom:6px;'>🏢 Infrastructure & Instance Control</p>", unsafe_allow_html=True)
+            instance_mode = st.radio("Instance Allocation", ["Automatic (Optimal)", "Manual (Fixed)"], horizontal=True, key="wiz_inst_mode")
+            if instance_mode == "Manual (Fixed)":
+                num_instances = st.slider("Number of Parallel Instances", 1, 16, cfg.get('n_instances', 1), key="wiz_n_inst")
+                cfg['n_instances'] = num_instances
+            else:
+                cfg['n_instances'] = None # Auto
             current_opt = cfg.get('optimization_mode', 'bayesian')
 
             cols_opt = st.columns(4)
@@ -3098,7 +3136,8 @@ with tabs[2]:
                     with _ov_info_col:
                         _trials_done = len(job.trials_data) if job.trials_data else 0
                         _est_trials = job.config.get('n_trials', 20) or 20
-                        render_pipeline_progress_ring(_trials_done, _est_trials)
+                        from src.tracking.manager import JobStatus
+                        render_pipeline_progress_ring(_trials_done, _est_trials, is_done=(job.status == JobStatus.COMPLETED))
 
                     ov1, ov2 = st.columns(2)
                     with ov1:
@@ -3126,6 +3165,20 @@ with tabs[2]:
 
                 # ── Tab 1: Progress ──
                 with detail_tabs[1]:
+                    # Trial Status Visualization
+                    if hasattr(job, 'trial_statuses') and job.trial_statuses:
+                        st.markdown("**Live Trial Tracker**")
+                        ts_cols = st.columns(min(len(job.trial_statuses), 5))
+                        for idx, (tid, tstat) in enumerate(job.trial_statuses.items()):
+                            t_col = ts_cols[idx % 5]
+                            with t_col:
+                                t_color = "#27ae60" if tstat == "completed" else "#f1c40f" if tstat == "running" else "#34495e"
+                                st.markdown(f"""
+                                <div style='background:{t_color}; color:white; padding:4px 8px; border-radius:4px; font-size:0.75rem; text-align:center; margin-bottom:4px;'>
+                                  Trial {tid}<br><b>{tstat.upper()}</b>
+                                </div>""", unsafe_allow_html=True)
+                        st.divider()
+
                     if job.trials_data:
                         df_t = pd.DataFrame(job.trials_data)
                         metric_col = job.target_metric
@@ -3257,6 +3310,36 @@ with tabs[2]:
                         
                         if "error" in rd:
                             st.error(f"Could not load MLflow data: {rd['error']}")
+                            
+                            # MLflow Repair Options
+                            st.markdown("---")
+                            st.markdown("#### 🛠️ MLflow Troubleshooting")
+                            st.info("The MLflow database seems to have a schema version conflict. This usually happens after an update.")
+                            
+                            rcol1, rcol2 = st.columns(2)
+                            with rcol1:
+                                if st.button("🔌 Attempt Schema Fix", key=f"ml_fix_stamp_{job.job_id}"):
+                                    try:
+                                        import subprocess
+                                        res = subprocess.run(["python", "-m", "mlflow", "db", "stamp", "head", "--url", "sqlite:///mlflow.db"], capture_output=True, text=True)
+                                        if res.returncode == 0:
+                                            st.success("Database stamped to 'head'. Please refresh.")
+                                        else:
+                                            st.error(f"Fix failed: {res.stderr}")
+                                    except Exception as ex:
+                                        st.error(f"Execution error: {ex}")
+                            
+                            with rcol2:
+                                if st.button("🔥 Purge & Re-init (Nuclear)", key=f"ml_purge_{job.job_id}", help="Renames mlflow.db and starts fresh. Historic data in the UI will persist but details for old runs will be lost."):
+                                    try:
+                                        import os, time
+                                        if os.path.exists("mlflow.db"):
+                                            os.rename("mlflow.db", f"mlflow.db.bak_{int(time.time())}")
+                                            st.success("Database purged. Refreshing to re-initialize...")
+                                            time.sleep(1)
+                                            st.rerun()
+                                    except Exception as ex:
+                                        st.error(f"Purge error: {ex}")
                         else:
                             info = rd.get("info", {})
                             cols_ml = st.columns(3)

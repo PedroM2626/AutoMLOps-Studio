@@ -24,19 +24,11 @@ from sklearn.ensemble import (
     VotingClassifier, VotingRegressor, IsolationForest,
     ExtraTreesClassifier, ExtraTreesRegressor,
     AdaBoostClassifier, AdaBoostRegressor,
-    StackingClassifier, StackingRegressor
+    StackingClassifier, StackingRegressor,
+    BaggingClassifier, BaggingRegressor,
+    HistGradientBoostingClassifier, HistGradientBoostingRegressor
 )
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
-from sklearn.linear_model import (
-    LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, 
-    SGDClassifier, SGDRegressor, RidgeClassifier, PassiveAggressiveClassifier
-)
-from sklearn.svm import SVC, SVR, OneClassSVM, LinearSVC
-from sklearn.naive_bayes import GaussianNB, BernoulliNB
-from sklearn.covariance import EllipticEnvelope
-from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
-from sklearn.neural_network import MLPClassifier, MLPRegressor
-from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
     mean_squared_error, mean_absolute_error, r2_score, confusion_matrix,
@@ -44,6 +36,12 @@ from sklearn.metrics import (
     median_absolute_error, explained_variance_score, mean_absolute_percentage_error,
     mean_squared_log_error, silhouette_score, calinski_harabasz_score, davies_bouldin_score
 )
+from sklearn.linear_model import (
+    LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, 
+    SGDClassifier, SGDRegressor, RidgeClassifier, PassiveAggressiveClassifier,
+    LassoLars, TweedieRegressor, HuberRegressor, RANSACRegressor, TheilSenRegressor
+)
+from sklearn.svm import SVC, SVR, OneClassSVM, LinearSVC, NuSVC, NuSVR
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, MeanShift, Birch, SpectralClustering
 from sklearn.mixture import GaussianMixture
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
@@ -106,7 +104,7 @@ class AutoMLTrainer:
                 'n_trials': 40,
                 'timeout': 1800, # 30 min
                 'cv': 5,
-                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp']
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting', 'bagging']
             },
             'high': {
                 'n_trials': 3, # Reduced to avoid long wait times
@@ -150,6 +148,8 @@ class AutoMLTrainer:
             if name == 'naive_bayes': return GaussianNB()
             if name == 'ridge_classifier': return RidgeClassifier(random_state=random_state)
             if name == 'adaboost': return AdaBoostClassifier(random_state=random_state)
+            if name == 'bagging': return BaggingClassifier(random_state=random_state)
+            if name == 'hist_gradient_boosting': return HistGradientBoostingClassifier(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostClassifier(verbose=0, thread_count=-1, random_seed=random_state)
         elif self.task_type == 'regression':
             if name == 'linear_regression': return LinearRegression()
@@ -166,6 +166,8 @@ class AutoMLTrainer:
             if name == 'elastic_net': return ElasticNet(random_state=random_state)
             if name == 'sgd_regressor': return SGDRegressor(max_iter=1000, random_state=random_state)
             if name == 'adaboost': return AdaBoostRegressor(random_state=random_state)
+            if name == 'bagging': return BaggingRegressor(random_state=random_state)
+            if name == 'hist_gradient_boosting': return HistGradientBoostingRegressor(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=-1, random_seed=random_state)
         elif self.task_type == 'dimensionality_reduction':
             if name == 'pca': return PCA(random_state=random_state)
@@ -353,12 +355,34 @@ class AutoMLTrainer:
                     thread_count=-1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
-                'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'roberta-base': lambda t: TransformersWrapper(model_name='roberta-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'albert-base-v2': lambda t: TransformersWrapper(model_name='albert-base-v2', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'xlnet-base-cased': lambda t: TransformersWrapper(model_name='xlnet-base-cased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None
+                'bagging': lambda t: BaggingClassifier(
+                    n_estimators=t.suggest_int('bagging_n_estimators', 10, 100),
+                    max_samples=t.suggest_float('bagging_max_samples', 0.5, 1.0),
+                    max_features=t.suggest_float('bagging_max_features', 0.5, 1.0),
+                    random_state=random_state,
+                    n_jobs=-1
+                ),
+                'hist_gradient_boosting': lambda t: HistGradientBoostingClassifier(
+                    max_iter=t.suggest_int('hgb_max_iter', 100, 1000),
+                    learning_rate=t.suggest_float('hgb_lr', 0.01, 0.3, log=True),
+                    max_depth=t.suggest_int('hgb_max_depth', 3, 20),
+                    max_leaf_nodes=t.suggest_int('hgb_max_leaf_nodes', 15, 255),
+                    l2_regularization=t.suggest_float('hgb_l2', 1e-10, 10.0, log=True),
+                    random_state=random_state
+                ),
+                'nu_svc': lambda t: NuSVC(
+                    nu=t.suggest_float('nu_svc_nu', 0.01, 0.5),
+                    kernel=t.suggest_categorical('nu_svc_kernel', ['linear', 'rbf', 'poly']),
+                    probability=True,
+                    random_state=random_state
+                ),
+                'bernoulli_nb': lambda t: BernoulliNB(
+                    alpha=t.suggest_float('bnb_alpha', 1e-3, 10.0, log=True)
+                ),
+                'bert-base-uncased': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'distilbert-base-uncased': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'roberta-base': lambda t: TransformersWrapper(model_name='roberta-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'microsoft/deberta-v3-base': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-base', task='classification', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None
             }
         elif self.task_type == 'regression':
             models_config = {
@@ -461,10 +485,42 @@ class AutoMLTrainer:
                     thread_count=-1,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
-                'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'roberta-base-reg': lambda t: TransformersWrapper(model_name='roberta-base', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None,
-                'microsoft/deberta-v3-small': lambda t: TransformersWrapper(model_name='microsoft/deberta-v3-small', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-3, log=True), epochs=t.suggest_int('num_train_epochs', 1, 20)) if TRANSFORMERS_AVAILABLE else None
+                'bagging': lambda t: BaggingRegressor(
+                    n_estimators=t.suggest_int('bagging_reg_n_estimators', 10, 100),
+                    max_samples=t.suggest_float('bagging_reg_max_samples', 0.5, 1.0),
+                    max_features=t.suggest_float('bagging_reg_max_features', 0.5, 1.0),
+                    random_state=random_state,
+                    n_jobs=-1
+                ),
+                'hist_gradient_boosting': lambda t: HistGradientBoostingRegressor(
+                    max_iter=t.suggest_int('hgb_reg_max_iter', 100, 1000),
+                    learning_rate=t.suggest_float('hgb_reg_lr', 0.01, 0.3, log=True),
+                    max_depth=t.suggest_int('hgb_reg_max_depth', 3, 20),
+                    max_leaf_nodes=t.suggest_int('hgb_reg_max_leaf_nodes', 15, 255),
+                    l2_regularization=t.suggest_float('hgb_reg_l2', 1e-10, 10.0, log=True),
+                    random_state=random_state
+                ),
+                'nu_svr': lambda t: NuSVR(
+                    nu=t.suggest_float('nu_svr_nu', 0.01, 1.0),
+                    C=t.suggest_float('nu_svr_C', 0.1, 100.0, log=True),
+                    kernel=t.suggest_categorical('nu_svr_kernel', ['linear', 'rbf'])
+                ),
+                'lasso_lars': lambda t: LassoLars(
+                    alpha=t.suggest_float('ll_alpha', 1e-4, 1.0, log=True),
+                    random_state=random_state
+                ),
+                'huber': lambda t: HuberRegressor(
+                    epsilon=t.suggest_float('huber_epsilon', 1.1, 2.0),
+                    alpha=t.suggest_float('huber_alpha', 1e-4, 1.0, log=True)
+                ),
+                'tweedie': lambda t: TweedieRegressor(
+                    power=t.suggest_float('tweedie_power', 0.0, 3.0),
+                    alpha=t.suggest_float('tweedie_alpha', 1e-4, 10.0, log=True)
+                ),
+                'ransac': lambda t: RANSACRegressor(random_state=random_state),
+                'theil_sen': lambda t: TheilSenRegressor(random_state=random_state),
+                'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
+                'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None
             }
         elif self.task_type == 'clustering':
             models_config = {
