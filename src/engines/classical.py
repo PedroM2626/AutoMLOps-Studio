@@ -1199,6 +1199,10 @@ class AutoMLTrainer:
                     logger.warning(f"No trial completed successfully for {m_name}. Report ignored.")
                     continue
                     
+                if best_model_instance is None:
+                    logger.warning(f"Could not instantiate best model instance for {m_name}. Skipping detailed report.")
+                    continue
+
                 # Force n_jobs=1 for reporting and stability to avoid hangs/contention in containers
                 if hasattr(best_model_instance, 'n_jobs'):
                      try: best_model_instance.set_params(n_jobs=1)
@@ -1434,26 +1438,32 @@ class AutoMLTrainer:
                             logger.warning(f"Failed to generate FI plot for {m_name}: {fi_err}")
 
                     # --- Explainability (SHAP) ---
-                    try:
-                        logger.info(f"Generating SHAP summary for {m_name}...")
-                        explainer = ModelExplainer(best_model_instance, effective_X_plot, task_type=self.task_type)
-                        # We use a smaller sample for SHAP if data is large
-                        X_shap = effective_X_plot
-                        if hasattr(effective_X_plot, "shape") and effective_X_plot.shape[0] > 100:
-                            if isinstance(effective_X_plot, pd.DataFrame):
-                                X_shap = effective_X_plot.sample(100, random_state=42)
-                            else:
-                                try:
-                                    idx = np.random.choice(effective_X_plot.shape[0], 100, replace=False)
-                                    X_shap = effective_X_plot[idx]
-                                except: pass
-
-                        fig_shap = explainer.plot_importance(X_shap)
-                        if fig_shap:
-                            plots[f"shap_summary_{m_name}"] = fig_shap
-                            logger.info(f"SHAP summary generated for {m_name}")
-                    except Exception as shap_err:
-                        logger.warning(f"Failed to generate SHAP summary for {m_name}: {shap_err}")
+                    if best_model_instance is not None:
+                        try:
+                            logger.info(f"Generating SHAP summary for {m_name}...")
+                            if "catboost" in str(m_name).lower():
+                                 logger.info("Initializing robust SHAP explainer for CatBoost...")
+                            
+                            explainer = ModelExplainer(best_model_instance, effective_X_plot, task_type=self.task_type)
+                            # We use a smaller sample for SHAP if data is large
+                            X_shap = effective_X_plot
+                            if hasattr(effective_X_plot, "shape") and effective_X_plot.shape[0] > 100:
+                                if isinstance(effective_X_plot, pd.DataFrame):
+                                    X_shap = effective_X_plot.sample(100, random_state=42)
+                                else:
+                                    try:
+                                        idx = np.random.choice(effective_X_plot.shape[0], 100, replace=False)
+                                        X_shap = effective_X_plot[idx]
+                                    except: pass
+    
+                            fig_shap = explainer.plot_importance(X_shap)
+                            if fig_shap:
+                                plots[f"shap_summary_{m_name}"] = fig_shap
+                                logger.info(f"SHAP summary generated for {m_name}")
+                        except Exception as shap_err:
+                            logger.warning(f"Failed to generate SHAP summary for {m_name}: {shap_err}")
+                    else:
+                        logger.warning(f"Skipping SHAP for {m_name} because model instance is None.")
                         
                 # --- Stability Analysis ---
                 stability_results = {}
@@ -1705,10 +1715,14 @@ class AutoMLTrainer:
             else:
                  logger.warning(f"Final Fit: Model {best_model_name} is a Transformer but X_raw is missing. Expect failure.")
 
-        if y_train is not None:
-            self.best_model.fit(final_X, y_train)
+        if self.best_model is not None:
+            if y_train is not None:
+                self.best_model.fit(final_X, y_train)
+            else:
+                self.best_model.fit(final_X)
         else:
-            self.best_model.fit(final_X)
+            logger.error(f"Cannot perform final fit: Best model {best_model_name} could not be instantiated.")
+            raise ValueError(f"Best model {best_model_name} could not be instantiated. Check library availability.")
             
         # Add Feature Importance if available
         if hasattr(self.best_model, 'feature_importances_'):
@@ -1855,6 +1869,21 @@ class AutoMLTrainer:
             if name == 'catboost':
                 cb_params = {k.replace('cb_', ''): v for k, v in params.items() if k.startswith('cb_')}
                 return cb.CatBoostClassifier(verbose=0, thread_count=-1, **cb_params)
+            if name == 'passive_aggressive':
+                pa_params = {k.replace('pa_', ''): v for k, v in params.items() if k.startswith('pa_')}
+                return PassiveAggressiveClassifier(**pa_params)
+            if name == 'bagging':
+                bag_params = {k.replace('bagging_', ''): v for k, v in params.items() if k.startswith('bagging_')}
+                return BaggingClassifier(**bag_params)
+            if name == 'hist_gradient_boosting':
+                hgb_params = {k.replace('hgb_', ''): v for k, v in params.items() if k.startswith('hgb_')}
+                return HistGradientBoostingClassifier(**hgb_params)
+            if name == 'nu_svc':
+                nu_params = {k.replace('nu_svc_', ''): v for k, v in params.items() if k.startswith('nu_svc_')}
+                return NuSVC(probability=True, **nu_params)
+            if name == 'bernoulli_nb':
+                bnb_params = {k.replace('bnb_', ''): v for k, v in params.items() if k.startswith('bnb_')}
+                return BernoulliNB(**bnb_params)
             if name == 'voting_ensemble':
                 # Default God Mode Ensemble
                 return VotingClassifier(
@@ -1931,6 +1960,23 @@ class AutoMLTrainer:
             if name == 'catboost':
                 cb_params = {k.replace('cb_', ''): v for k, v in params.items() if k.startswith('cb_')}
                 return cb.CatBoostRegressor(verbose=0, thread_count=-1, **cb_params)
+            if name == 'bagging':
+                bag_params = {k.replace('bagging_reg_', ''): v for k, v in params.items() if k.startswith('bagging_reg_')}
+                return BaggingRegressor(**bag_params)
+            if name == 'hist_gradient_boosting':
+                hgb_params = {k.replace('hgb_reg_', ''): v for k, v in params.items() if k.startswith('hgb_reg_')}
+                return HistGradientBoostingRegressor(**hgb_params)
+            if name == 'nu_svr':
+                nu_params = {k.replace('nu_svr_', ''): v for k, v in params.items() if k.startswith('nu_svr_')}
+                return NuSVR(**nu_params)
+            if name == 'lasso_lars':
+                return LassoLars(**{k.replace('ll_', ''): v for k, v in params.items() if k.startswith('ll_')})
+            if name == 'huber':
+                return HuberRegressor(**{k.replace('huber_', ''): v for k, v in params.items() if k.startswith('huber_')})
+            if name == 'tweedie':
+                return TweedieRegressor(**{k.replace('tweedie_', ''): v for k, v in params.items() if k.startswith('tweedie_')})
+            if name == 'ransac': return RANSACRegressor()
+            if name == 'theil_sen': return TheilSenRegressor()
         elif self.task_type == 'clustering':
             if name == 'kmeans': 
                 return KMeans(n_clusters=params.get('km_n_clusters', 8), n_init=10)

@@ -20,6 +20,8 @@ class StabilityAnalyzer:
             task_type: 'classification' or 'regression'.
             random_state: Base seed for reproducibility.
         """
+        if base_model is None:
+            raise ValueError("StabilityAnalyzer requires a non-None base_model.")
         self.base_model = base_model
         self.X = X
         self.y = y

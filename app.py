@@ -580,7 +580,7 @@ with st.sidebar:
       </div>
       <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
         <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
-        <span class='version-badge'>v4.2.1</span>
+        <span class='version-badge'>v4.2.2</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -3152,8 +3152,19 @@ with tabs[2]:
                         render_training_mini_pipeline(job.logs or [], job.status)
                     with _ov_info_col:
                         _trials_done = len(job.trials_data) if job.trials_data else 0
-                        _est_trials = job.config.get('n_trials', 20) or 20
-                        # from src.tracking.manager import JobStatus (Removed shadowing local import)
+                        # Calculate accurate total estimated trials based on models per preset
+                        _n_trials_per_model = job.config.get('n_trials', 20) or 20
+                        _preset_name = job.config.get('preset', 'medium')
+                        _models_map = {'test': 2, 'fast': 5, 'medium': 10, 'high': 17}
+                        
+                        if _preset_name == 'custom':
+                            _sel_models = job.config.get('selected_models')
+                            _n_models = len(_sel_models) if isinstance(_sel_models, list) else 1
+                        else:
+                            _n_models = _models_map.get(_preset_name, 10)
+                            
+                        _est_trials = _n_trials_per_model * _n_models
+                        
                         render_pipeline_progress_ring(_trials_done, _est_trials, is_done=(job.status == JobStatus.COMPLETED))
 
                     ov1, ov2 = st.columns(2)

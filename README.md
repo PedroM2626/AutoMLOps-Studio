@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v4.2.1-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v4.3.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -17,9 +17,6 @@
 ---
 
 ## 🌟 What's New in v4.0.0
-
-### 🌐 Full English Translation
-The entire platform, including the UI, error messages, logging, and engine internals, has been fully translated from Portuguese to English. This ensures a consistent, professional experience for a global audience.
 
 ### 🏗️ Professional Modular Architecture
 The codebase has been completely restructured into a clean, industrial-standard modular layout (`src/` architecture). This improves maintainability, scalability, and follows Python best practices for package distribution.

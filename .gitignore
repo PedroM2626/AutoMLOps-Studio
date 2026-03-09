@@ -12,3 +12,4 @@ dist/
 *.log
 *.txt
 image*
+*cat*
