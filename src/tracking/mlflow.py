@@ -152,6 +152,9 @@ def get_run_details(run_id: str) -> dict:
     """
     Returns a rich dict of all MLflow data for a specific run_id.
     """
+    if not run_id or run_id == "dummy_run_id":
+        return {"error": "Preview mode (dummy run) or no run ID provided. Real tracking unavailable."}
+
     try:
         from mlflow.tracking import MlflowClient
         client = MlflowClient()

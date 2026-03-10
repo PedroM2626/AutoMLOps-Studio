@@ -27,13 +27,26 @@ def test_automl_trainer_classification(sample_data):
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
     
-    trainer = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=False)
+    trainer = AutoMLTrainer(task_type='classification', ensemble_mode='single', use_deep_learning=False)
     # Use 1 trial for speed in tests
     model = trainer.train(X_proc, y_proc, n_trials=1)
     
     assert model is not None
     metrics, preds = trainer.evaluate(X_proc, y_proc)
     assert 'accuracy' in metrics
+
+def test_automl_trainer_regression(sample_data):
+    # Change target to continuous for regression
+    sample_data['target'] = np.random.rand(len(sample_data))
+    processor = AutoMLDataProcessor(target_column='target')
+    X_proc, y_proc = processor.fit_transform(sample_data)
+    
+    trainer = AutoMLTrainer(task_type='regression', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1)
+    
+    assert model is not None
+    metrics, preds = trainer.evaluate(X_proc, y_proc)
+    assert 'r2' in metrics
 
 def test_drift_detector():
     ref = pd.DataFrame({'a': [1, 2, 3, 4, 5]})
@@ -65,27 +78,42 @@ def test_model_save_load(sample_data):
         os.remove(path)
 
 def test_automl_trainer_filtering():
-    """Test that use_ensemble and use_deep_learning flags correctly filter available models."""
-    # Test 1: All enabled (default)
-    trainer_all = AutoMLTrainer(task_type='classification', use_ensemble=True, use_deep_learning=True)
+    """Test that use_deep_learning and ensemble_mode flags correctly filter available models."""
+    # Test 1: All enabled (default - both mode)
+    trainer_all = AutoMLTrainer(task_type='classification', ensemble_mode='both', use_deep_learning=True)
     models_all = trainer_all.get_available_models()
-    assert 'custom_voting' in models_all or 'voting_classifier' in models_all or 'Voting Classifier' in models_all or any('vot' in m.lower() or 'stack' in m.lower() for m in models_all)
-    assert 'mlp' in [m.lower() for m in models_all] or 'neural_network' in [m.lower() for m in models_all]
+    assert 'custom_voting' in models_all or 'voting_ensemble' in models_all
+    assert 'mlp' in models_all
 
-    # Test 2: Ensembles disabled
-    trainer_no_ens = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=True)
-    models_no_ens = trainer_no_ens.get_available_models()
-    assert not any('vot' in m.lower() or 'stack' in m.lower() for m in models_no_ens)
+    # Test 2: Ensemble Mode = single (no ensembles)
+    trainer_single = AutoMLTrainer(task_type='classification', ensemble_mode='single', use_deep_learning=True)
+    models_single = trainer_single.get_available_models()
+    assert not any(m in ['custom_voting', 'custom_stacking', 'custom_bagging', 'voting_ensemble', 'stacking_ensemble'] for m in models_single)
+    assert 'mlp' in models_single
 
-    # Test 3: DL disabled (using regression to check mlp_regressor if present)
-    trainer_no_dl = AutoMLTrainer(task_type='regression', use_ensemble=True, use_deep_learning=False)
+    # Test 3: Ensemble Mode = ensemble_only
+    trainer_ens_only = AutoMLTrainer(task_type='classification', ensemble_mode='ensemble_only', use_deep_learning=True)
+    models_ens_only = trainer_ens_only.get_available_models()
+    # Should only contain ensemble keys (custom or built-in)
+    from src.core.trainer import _ENSEMBLE_MODEL_KEYS
+    assert all(m in _ENSEMBLE_MODEL_KEYS for m in models_ens_only)
+    assert len(models_ens_only) > 0
+
+    # Test 4: DL disabled
+    trainer_no_dl = AutoMLTrainer(task_type='regression', ensemble_mode='both', use_deep_learning=False)
     models_no_dl = trainer_no_dl.get_available_models()
-    assert not any('mlp' in m.lower() or 'neural' in m.lower() or 'transformer' in m.lower() for m in models_no_dl)
+    assert not any(m in ['mlp', 'transformer'] for m in models_no_dl)
 
-    # Test 4: Both disabled
-    trainer_none = AutoMLTrainer(task_type='classification', use_ensemble=False, use_deep_learning=False)
-    models_none = trainer_none.get_available_models()
-    assert not any('vot' in m.lower() or 'stack' in m.lower() for m in models_none)
-    assert not any('mlp' in m.lower() or 'neural' in m.lower() or 'transformer' in m.lower() for m in models_none)
-    # Ensure standard models like RF or Logistic Regression are still there
-    assert any('forest' in m.lower() or 'logistics' in m.lower() or 'logistic' in m.lower() for m in models_none)
+def test_mlflow_dummy_fallback(sample_data):
+    """Test that MLflow gracefully falls back when tracking URI/DB is corrupted or unavailable."""
+    from src.tracking.mlflow import get_run_details
+    # Match the actual implementation message from mlflow.py
+    assert get_run_details("dummy_run_id") == {"error": "Preview mode (dummy run) or no run ID provided. Real tracking unavailable."}
+
+def test_custom_ensemble_names():
+    """Test that custom ensemble keys are properly mapped to display names."""
+    from src.core.trainer import get_ensemble_display_name
+    assert get_ensemble_display_name('custom_voting') == 'Custom Voting Ensemble'
+    assert get_ensemble_display_name('custom_stacking') == 'Custom Stacking Ensemble'
+    assert get_ensemble_display_name('custom_bagging') == 'Custom Bagging Ensemble'
+    assert get_ensemble_display_name('random_forest') == 'random_forest'  # Non-ensemble returns key

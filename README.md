@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v4.3.2-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v4.4.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -16,13 +16,16 @@
 
 ---
 
-## 🌟 What's New in v4.0.0
+## 🌟 What's New in v4.4.0
 
-### 🏗️ Professional Modular Architecture
-The codebase has been completely restructured into a clean, industrial-standard modular layout (`src/` architecture). This improves maintainability, scalability, and follows Python best practices for package distribution.
+### 🛠️ Custom Ensemble Builder & Advanced Selection
+A sophisticated **Custom Ensemble Builder** has been introduced, allowing users to choose between **Voting** and **Stacking** strategies. You can now manually select base estimators, meta-models, and configure voting types (Soft/Hard) directly from the UI. The model selection logic has been refined to strictly respect manual user choices, overriding default filters.
 
-### 🧠 SHAP Explainability Integration
-Deep integration of **SHAP (SHapley Additive exPlanations)** into the training workflow. Automated summary plots are now generated and logged as MLflow artifacts for every experiment, providing immediate visual transparency into model decisions.
+### ⚡ Optimized Training Pipeline
+Ensemble models and static models are now automatically detected and optimized to run a **single trial**. This eliminates redundant hyperparameter searches for composite models, significantly speeding up the training process while maintaining high performance.
+
+### 📝 Descriptive Experiment Naming
+Experiments and charts now feature **Detailed Descriptive Names**. For example, a custom ensemble will appear as *"Custom Voting Ensemble (Random Forest, XGBoost)"*, providing immediate clarity in MLflow and the UI dashboard.
 
 ---
 
@@ -51,7 +54,8 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 
 ### 2. 🤖 Training Configuration, NLP & Vision
 - **Multi-Task Support**: Classification, Regression, Clustering, Time Series, and **Computer Vision** (Classification, Segmentation, Multi-label).
-- **Advanced Controls**: Toggles to focus training on **Ensemble models** (Voting/Stacking) or enable **Deep Learning** models.
+- **Custom Ensemble Builder**: Dedicated UI to build **Voting, Stacking, and Bagging** models. Select your own base learners and meta-estimators.
+- **Precision Model Selection**: Toggle between Automatic, Manual, and Custom modes. Explicit manual selections always bypass general filters (Deep Learning/Ensemble modes).
 - **NLP & Transformers**: Support for TF-IDF and Hugging Face Transformers. Full English support for embeddings and tokenization.
 - **Computer Vision**: Integrated training with MLflow tracking, data augmentation config, and automated consumption code generation.
 - **Advanced Optimization**: Optuna with Bayesian Optimization.

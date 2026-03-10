@@ -2003,56 +2003,6 @@ with tabs[1]:
             cfg['model_source'] = model_source
 
             if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
-                # ── Training Focus selector ───────────────────────────────────
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                FOCUS_OPTIONS = [
-                    ('single', '🎯', 'Single Models', 'Train individual models only. Faster, simpler, easier to interpret.'),
-                    ('ensemble', '🏗️', 'Include Ensembles', 'Also train Voting and Stacking ensembles. Usually higher accuracy.'),
-                ]
-                cur_focus = 'ensemble' if cfg.get('use_ensemble', True) else 'single'
-                focus_cols = st.columns(2)
-                for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
-                    with focus_cols[i]:
-                        is_sel = (fid == cur_focus)
-                        border = "border: 2px solid #27ae60; background:linear-gradient(135deg,rgba(39,174,96,0.1),rgba(39,174,96,0.05));" if is_sel else ""
-                        st.markdown(f"""
-                        <div class='task-card' style='min-height:100px;{border}'>
-                          <div class='task-icon'>{ficon}</div>
-                          <div class='task-name'>{fname}</div>
-                          <div class='task-desc'>{fdesc}</div>
-                        </div>""", unsafe_allow_html=True)
-                        if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
-                            cfg['use_ensemble'] = (fid == 'ensemble')
-                            st.session_state['automl_config'] = cfg
-                            st.rerun()
-                cfg['use_ensemble'] = cur_focus == 'ensemble'
-
-                # ── Deep Learning selector ────────────────────────────────────
-                st.markdown("<br>", unsafe_allow_html=True)
-                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Deep Learning Models</p>", unsafe_allow_html=True)
-                DL_OPTIONS = [
-                    ('classic', '📊', 'Classic ML Only', 'Tree-based models, linear models, SVM, KNN. Fast training, low resource usage.'),
-                    ('deep',    '🧠', 'Include Deep Learning', 'Also search Neural Networks (MLP) and Transformers (BERT, etc.). Much slower but may outperform for NLP/complex tabular.'),
-                ]
-                cur_dl = 'deep' if cfg.get('use_deep_learning', True) else 'classic'
-                dl_cols = st.columns(2)
-                for i, (did, dicon, dname, ddesc) in enumerate(DL_OPTIONS):
-                    with dl_cols[i]:
-                        is_sel = (did == cur_dl)
-                        border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
-                        st.markdown(f"""
-                        <div class='task-card' style='min-height:110px;{border}'>
-                          <div class='task-icon'>{dicon}</div>
-                          <div class='task-name'>{dname}</div>
-                          <div class='task-desc'>{ddesc}</div>
-                        </div>""", unsafe_allow_html=True)
-                        if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
-                            cfg['use_deep_learning'] = (did == 'deep')
-                            st.session_state['automl_config'] = cfg
-                            st.rerun()
-                cfg['use_deep_learning'] = cur_dl == 'deep'
-
                 # ── Model Selection Mode ──────────────────────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 mode_selection = st.radio(
@@ -2070,24 +2020,118 @@ with tabs[1]:
                         use_ensemble=cfg.get('use_ensemble', True),
                         use_deep_learning=cfg.get('use_deep_learning', True)
                     )
-                    _filtered_models = _tmp_trainer.get_available_models()
+                    # For manual selection, we show ALL possible models (unfiltered by ensemble_mode or deep_learning)
+                    # but we can provide hints or categories.
+                    _all_candidates = _tmp_trainer.get_available_models()
+                    
+                    st.markdown("<p style='font-size:0.8rem;color:#8b949e;'>Select specific models to include in the search space. Hand-picked models will always be trained regardless of global filters.</p>", unsafe_allow_html=True)
                     sel_models = st.multiselect(
                         "Choose Models",
-                        _filtered_models,
-                        default=[m for m in (cfg.get('selected_models', _filtered_models[:2]) or _filtered_models[:2]) if m in _filtered_models],
+                        _all_candidates,
+                        default=[m for m in (cfg.get('selected_models', _all_candidates[:2]) or _all_candidates[:2]) if m in _all_candidates],
                         key="wiz_sel_models"
                     )
                     cfg['selected_models'] = sel_models
-
+                
                 elif mode_selection == "Custom Ensemble Builder":
-                    if not cfg.get('use_ensemble', True):
-                        st.warning("Ensemble Builder requires 'Include Ensembles' to be selected above. Enabling it automatically.")
-                        cfg['use_ensemble'] = True
+                    cfg['use_ensemble'] = True
                     st.markdown("""
                     <div class='ui-card' style='padding:14px;margin-bottom:12px;'>
                       <div style='font-weight:600;margin-bottom:4px;'>🏗️ Ensemble Builder</div>
                       <div style='color:#8b949e;font-size:0.8rem;'>Combine multiple base models into a powerful ensemble.</div>
                     </div>""", unsafe_allow_html=True)
+                    ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"], key="wiz_ens_type")
+                    base_candidates = [m for m in available_models if 'ensemble' not in m]
+                    sel_base = st.multiselect("Base Estimators", base_candidates,
+                        default=cfg.get('ensemble_config', {}).get('voting_estimators', base_candidates[:3]),
+                        key="wiz_base_models")
+                    if len(sel_base) < 2:
+                        st.warning("⚠️ Select at least 2 base models.")
+
+                    ens_cfg = {}
+                    if ensemble_type == "Voting":
+                        voting_type = st.selectbox("Voting Type", ["soft", "hard"] if task == "classification" else ["soft"], key="wiz_vote_type")
+                        use_wts = st.checkbox("Weighted Voting", key="wiz_use_weights")
+                        voting_weights = None
+                        if use_wts:
+                            wts_str = st.text_input("Weights (comma-separated)", value=",".join(["1.0"] * len(sel_base)), key="wiz_weights")
+                            try:
+                                voting_weights = [float(w.strip()) for w in wts_str.split(",")]
+                            except:
+                                st.error("Invalid weights format.")
+                        ens_cfg = {'voting_estimators': sel_base, 'voting_type': voting_type, 'voting_weights': voting_weights}
+                        cfg['selected_models'] = ['custom_voting']
+                    else:  # Stacking
+                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'ridge', 'linear_regression']
+                        if task == 'classification':
+                            meta_candidates = [m for m in meta_candidates if m not in ['linear_regression', 'ridge']]
+                        else:
+                            meta_candidates = [m for m in meta_candidates if m not in ['logistic_regression']]
+                        if not meta_candidates:
+                            meta_candidates = ['random_forest']
+                        final_est = st.selectbox("Meta-Model", meta_candidates, key="wiz_meta_model")
+                        ens_cfg = {'stacking_estimators': sel_base, 'stacking_final_estimator': final_est}
+                        cfg['selected_models'] = ['custom_stacking']
+
+                    cfg['ensemble_config'] = ens_cfg
+                else:
+                    cfg['selected_models'] = None
+
+                # ── Training Focus & Deep Learning (Only relevant if NOT in Custom Ensemble Builder) ──
+                if mode_selection != "Custom Ensemble Builder":
+                    # ── Training Focus selector ───────────────────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
+                    FOCUS_OPTIONS = [
+                        ('single', '🎯', 'Single Models', 'Train individual models only. Faster, simpler, easier to interpret.'),
+                        ('ensemble_only', '🏗️', 'Custom Ensembles', 'Only train Custom Voting/Stacking/Bagging. Good if base models are already tuned.'),
+                        ('both', '🏆', 'Both (Full)', 'Train all models including ensembles. Maximum accuracy but takes longer.'),
+                    ]
+                    cur_focus = cfg.get('ensemble_mode', 'both')
+                    
+                    focus_cols = st.columns(3)
+                    for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
+                        with focus_cols[i]:
+                            is_sel = (fid == cur_focus)
+                            border = "border: 2px solid #27ae60; background:linear-gradient(135deg,rgba(39,174,96,0.1),rgba(39,174,96,0.05));" if is_sel else ""
+                            st.markdown(f"""
+                            <div class='task-card' style='min-height:130px;{border}'>
+                              <div class='task-icon'>{ficon}</div>
+                              <div class='task-name'>{fname}</div>
+                              <div class='task-desc'>{fdesc}</div>
+                            </div>""", unsafe_allow_html=True)
+                            if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
+                                cfg['ensemble_mode'] = fid
+                                cfg['use_ensemble'] = (fid != 'single')
+                                st.session_state['automl_config'] = cfg
+                                st.rerun()
+                    cfg['ensemble_mode'] = cur_focus
+                    cfg['use_ensemble'] = (cur_focus != 'single')
+
+                    # ── Deep Learning selector ────────────────────────────────────
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Deep Learning Models</p>", unsafe_allow_html=True)
+                    DL_OPTIONS = [
+                        ('classic', '📊', 'Classic ML Only', 'Tree-based models, linear models, SVM, KNN. Fast training, low resource usage.'),
+                        ('deep',    '🧠', 'Include Deep Learning', 'Also search Neural Networks (MLP) and Transformers (BERT, etc.). Much slower but may outperform for NLP/complex tabular.'),
+                    ]
+                    cur_dl = 'deep' if cfg.get('use_deep_learning', True) else 'classic'
+                    dl_cols = st.columns(2)
+                    for i, (did, dicon, dname, ddesc) in enumerate(DL_OPTIONS):
+                        with dl_cols[i]:
+                            is_sel = (did == cur_dl)
+                            border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
+                            st.markdown(f"""
+                            <div class='task-card' style='min-height:110px;{border}'>
+                              <div class='task-icon'>{dicon}</div>
+                              <div class='task-name'>{dname}</div>
+                              <div class='task-desc'>{ddesc}</div>
+                            </div>""", unsafe_allow_html=True)
+                            if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
+                                cfg['use_deep_learning'] = (did == 'deep')
+                                st.session_state['automl_config'] = cfg
+                                st.rerun()
+                    cfg['use_deep_learning'] = cur_dl == 'deep'
                     ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"], key="wiz_ens_type")
                     base_candidates = [m for m in available_models if 'ensemble' not in m]
                     sel_base = st.multiselect("Base Estimators", base_candidates,
@@ -2660,6 +2704,7 @@ with tabs[1]:
                             'time_budget': real_time_bud,
                             'selected_models': real_sel_models,
                             'use_ensemble': cfg.get('use_ensemble', True),
+                            'ensemble_mode': cfg.get('ensemble_mode', 'both'),
                             'use_deep_learning': cfg.get('use_deep_learning', True),
                             'manual_params': real_mp,
                             'experiment_name': clean_exp_name,
@@ -3232,8 +3277,10 @@ with tabs[2]:
                         st.divider()
                         st.markdown("#### Best Results by Model")
                         sum_rows = []
+                        from src.core.trainer import get_ensemble_display_name
                         for mn, mi in job.model_summaries.items():
-                            row = {"Model": mn, "Best Score": f"{mi.get('score', 0):.4f}", "ScoreVal": mi.get('score', 0),
+                            display_mn = get_ensemble_display_name(mn)
+                            row = {"Model": display_mn, "Best Score": f"{mi.get('score', 0):.4f}", "ScoreVal": mi.get('score', 0),
                                    "Trial": mi.get("trial_name", "?"), "Duration (s)": f"{mi.get('duration', 0):.2f}"}
                             if 'metrics' in mi:
                                 for mk, mv in mi['metrics'].items():
@@ -3267,8 +3314,10 @@ with tabs[2]:
                 # ── Tab 3: Results ──
                 with detail_tabs[3]:
                     if job.report_data:
+                        from src.core.trainer import get_ensemble_display_name
                         for m_name, rep in job.report_data.items():
-                            with st.expander(f"📊 Report: {m_name} (Score: {rep.get('score', 0):.4f})", expanded=True):
+                            display_m_name = get_ensemble_display_name(m_name)
+                            with st.expander(f"📊 Report: {display_m_name} (Score: {rep.get('score', 0):.4f})", expanded=True):
                                 r1, r2 = st.columns([1, 2])
                                 with r1:
                                     st.markdown("**Validation Metrics**")

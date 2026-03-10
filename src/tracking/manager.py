@@ -239,8 +239,18 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             trials_data.append(trial_info)
             status_queue.put({"type": "trial", "trial": trial_info, "score": float(score), "full_name": full_name})
 
-        # Training
-        trainer = AutoMLTrainer(task_type=task, preset=preset, ensemble_config=ensemble_config)
+        # Training — forward DL/ensemble flags from job config
+        use_ensemble      = config.get('use_ensemble', True)
+        use_deep_learning = config.get('use_deep_learning', True)
+        ensemble_mode     = config.get('ensemble_mode', 'both')  # 'single', 'ensemble_only', 'both'
+        trainer = AutoMLTrainer(
+            task_type=task,
+            preset=preset,
+            ensemble_config=ensemble_config,
+            use_ensemble=use_ensemble,
+            use_deep_learning=use_deep_learning,
+            ensemble_mode=ensemble_mode,
+        )
         clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
 
         best_model = trainer.train(

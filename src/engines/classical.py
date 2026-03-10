@@ -28,6 +28,9 @@ from sklearn.ensemble import (
     BaggingClassifier, BaggingRegressor,
     HistGradientBoostingClassifier, HistGradientBoostingRegressor
 )
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.naive_bayes import GaussianNB
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
@@ -58,7 +61,7 @@ except ImportError:
 
 # Modular imports
 from src.core.processor import AutoMLDataProcessor
-from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS
+from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS, _NEURAL_NET_KEYS, ENSEMBLE_DISPLAY_NAMES, get_ensemble_display_name
 from src.engines.stability import StabilityAnalyzer
 from src.tracking.mlflow import MLFlowTracker
 from src.utils.helpers import get_consumption_code, generate_model_card
@@ -82,12 +85,14 @@ logger = logging.getLogger(__name__)
 
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
-                 use_ensemble=True, use_deep_learning=True):
+                 use_ensemble=True, use_deep_learning=True, ensemble_mode='both'):
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
         self.use_ensemble = use_ensemble
         self.use_deep_learning = use_deep_learning
+        # ensemble_mode: 'single' (no ensembles), 'ensemble_only' (only custom ensembles), 'both'
+        self.ensemble_mode = ensemble_mode
         self.best_model = None
         self.best_params = None
         self.results = []
@@ -242,6 +247,17 @@ class AutoMLTrainer:
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str) 
                                     else self.ensemble_config.get('stacking_final_estimator', LogisticRegression(random_state=random_state)),
                     n_jobs=-1
+                ),
+                'custom_bagging': lambda t: BaggingClassifier(
+                    estimator=self._get_default_model(
+                        self.ensemble_config.get('bagging_base_estimator', 'decision_tree'),
+                        random_state
+                    ),
+                    n_estimators=t.suggest_int('custom_bag_n_estimators', 5, 50),
+                    max_samples=t.suggest_float('custom_bag_max_samples', 0.5, 1.0),
+                    max_features=t.suggest_float('custom_bag_max_features', 0.5, 1.0),
+                    random_state=random_state,
+                    n_jobs=1
                 ),
                 'logistic_regression': lambda t: LogisticRegression(
                     C=t.suggest_float('lr_C', 0.001, 100.0, log=True),
@@ -421,6 +437,17 @@ class AutoMLTrainer:
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str)
                                     else self.ensemble_config.get('stacking_final_estimator', LinearRegression()),
                     n_jobs=-1
+                ),
+                'custom_bagging': lambda t: BaggingRegressor(
+                    estimator=self._get_default_model(
+                        self.ensemble_config.get('bagging_base_estimator', 'decision_tree'),
+                        random_state
+                    ),
+                    n_estimators=t.suggest_int('custom_bag_n_estimators', 5, 50),
+                    max_samples=t.suggest_float('custom_bag_max_samples', 0.5, 1.0),
+                    max_features=t.suggest_float('custom_bag_max_features', 0.5, 1.0),
+                    random_state=random_state,
+                    n_jobs=1
                 ),
                 'linear_regression': lambda t: LinearRegression(),
                 'random_forest': lambda t: RandomForestRegressor(
@@ -672,14 +699,41 @@ class AutoMLTrainer:
         
         return None
 
-    def _filter_models(self, model_list):
-        """Filter model list based on use_ensemble and use_deep_learning flags."""
+    def _filter_models(self, model_list, selected_models=None):
+        """
+        Filter model list based on use_ensemble, use_deep_learning, and ensemble_mode.
+        If a model is explicitly in selected_models, it bypasses these filters.
+        """
         result = []
+        mode = getattr(self, 'ensemble_mode', 'both')
+        manual_selection = selected_models if selected_models else []
+        
         for m in model_list:
-            if not self.use_ensemble and m in _ENSEMBLE_MODEL_KEYS:
+            # If model was manually selected, keep it regardless of filters
+            if m in manual_selection:
+                result.append(m)
                 continue
-            if not self.use_deep_learning and m in _DL_MODEL_KEYS:
+                
+            is_ensemble = m in _ENSEMBLE_MODEL_KEYS
+            is_dl = m in _DL_MODEL_KEYS or m in _NEURAL_NET_KEYS
+            
+            # Apply deep learning filter
+            if not self.use_deep_learning and is_dl:
                 continue
+                
+            # Apply ensemble mode filter
+            if mode == 'ensemble_only':
+                # Only include ensemble models
+                if not is_ensemble:
+                    continue
+            elif mode == 'single':
+                # Exclude ALL ensemble models
+                if is_ensemble:
+                    continue
+            else:  # 'both'
+                # Respect use_ensemble flag as before
+                if not self.use_ensemble and is_ensemble:
+                    continue
             result.append(m)
         return result
 
@@ -711,9 +765,13 @@ class AutoMLTrainer:
         
         # If selected_models is not provided, use the preset list
         if selected_models is None:
-            selected_models = preset_config['models']
-        # Apply use_ensemble / use_deep_learning filter
-        selected_models = self._filter_models(selected_models)
+            selected_models_to_filter = preset_config['models']
+        else:
+            selected_models_to_filter = selected_models
+            
+        # Apply use_ensemble / use_deep_learning filter, but respect manual selection
+        self.selected_models = self._filter_models(selected_models_to_filter, selected_models=selected_models)
+        selected_models = self.selected_models
             
         self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
         self.random_state = random_state
@@ -770,7 +828,7 @@ class AutoMLTrainer:
         self.detailed_model_reports = {} # Store detailed reports for display
 
         def objective(trial, forced_model=None):
-            nonlocal best_score_so_far, trials_without_improvement
+            nonlocal best_score_so_far, trials_without_improvement, model_trial_counts
             
             # Global Time Budget Check
             if time_budget is not None:
@@ -794,12 +852,27 @@ class AutoMLTrainer:
             # Unique identifier for this model trial
             model_trial_counts[model_name] = model_trial_counts.get(model_name, 0) + 1
             trial_num_for_model = model_trial_counts[model_name]
-            full_trial_name = f"{model_name} - Trial {trial_num_for_model}"
+            from src.core.trainer import get_ensemble_display_name
+            
+            # Get base estimators for descriptive names if it's a custom ensemble
+            ens_estimators = None
+            if model_name == 'custom_voting':
+                ens_estimators = self.ensemble_config.get('voting_estimators')
+            elif model_name == 'custom_stacking':
+                ens_estimators = self.ensemble_config.get('stacking_estimators')
+                
+            display_model_name = get_ensemble_display_name(model_name, estimators=ens_estimators)
+            full_trial_name = f"{display_model_name} - Trial {trial_num_for_model}"
             
             # Determine specific seed for this model
             current_seed = self.random_state
             if isinstance(self.random_state, dict):
                 current_seed = self.random_state.get(model_name, 42)
+
+            # Log to queue if callback exists
+            if callback:
+                # We don't have the score yet, but we inform the start
+                pass
             
             logger.info(f"Trial {trial.number} mapped to {full_trial_name} (Seed: {current_seed})")
 
@@ -1150,18 +1223,24 @@ class AutoMLTrainer:
                 study.enqueue_trial(p)
                 logger.info(f"Enqueueing manual trial for {m_name}")
 
-            # If the model is static, we run only 1 time
-            current_n_trials = 1 if m_name in static_models else n_trials
+            # Determine number of trials for this specific model
+            m_n_trials = n_trials
             
-            trials_without_improvement = 0 
-            logger.info(f"Starting optimization for model: {m_name} ({current_n_trials} trials, Timeout: {current_timeout:.2f}s)")
+            # Ensembles and static models should only run once
+            from src.core.trainer import _ENSEMBLE_MODEL_KEYS
+            if m_name in _ENSEMBLE_MODEL_KEYS or m_name in static_models:
+                m_n_trials = 1
+                logger.info(f"Setting n_trials=1 for model: {m_name}")
+
+            logger.info(f"Starting optimization for model: {m_name} ({m_n_trials} trials, Timeout: {current_timeout:.2f}s)")
             
             try:
-                # The timeout parameter here ensures Optuna stops starting new trials after the limit
+                # Run optimization for this specific model
                 study.optimize(
-                    lambda t: objective(t, forced_model=m_name), 
-                    n_trials=current_n_trials, 
-                    timeout=current_timeout
+                    lambda t: objective(t, forced_model=m_name),
+                    n_trials=m_n_trials,
+                    timeout=current_timeout,
+                    callbacks=[lambda s, t: callback(t, t.value, f"{display_model_name} - Trial {getattr(t, 'number', 0)+1}", 0)] if callback else None
                 )
             except Exception as e:
                 logger.error(f"Error during optimization of {m_name}: {e}")
@@ -1825,6 +1904,12 @@ class AutoMLTrainer:
                     final_estimator=self.ensemble_config.get('stacking_final_estimator', LogisticRegression(random_state=42)),
                     n_jobs=-1
                 )
+            if name == 'custom_bagging':
+                return BaggingClassifier(
+                    estimator=self._get_default_model(self.ensemble_config.get('bagging_base_estimator', 'decision_tree'), 42),
+                    n_estimators=self.ensemble_config.get('custom_bag_n_estimators', 10),
+                    random_state=42
+                )
             if name == 'logistic_regression':  
                 lr_params = {k.replace('lr_', ''): v for k, v in params.items() if k.startswith('lr_')}
                 return LogisticRegression(max_iter=2000, **lr_params)
@@ -1928,6 +2013,12 @@ class AutoMLTrainer:
                     ),
                     final_estimator=self.ensemble_config.get('stacking_final_estimator', LinearRegression()),
                     n_jobs=-1
+                )
+            if name == 'custom_bagging':
+                return BaggingRegressor(
+                    estimator=self._get_default_model(self.ensemble_config.get('bagging_base_estimator', 'decision_tree'), 42),
+                    n_estimators=self.ensemble_config.get('custom_bag_n_estimators', 10),
+                    random_state=42
                 )
             if name == 'linear_regression': return LinearRegression()
             if name == 'random_forest': 
