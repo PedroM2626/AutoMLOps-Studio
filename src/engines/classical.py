@@ -1232,7 +1232,7 @@ class AutoMLTrainer:
                 m_n_trials = 1
                 logger.info(f"Setting n_trials=1 for model: {m_name}")
 
-            logger.info(f"Starting optimization for model: {m_name} ({m_n_trials} trials, Timeout: {current_timeout:.2f}s)")
+            logger.info(f"Starting optimization for model: {m_name} ({m_n_trials} trials, Timeout: {(current_timeout or 0.0):.2f}s)")
             
             try:
                 # Run optimization for this specific model

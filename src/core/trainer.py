@@ -80,7 +80,11 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
         is_raw_text = False
 
         if hasattr(X, "shape"):
-            if X.dtype == 'object' or X.dtype.type is np.str_ or X.dtype.type is np.bytes_:
+            # NumPy 2.0 compatible dtype checking
+            is_str_dtype = np.issubdtype(X.dtype, np.str_) or X.dtype == object
+            is_bytes_dtype = np.issubdtype(X.dtype, np.bytes_)
+            
+            if is_str_dtype or is_bytes_dtype:
                 is_raw_text = True
             elif len(X.shape) > 1 and X.shape[1] > 1:
                 is_vectorized = True

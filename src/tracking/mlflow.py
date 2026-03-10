@@ -2,6 +2,9 @@ import mlflow
 import mlflow.sklearn
 import os
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 from src.utils.helpers import get_consumption_code
 
 class MLFlowTracker:

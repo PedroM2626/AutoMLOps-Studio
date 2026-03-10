@@ -97,8 +97,8 @@ class AutoMLDataProcessor:
                 ds = DeepDataset(df, label=label, cat_features=df.select_dtypes(include=['object', 'category']).columns.tolist())
                 integ_suite = data_integrity()
                 suite_result = integ_suite.run(ds)
-                # Fixed: Use lower case np.inf for NumPy 2.0 compatibility if needed, 
-                # but here it's about deepchecks internal error. I'll just fix any np.Inf in my code.
+                # Fixed: Use lower case np.inf for NumPy 2.0 compatibility.
+                # The warning in Deepchecks might still appear if the library uses the old alias internally.
                 self.quality_report_html = suite_result.save_as_html(render_static=True)
                 logger.info("Data Integrity check completed.")
         except Exception as e:

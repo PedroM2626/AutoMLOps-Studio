@@ -1,5 +1,9 @@
 from src.core.processor import AutoMLDataProcessor
 from src.engines.classical import AutoMLTrainer
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
 # from src.engines.vision import CVAutoMLTrainer, get_cv_explanation # Migrated structure
 import streamlit as st
 import pandas as pd
