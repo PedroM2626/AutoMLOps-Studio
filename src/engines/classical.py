@@ -1300,13 +1300,19 @@ class AutoMLTrainer:
                              best_model_instance.set_params(n_estimators=orig_estimators)
                              
                     except Exception as cv_err:
-                        logger.warning(f"Failed to generate fast predictions for report: {cv_err}")
+                        logger.warning(f"Failed to generate fast predictions for report for {m_name}: {cv_err}")
                         # Fallback: Simple predict on X_train (Overfit warning)
-                        best_model_instance.fit(effective_X_plot, y_train)
-                        y_pred_plot = best_model_instance.predict(effective_X_plot)
-                        y_true_plot = y_train
-                        if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
-                            y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
+                        if best_model_instance is not None:
+                            try:
+                                best_model_instance.fit(effective_X_plot, y_train)
+                                y_pred_plot = best_model_instance.predict(effective_X_plot)
+                                y_true_plot = y_train
+                                if self.task_type == 'classification' and hasattr(best_model_instance, 'predict_proba'):
+                                    y_proba_plot = best_model_instance.predict_proba(effective_X_plot)
+                            except Exception as fallback_err:
+                                logger.error(f"Fallback fit failed for {m_name}: {fallback_err}")
+                        else:
+                            logger.error(f"Cannot perform fallback fit for {m_name}: best_model_instance is None.")
                 
                 # 4. Calculate detailed metrics
                 report_metrics = {}
@@ -1390,9 +1396,12 @@ class AutoMLTrainer:
                         logger.info(f"Model {m_name} is already fitted.")
                     except:
                         try:
-                            logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
-                            # Use a small sample if it's too large, but for FI we want representative
-                            best_model_instance.fit(effective_X_plot, y_train)
+                            if best_model_instance is not None:
+                                logger.info(f"Fitting {m_name} to extract Feature Importance for report...")
+                                # Use a small sample if it's too large, but for FI we want representative
+                                best_model_instance.fit(effective_X_plot, y_train)
+                            else:
+                                logger.error(f"Cannot perform FI fit for {m_name}: best_model_instance is None.")
                         except Exception as fit_err:
                             logger.warning(f"Could not fit {m_name} for FI plot: {fit_err}")
 
@@ -1459,7 +1468,7 @@ class AutoMLTrainer:
                             fig_shap = explainer.plot_importance(X_shap)
                             if fig_shap:
                                 plots[f"shap_summary_{m_name}"] = fig_shap
-                                logger.info(f"SHAP summary generated for {m_name}")
+                                logger.info(f"SHAP summary successfully generated for {m_name}")
                         except Exception as shap_err:
                             logger.warning(f"Failed to generate SHAP summary for {m_name}: {shap_err}")
                     else:

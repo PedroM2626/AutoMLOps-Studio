@@ -155,7 +155,7 @@ class AutoMLDataProcessor:
 
         low_card_transformer = Pipeline(steps=[
             ('imputer', SimpleImputer(strategy='most_frequent')),
-            ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+            ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=True))
         ])
         
         high_card_transformer = Pipeline(steps=[
@@ -176,6 +176,13 @@ class AutoMLDataProcessor:
             vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
             ngram_range = self.nlp_config.get('ngram_range', (1, 3))
             max_features = self.nlp_config.get('max_features', 5000)
+            
+            # Optimization: reduce max_features if many NLP columns to prevent explosion
+            effective_max_features = max_features
+            if len(nlp_features) > 3:
+                 effective_max_features = min(max_features, 2000)
+            elif len(nlp_features) > 1:
+                 effective_max_features = min(max_features, 3000)
             chosen_language = self.nlp_config.get('language', 'english').lower()
             stop_words = chosen_language if self.nlp_config.get('stop_words', True) else None
             
@@ -199,9 +206,9 @@ class AutoMLDataProcessor:
                                 return [f"ST_emb_{i}" for i in range(384)]
                         vectorizer = STTransformer(model_name=self.nlp_config.get('embedding_model', 'all-MiniLM-L6-v2'))
                     except ImportError:
-                        vectorizer = TfidfVectorizer(max_features=max_features, ngram_range=ngram_range, stop_words=stop_words)
+                        vectorizer = TfidfVectorizer(max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words)
                 elif vectorizer_type == 'count':
-                    vectorizer = CountVectorizer(max_features=max_features, ngram_range=ngram_range, stop_words=stop_words)
+                    vectorizer = CountVectorizer(max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words)
                 elif vectorizer_type == 'passthrough':
                      def pass_text(x):
                          if hasattr(x, 'values'): x = x.values
@@ -211,18 +218,24 @@ class AutoMLDataProcessor:
                 else:
                     is_god_mode = self.nlp_config.get('cleaning_mode') == 'god_mode'
                     vectorizer = TfidfVectorizer(
-                        max_features=max_features, ngram_range=ngram_range, stop_words=stop_words,
+                        max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words,
                         sublinear_tf=self.nlp_config.get('sublinear_tf', True),
                         strip_accents='unicode' if is_god_mode else None
                     )
                 transformers.append((f'nlp_{col}', vectorizer, col))
 
-        sparse_thresh = 1.0 if nlp_features else 0
+        # Favor sparse if we have NLP or many features (prevents memory explosion)
+        sparse_thresh = 1.0 if (nlp_features or len(transformers) > 5) else 0.3
         self.preprocessor = ColumnTransformer(transformers=transformers, sparse_threshold=sparse_thresh)
         X_processed = self.preprocessor.fit_transform(X)
         
         if not nlp_features and hasattr(X_processed, "toarray"):
-            X_processed = X_processed.toarray()
+            # Check if dense matrix would be too large (> 10 million elements)
+            n_elements = X_processed.shape[0] * X_processed.shape[1]
+            if n_elements < 10_000_000:
+                X_processed = X_processed.toarray()
+            else:
+                logger.info(f"Keep sparse: Matrix size ({X_processed.shape}) too large for dense conversion.")
             
         y_processed = None
         if y is not None:

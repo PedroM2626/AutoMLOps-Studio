@@ -580,7 +580,7 @@ with st.sidebar:
       </div>
       <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
         <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
-        <span class='version-badge'>v4.2.2</span>
+        <span class='version-badge'>v4.3.0</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -3285,6 +3285,12 @@ with tabs[2]:
                                         st.markdown("**Ensemble Constituents:**")
                                         st.caption(", ".join(constituents))
 
+                                    # Consumption Code Integrated
+                                    c_code = rep.get('consumption_code')
+                                    if c_code:
+                                        st.markdown("#### 📦 Consumption Code")
+                                        st.code(c_code, language='python')
+
                                     # Stability results
                                     if rep.get('stability'):
                                         st.divider()
@@ -3398,96 +3404,77 @@ with tabs[2]:
                 # ── Tab 4: MLflow Details ──
                 with detail_tabs[4]:
                     if job.mlflow_run_id:
-                        # Caching MLflow data
-                        cache = st.session_state['mlflow_cache']
-                        if job.mlflow_run_id not in cache:
-                            with st.spinner("Fetching MLflow data…"):
-                                cache[job.mlflow_run_id] = get_run_details(job.mlflow_run_id)
-                        
-                        rd = cache[job.mlflow_run_id]
-                        
-                        if "error" in rd:
-                            st.error(f"Could not load MLflow data: {rd['error']}")
+                        st.markdown(f"#### 🔍 MLflow Details (Run: `{job.mlflow_run_id}`)")
+                        try:
+                            # Use caching for MLflow details
+                            cache = st.session_state.get('mlflow_cache', {})
+                            if job.mlflow_run_id not in cache:
+                                with st.spinner("Fetching MLflow data..."):
+                                    cache[job.mlflow_run_id] = get_run_details(job.mlflow_run_id)
+                                    st.session_state['mlflow_cache'] = cache
                             
-                            # MLflow Repair Options
-                            st.markdown("---")
-                            st.markdown("#### 🛠️ MLflow Troubleshooting")
-                            st.info("The MLflow database seems to have a schema version conflict. This usually happens after an update.")
+                            rd = cache.get(job.mlflow_run_id, {"error": "No details found."})
                             
-                            rcol1, rcol2 = st.columns(2)
-                            with rcol1:
-                                if st.button("🔌 Attempt Schema Fix", key=f"ml_fix_stamp_{job.job_id}"):
-                                    try:
+                            if "error" in rd:
+                                st.error(f"Could not load MLflow data: {rd['error']}")
+                                st.markdown("---")
+                                st.markdown("#### 🛠️ MLflow Troubleshooting")
+                                st.info("The MLflow database seems to have a schema conflict.")
+                                rcols = st.columns(2)
+                                with rcols[0]:
+                                    if st.button("🔌 Attempt Fix", key=f"t4_fix_{job.job_id}"):
                                         import subprocess
-                                        res = subprocess.run(["python", "-m", "mlflow", "db", "stamp", "head", "--url", "sqlite:///mlflow.db"], capture_output=True, text=True)
-                                        if res.returncode == 0:
-                                            st.success("Database stamped to 'head'. Please refresh.")
-                                        else:
-                                            st.error(f"Fix failed: {res.stderr}")
-                                    except Exception as ex:
-                                        st.error(f"Execution error: {ex}")
-                            
-                            with rcol2:
-                                if st.button("🔥 Purge & Re-init (Nuclear)", key=f"ml_purge_{job.job_id}", help="Renames mlflow.db and starts fresh. Historic data in the UI will persist but details for old runs will be lost."):
-                                    try:
-                                        import os, time
-                                        if os.path.exists("mlflow.db"):
-                                            os.rename("mlflow.db", f"mlflow.db.bak_{int(time.time())}")
-                                            st.success("Database purged. Refreshing to re-initialize...")
-                                            time.sleep(1)
-                                            st.rerun()
-                                    except Exception as ex:
-                                        st.error(f"Purge error: {ex}")
-                        else:
-                            info = rd.get("info", {})
-                            cols_ml = st.columns(3)
-                            cols_ml[0].metric("Status", info.get("status", "?"))
-                            if info.get("start_time"):
-                                import datetime as _dt
-                                st.datetime_info = _dt.datetime.fromtimestamp(info["start_time"] / 1000)
-                                cols_ml[1].metric("Started", st.datetime_info.strftime("%H:%M:%S"))
-                            cols_ml[2].caption(f"Experiment: **{info.get('experiment_name', '?')}**")
+                                        subprocess.run(["python", "-m", "mlflow", "db", "stamp", "head", "--url", "sqlite:///mlflow.db"])
+                                        st.rerun()
+                                with rcols[1]:
+                                    if st.button("🗑 Reset DB", key=f"t4_rst_{job.job_id}"):
+                                        import os
+                                        if os.path.exists("mlflow.db"): os.remove("mlflow.db")
+                                        st.rerun()
+                            else:
+                                # Standard Display
+                                info = rd.get("info", {})
+                                cols_ml = st.columns(3)
+                                cols_ml[0].metric("Status", info.get("status", "?"))
+                                if info.get("start_time"):
+                                    import datetime as _dt
+                                    dt_val = _dt.datetime.fromtimestamp(info["start_time"] / 1000)
+                                    cols_ml[1].metric("Started", dt_val.strftime("%H:%M:%S"))
+                                cols_ml[2].caption(f"Experiment: **{info.get('experiment_name', '?')}**")
 
-                            ml_tabs = st.tabs(["Parameters", "Metrics", "Tags", "Artifacts"])
-                            with ml_tabs[0]:
-                                params_data = rd.get("params", {})
-                                if params_data:
-                                    params_df = pd.DataFrame(list(params_data.items()), columns=['Parameter', 'Value'])
-                                    st.dataframe(params_df, use_container_width=True)
-                                else:
-                                    st.info("No parameters logged.")
-                            with ml_tabs[1]:
-                                metrics_data = rd.get("metrics", {})
-                                if metrics_data:
-                                    met_cols = st.columns(min(len(metrics_data), 4))
-                                    for mi, (mk, mv) in enumerate(metrics_data.items()):
-                                        met_cols[mi % 4].metric(mk, f"{mv:.4f}" if isinstance(mv, float) else mv)
-                                    
-                                    # Show history chart for numeric metrics
-                                    hist = rd.get("metric_history", {})
-                                    if hist:
-                                        metric_sel = st.selectbox("Metric History", list(hist.keys()), key=f"mhist_{job.job_id}")
-                                        if metric_sel and hist.get(metric_sel):
-                                            hist_df = pd.DataFrame(hist[metric_sel])
-                                            fig_hist = px.line(hist_df, x="step", y="value", title=f"{metric_sel} History")
-                                            st.plotly_chart(fig_hist, use_container_width=True, key=f"hist_{job.job_id}")
-                                else:
-                                    st.info("No metrics logged.")
-                            with ml_tabs[2]:
-                                tags_data = rd.get("tags", {})
-                                if tags_data:
-                                    st.json(tags_data)
-                                else:
-                                    st.info("No custom tags.")
-                            with ml_tabs[3]:
-                                artifacts = rd.get("artifacts", [])
-                                if artifacts:
-                                    for a in artifacts:
-                                        st.markdown(f"📄 `{a}`")
-                                else:
-                                    st.info("No artifacts logged.")
+                                ml_tabs = st.tabs(["Parameters", "Metrics", "Tags", "Artifacts"])
+                                with ml_tabs[0]: st.json(rd.get("params", {}))
+                                with ml_tabs[1]:
+                                    metrics_data = rd.get("metrics", {})
+                                    if metrics_data:
+                                        met_cols = st.columns(min(len(metrics_data), 4))
+                                        for mi, (mk, mv) in enumerate(metrics_data.items()):
+                                            met_cols[mi % 4].metric(mk, f"{mv:.4f}" if isinstance(mv, float) else mv)
+                                        
+                                        hist = rd.get("metric_history", {})
+                                        if hist:
+                                            metric_sel = st.selectbox("History", list(hist.keys()), key=f"hsel_t4_{job.job_id}")
+                                            if metric_sel:
+                                                h_df = pd.DataFrame(hist[metric_sel])
+                                                st.plotly_chart(px.line(h_df, x="step", y="value"), use_container_width=True)
+                                    else: st.info("No metrics.")
+                                with ml_tabs[2]: st.json(rd.get("tags", {}))
+                                with ml_tabs[3]:
+                                    artifacts = rd.get("artifacts", [])
+                                    if artifacts:
+                                        for a in artifacts: st.markdown(f"📄 `{a}`")
+                                    else: st.info("No artifacts logged.")
+                                
+                                st.divider()
+                                if st.button("🗑 Reset MLflow Database", key=f"g_rst_t4_{job.job_id}"):
+                                    import os
+                                    if os.path.exists("mlflow.db"):
+                                        os.remove("mlflow.db")
+                                        st.rerun()
+                        except Exception as e:
+                            st.error(f"Error handling MLflow data: {e}")
                     else:
-                        st.info("MLflow data available after the experiment completes.")
+                        st.info("MLflow data will be available after the first trial completes.")
 
                 # ── Tab 5: Register Model ──
                 with detail_tabs[5]:
@@ -3495,11 +3482,11 @@ with tabs[2]:
                         st.markdown("### Register this run as an Official Model")
                         reg_name = st.text_input(
                             "Model Registry Name", 
-                            value=f"{job.config.get('task', 'model')}_{job.name[:20]}",
+                            value=f"{job.config.get('task', 'model')}_{job.name[:20].replace(' ', '_')}",
                             key=f"reg_name_{job.job_id}"
                         )
                         if st.button("📦 Register Model", key=f"reg_btn_{job.job_id}", type="primary"):
-                            with st.spinner("Registering…"):
+                            with st.spinner("Registering..."):
                                 success = register_model_from_run(job.mlflow_run_id, reg_name)
                             if success:
                                 st.success(f"✅ Model **{reg_name}** registered! Check the **Model Registry & Deploy** tab.")
@@ -3546,16 +3533,21 @@ with tabs[2]:
                                             # Download model from MLflow to a temp directory
                                             import tempfile
                                             with tempfile.TemporaryDirectory() as tmp_dir:
-                                                from mlflow.sklearn import save_model as ml_save_skl
                                                 from mlflow.sklearn import load_model as ml_load_skl
                                                 model_uri = f"runs:/{job.mlflow_run_id}/model"
                                                 skl_model = ml_load_skl(model_uri)
+                                                
+                                                import os
                                                 save_path = os.path.join(tmp_dir, "model")
-                                                ml_save_skl(skl_model, save_path)
+                                                # We don't necessarily need to re-save if we have the local path, 
+                                                # but MLflow download_artifacts is better
+                                                import mlflow
+                                                local_model_path = mlflow.artifacts.download_artifacts(run_id=job.mlflow_run_id, artifact_path="model", dst_path=tmp_dir)
                                                 
                                                 # Deploy using our utility
+                                                from src.deploy.hf_deploy import deploy_to_huggingface
                                                 repo_url = deploy_to_huggingface(
-                                                    model_path=save_path,
+                                                    model_path=local_model_path,
                                                     repo_id=hf_repo,
                                                     token=hf_token,
                                                     task=job.config.get('task', 'classification')
@@ -3565,6 +3557,7 @@ with tabs[2]:
                                             st.error(f"HF Push failed: {e}")
                     else:
                         st.info("Model registration is available after the experiment completes and logs a model to MLflow.")
+
 
     # Call the dashboard fragment
     experiments_dashboard()
