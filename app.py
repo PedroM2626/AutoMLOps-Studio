@@ -2023,7 +2023,7 @@ with tabs[1]:
                 cfg['mode_selection'] = mode_selection
 
                 # Models that are training METHODS, not standalone estimators — excluded from user-facing model list
-                _ENSEMBLE_METHODS = {"custom_voting", "custom_stacking", "custom_bagging", "bagging"}
+                _ENSEMBLE_METHODS = {"custom_voting", "custom_stacking", "custom_bagging", "bagging", "voting_ensemble", "stacking_ensemble"}
 
                 if mode_selection == "Manual (Select)":
                     # Build candidate list: all available models minus pure ensemble-method keys
