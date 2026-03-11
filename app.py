@@ -2009,169 +2009,247 @@ with tabs[1]:
             if model_source == "Standard AutoML (Scikit-Learn/XGBoost/Transformers)":
                 # ── Model Selection Mode ──────────────────────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
+
+                # NOTE: "Custom Ensemble Builder" is now merged into "Manual (Select)"
+                # In Automatic mode, the system auto-configures ensembles based on Training Focus.
                 mode_selection = st.radio(
                     "Selection Mode",
-                    ["Automatic (Preset)", "Manual (Select)", "Custom Ensemble Builder"],
+                    ["Automatic (Preset)", "Manual (Select)"],
+                    index=0 if cfg.get('mode_selection', 'Automatic (Preset)') not in ["Manual (Select)"] else 1,
                     horizontal=True,
-                    key="wiz_mode_sel"
+                    key="wiz_mode_sel",
+                    help="Automatic: AutoML explores all models using the Training Focus below. Manual: hand-pick specific models and optionally define your own ensemble combinations."
                 )
                 cfg['mode_selection'] = mode_selection
 
+                # Models that are training METHODS, not standalone estimators — excluded from user-facing model list
+                _ENSEMBLE_METHODS = {"custom_voting", "custom_stacking", "custom_bagging", "bagging"}
+
                 if mode_selection == "Manual (Select)":
-                    # Re-build available models respecting current flags
+                    # Build candidate list: all available models minus pure ensemble-method keys
                     _tmp_trainer = AutoMLTrainer(
                         task_type=task,
-                        use_ensemble=cfg.get('use_ensemble', True),
-                        use_deep_learning=cfg.get('use_deep_learning', True)
+                        use_ensemble=cfg.get("use_ensemble", True),
+                        use_deep_learning=cfg.get("use_deep_learning", True)
                     )
-                    # For manual selection, we show ALL possible models (unfiltered by ensemble_mode or deep_learning)
-                    # but we can provide hints or categories.
                     _all_candidates = _tmp_trainer.get_available_models()
-                    
+                    _model_candidates = [m for m in _all_candidates if m not in _ENSEMBLE_METHODS]
+
                     st.markdown("<p style='font-size:0.8rem;color:#8b949e;'>Select specific models to include in the search space. Hand-picked models will always be trained regardless of global filters.</p>", unsafe_allow_html=True)
+                    _prev_sel = cfg.get("selected_models") or []
+                    _prev_plain = [m for m in _prev_sel if m not in _ENSEMBLE_METHODS]
                     sel_models = st.multiselect(
                         "Choose Models",
-                        _all_candidates,
-                        default=[m for m in (cfg.get('selected_models', _all_candidates[:2]) or _all_candidates[:2]) if m in _all_candidates],
+                        _model_candidates,
+                        default=[m for m in _prev_plain if m in _model_candidates] or _model_candidates[:2],
                         key="wiz_sel_models"
                     )
-                    cfg['selected_models'] = sel_models
-                
-                elif mode_selection == "Custom Ensemble Builder":
-                    cfg['use_ensemble'] = True
+                    cfg["selected_models"] = sel_models if sel_models else None
+                else:
+                    # Automatic mode — no manual model list needed
+                    cfg["selected_models"] = None
+
+                # ── Training Focus selector (shown for both modes) ────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
+                FOCUS_OPTIONS = [
+                    ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
+                    ("ensemble_only", "🏗️", "Custom Ensembles","Only train Custom Voting/Stacking/Bagging. Good if base models are already tuned."),
+                    ("both",          "🏆", "Both (Full)",     "Train all models including ensembles. Maximum accuracy but takes longer."),
+                ]
+                cur_focus = cfg.get("ensemble_mode", "both")
+
+                focus_cols = st.columns(3)
+                for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
+                    with focus_cols[i]:
+                        is_sel = (fid == cur_focus)
+                        border = "border: 2px solid #27ae60; background:linear-gradient(135deg,rgba(39,174,96,0.1),rgba(39,174,96,0.05));" if is_sel else ""
+                        st.markdown(f"""
+                        <div class='task-card' style='min-height:130px;{border}'>
+                          <div class='task-icon'>{ficon}</div>
+                          <div class='task-name'>{fname}</div>
+                          <div class='task-desc'>{fdesc}</div>
+                        </div>""", unsafe_allow_html=True)
+                        if st.button(f"{'\u2713 Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
+                            cfg["ensemble_mode"] = fid
+                            cfg["use_ensemble"] = (fid != "single")
+                            st.session_state["automl_config"] = cfg
+                            st.rerun()
+                cfg["ensemble_mode"] = cur_focus
+                cfg["use_ensemble"] = (cur_focus != "single")
+
+                # ── Deep Learning selector ────────────────────────────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Deep Learning Models</p>", unsafe_allow_html=True)
+                DL_OPTIONS = [
+                    ("classic", "📊", "Classic ML Only",      "Tree-based models, linear models, SVM, KNN. Fast training, low resource usage."),
+                    ("deep",    "🧠", "Include Deep Learning", "Also search Neural Networks (MLP) and Transformers (BERT, etc.). Much slower but may outperform for NLP/complex tabular."),
+                ]
+                cur_dl = "deep" if cfg.get("use_deep_learning", True) else "classic"
+                dl_cols = st.columns(2)
+                for i, (did, dicon, dname, ddesc) in enumerate(DL_OPTIONS):
+                    with dl_cols[i]:
+                        is_sel = (did == cur_dl)
+                        border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
+                        st.markdown(f"""
+                        <div class='task-card' style='min-height:110px;{border}'>
+                          <div class='task-icon'>{dicon}</div>
+                          <div class='task-name'>{dname}</div>
+                          <div class='task-desc'>{ddesc}</div>
+                        </div>""", unsafe_allow_html=True)
+                        if st.button(f"{'\u2713 Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
+                            cfg["use_deep_learning"] = (did == "deep")
+                            st.session_state["automl_config"] = cfg
+                            st.rerun()
+                cfg["use_deep_learning"] = (cur_dl == "deep")
+
+                # ── Custom Ensemble Builder — only in Manual mode + when focus involves ensembles ──
+                # In Automatic (Preset) mode, ensembles are configured automatically by the engine.
+                if mode_selection == "Manual (Select)" and cur_focus != "single":
+                    st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown("""
                     <div class='ui-card' style='padding:14px;margin-bottom:12px;'>
-                      <div style='font-weight:600;margin-bottom:4px;'>🏗️ Ensemble Builder</div>
-                      <div style='color:#8b949e;font-size:0.8rem;'>Combine multiple base models into a powerful ensemble.</div>
+                      <div style='font-weight:600;margin-bottom:4px;'>
+                        🏗️ Custom Ensembles
+                        <span style='font-size:0.75rem;color:#8b949e;font-weight:400;'>(optional)</span>
+                      </div>
+                      <div style='color:#8b949e;font-size:0.8rem;'>
+                        Add one or more ensemble methods to combine your selected base models.
+                        You can add multiple ensembles with different configurations.
+                      </div>
                     </div>""", unsafe_allow_html=True)
-                    ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"], key="wiz_ens_type")
-                    base_candidates = [m for m in available_models if 'ensemble' not in m]
-                    sel_base = st.multiselect("Base Estimators", base_candidates,
-                        default=cfg.get('ensemble_config', {}).get('voting_estimators', base_candidates[:3]),
-                        key="wiz_base_models")
-                    if len(sel_base) < 2:
-                        st.warning("⚠️ Select at least 2 base models.")
 
-                    ens_cfg = {}
-                    if ensemble_type == "Voting":
-                        voting_type = st.selectbox("Voting Type", ["soft", "hard"] if task == "classification" else ["soft"], key="wiz_vote_type")
-                        use_wts = st.checkbox("Weighted Voting", key="wiz_use_weights")
-                        voting_weights = None
-                        if use_wts:
-                            wts_str = st.text_input("Weights (comma-separated)", value=",".join(["1.0"] * len(sel_base)), key="wiz_weights")
-                            try:
-                                voting_weights = [float(w.strip()) for w in wts_str.split(",")]
-                            except:
-                                st.error("Invalid weights format.")
-                        ens_cfg = {'voting_estimators': sel_base, 'voting_type': voting_type, 'voting_weights': voting_weights}
-                        cfg['selected_models'] = ['custom_voting']
-                    else:  # Stacking
-                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'ridge', 'linear_regression']
-                        if task == 'classification':
-                            meta_candidates = [m for m in meta_candidates if m not in ['linear_regression', 'ridge']]
-                        else:
-                            meta_candidates = [m for m in meta_candidates if m not in ['logistic_regression']]
-                        if not meta_candidates:
-                            meta_candidates = ['random_forest']
-                        final_est = st.selectbox("Meta-Model", meta_candidates, key="wiz_meta_model")
-                        ens_cfg = {'stacking_estimators': sel_base, 'stacking_final_estimator': final_est}
-                        cfg['selected_models'] = ['custom_stacking']
+                    # Initialise list in config
+                    if "custom_ensembles" not in cfg or not isinstance(cfg.get("custom_ensembles"), list):
+                        cfg["custom_ensembles"] = []
 
-                    cfg['ensemble_config'] = ens_cfg
-                else:
-                    cfg['selected_models'] = None
+                    # Build base model options for ensembles
+                    _ens_base_trainer = AutoMLTrainer(task_type=task, use_deep_learning=cfg.get("use_deep_learning", True))
+                    _ens_base_candidates = [m for m in _ens_base_trainer.get_available_models() if m not in _ENSEMBLE_METHODS]
 
-                # ── Training Focus & Deep Learning (Only relevant if NOT in Custom Ensemble Builder) ──
-                if mode_selection != "Custom Ensemble Builder":
-                    # ── Training Focus selector ───────────────────────────────────
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                    FOCUS_OPTIONS = [
-                        ('single', '🎯', 'Single Models', 'Train individual models only. Faster, simpler, easier to interpret.'),
-                        ('ensemble_only', '🏗️', 'Custom Ensembles', 'Only train Custom Voting/Stacking/Bagging. Good if base models are already tuned.'),
-                        ('both', '🏆', 'Both (Full)', 'Train all models including ensembles. Maximum accuracy but takes longer.'),
-                    ]
-                    cur_focus = cfg.get('ensemble_mode', 'both')
-                    
-                    focus_cols = st.columns(3)
-                    for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
-                        with focus_cols[i]:
-                            is_sel = (fid == cur_focus)
-                            border = "border: 2px solid #27ae60; background:linear-gradient(135deg,rgba(39,174,96,0.1),rgba(39,174,96,0.05));" if is_sel else ""
-                            st.markdown(f"""
-                            <div class='task-card' style='min-height:130px;{border}'>
-                              <div class='task-icon'>{ficon}</div>
-                              <div class='task-name'>{fname}</div>
-                              <div class='task-desc'>{fdesc}</div>
-                            </div>""", unsafe_allow_html=True)
-                            if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
-                                cfg['ensemble_mode'] = fid
-                                cfg['use_ensemble'] = (fid != 'single')
-                                st.session_state['automl_config'] = cfg
+                    # Render existing ensemble entries
+                    ensembles_to_keep = []
+                    for ei, ens in enumerate(cfg["custom_ensembles"]):
+                        ecol1, ecol2 = st.columns([5, 1])
+                        with ecol1:
+                            if ens["type"] == "voting":
+                                ens_label = f"**#{ei+1} Voting** — Models: `{', '.join(ens.get('models', []))}` | Voting: `{ens.get('voting_type', 'soft')}`"
+                            elif ens["type"] == "stacking":
+                                ens_label = f"**#{ei+1} Stacking** — Models: `{', '.join(ens.get('models', []))}` | Meta: `{ens.get('meta_model', '')}`"
+                            else:
+                                ens_label = f"**#{ei+1} Bagging** — Base: `{ens.get('base_estimator', 'decision_tree')}`"
+                            st.markdown(ens_label)
+                        with ecol2:
+                            if st.button("🗑️ Remove", key=f"ens_remove_{ei}"):
+                                cfg["custom_ensembles"] = [e for j, e in enumerate(cfg["custom_ensembles"]) if j != ei]
+                                st.session_state["automl_config"] = cfg
                                 st.rerun()
-                    cfg['ensemble_mode'] = cur_focus
-                    cfg['use_ensemble'] = (cur_focus != 'single')
+                            else:
+                                ensembles_to_keep.append(ens)
+                    cfg["custom_ensembles"] = ensembles_to_keep
 
-                    # ── Deep Learning selector ────────────────────────────────────
-                    st.markdown("<br>", unsafe_allow_html=True)
-                    st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Deep Learning Models</p>", unsafe_allow_html=True)
-                    DL_OPTIONS = [
-                        ('classic', '📊', 'Classic ML Only', 'Tree-based models, linear models, SVM, KNN. Fast training, low resource usage.'),
-                        ('deep',    '🧠', 'Include Deep Learning', 'Also search Neural Networks (MLP) and Transformers (BERT, etc.). Much slower but may outperform for NLP/complex tabular.'),
-                    ]
-                    cur_dl = 'deep' if cfg.get('use_deep_learning', True) else 'classic'
-                    dl_cols = st.columns(2)
-                    for i, (did, dicon, dname, ddesc) in enumerate(DL_OPTIONS):
-                        with dl_cols[i]:
-                            is_sel = (did == cur_dl)
-                            border = "border: 2px solid #8b5cf6; background:linear-gradient(135deg,rgba(139,92,246,0.1),rgba(139,92,246,0.05));" if is_sel else ""
-                            st.markdown(f"""
-                            <div class='task-card' style='min-height:110px;{border}'>
-                              <div class='task-icon'>{dicon}</div>
-                              <div class='task-name'>{dname}</div>
-                              <div class='task-desc'>{ddesc}</div>
-                            </div>""", unsafe_allow_html=True)
-                            if st.button(f"{'✓ Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
-                                cfg['use_deep_learning'] = (did == 'deep')
-                                st.session_state['automl_config'] = cfg
+                    # Form to add a new ensemble
+                    with st.expander("➕ Add Custom Ensemble", expanded=len(cfg["custom_ensembles"]) == 0):
+                        new_ens_type = st.selectbox(
+                            "Ensemble Type",
+                            ["Voting", "Stacking", "Bagging"],
+                            key="wiz_new_ens_type"
+                        )
+                        new_ens_cfg = {"type": new_ens_type.lower()}
+
+                        if new_ens_type in ("Voting", "Stacking"):
+                            new_sel_base = st.multiselect(
+                                "Base Estimators",
+                                _ens_base_candidates,
+                                default=_ens_base_candidates[:3] if len(_ens_base_candidates) >= 3 else _ens_base_candidates,
+                                key="wiz_new_base_models"
+                            )
+                            if len(new_sel_base) < 2:
+                                st.warning("⚠️ Select at least 2 base models.")
+                            new_ens_cfg["models"] = new_sel_base
+
+                            if new_ens_type == "Voting":
+                                new_voting_type = st.selectbox(
+                                    "Voting Type",
+                                    ["soft", "hard"] if task == "classification" else ["soft"],
+                                    key="wiz_new_vote_type"
+                                )
+                                new_use_wts = st.checkbox("Weighted Voting", key="wiz_new_use_weights")
+                                new_voting_weights = None
+                                if new_use_wts:
+                                    wts_str = st.text_input(
+                                        "Weights (comma-separated)",
+                                        value=",".join(["1.0"] * len(new_sel_base)),
+                                        key="wiz_new_weights"
+                                    )
+                                    try:
+                                        new_voting_weights = [float(w.strip()) for w in wts_str.split(",")]
+                                    except Exception:
+                                        st.error("Invalid weights format.")
+                                new_ens_cfg["voting_type"] = new_voting_type
+                                new_ens_cfg["voting_weights"] = new_voting_weights
+                            else:  # Stacking
+                                _meta_opts = ["logistic_regression", "random_forest", "xgboost", "ridge", "linear_regression"]
+                                if task == "classification":
+                                    _meta_opts = [m for m in _meta_opts if m not in ["linear_regression", "ridge"]]
+                                else:
+                                    _meta_opts = [m for m in _meta_opts if m not in ["logistic_regression"]]
+                                if not _meta_opts:
+                                    _meta_opts = ["random_forest"]
+                                new_meta = st.selectbox("Meta-Model (Final Estimator)", _meta_opts, key="wiz_new_meta_model")
+                                new_ens_cfg["meta_model"] = new_meta
+
+                        else:  # Bagging
+                            _bag_base_opts = ["decision_tree", "logistic_regression", "knn", "svm", "extra_trees"]
+                            new_bag_base = st.selectbox("Base Estimator", _bag_base_opts, key="wiz_new_bag_base")
+                            new_ens_cfg["base_estimator"] = new_bag_base
+
+                        if st.button("✅ Add This Ensemble", key="wiz_add_ensemble_btn"):
+                            valid = True
+                            if new_ens_type in ("Voting", "Stacking") and len(new_ens_cfg.get("models", [])) < 2:
+                                st.error("Please select at least 2 base models first.")
+                                valid = False
+                            if valid:
+                                cfg["custom_ensembles"].append(new_ens_cfg)
+                                st.session_state["automl_config"] = cfg
                                 st.rerun()
-                    cfg['use_deep_learning'] = cur_dl == 'deep'
-                    ensemble_type = st.selectbox("Ensemble Type", ["Voting", "Stacking"], key="wiz_ens_type")
-                    base_candidates = [m for m in available_models if 'ensemble' not in m]
-                    sel_base = st.multiselect("Base Estimators", base_candidates,
-                        default=cfg.get('ensemble_config', {}).get('voting_estimators', base_candidates[:3]),
-                        key="wiz_base_models")
-                    if len(sel_base) < 2:
-                        st.warning("⚠️ Select at least 2 base models.")
 
-                    ens_cfg = {}
-                    if ensemble_type == "Voting":
-                        voting_type = st.selectbox("Voting Type", ["soft", "hard"] if task == "classification" else ["soft"], key="wiz_vote_type")
-                        use_wts = st.checkbox("Weighted Voting", key="wiz_use_weights")
-                        voting_weights = None
-                        if use_wts:
-                            wts_str = st.text_input("Weights (comma-separated)", value=",".join(["1.0"] * len(sel_base)), key="wiz_weights")
-                            try:
-                                voting_weights = [float(w.strip()) for w in wts_str.split(",")]
-                            except:
-                                st.error("Invalid weights format.")
-                        ens_cfg = {'voting_estimators': sel_base, 'voting_type': voting_type, 'voting_weights': voting_weights}
-                        cfg['selected_models'] = ['custom_voting']
-                    else:  # Stacking
-                        meta_candidates = ['logistic_regression', 'random_forest', 'xgboost', 'ridge', 'linear_regression']
-                        if task == 'classification':
-                            meta_candidates = [m for m in meta_candidates if m not in ['linear_regression', 'ridge']]
-                        else:
-                            meta_candidates = [m for m in meta_candidates if m not in ['logistic_regression']]
-                        if not meta_candidates:
-                            meta_candidates = ['random_forest']
-                        final_est = st.selectbox("Meta-Model", meta_candidates, key="wiz_meta_model")
-                        ens_cfg = {'stacking_estimators': sel_base, 'stacking_final_estimator': final_est}
-                        cfg['selected_models'] = ['custom_stacking']
+                    # Build selected_models and ensemble_config from the custom_ensembles list
+                    _base_sel = [m for m in (cfg.get("selected_models") or []) if m not in _ENSEMBLE_METHODS]
+                    _ens_model_keys = []
+                    _ens_config_list = []
+                    for ens in cfg["custom_ensembles"]:
+                        if ens["type"] == "voting":
+                            _ens_model_keys.append("custom_voting")
+                            _ens_config_list.append({
+                                "voting_estimators": ens.get("models", []),
+                                "voting_type":       ens.get("voting_type", "soft"),
+                                "voting_weights":    ens.get("voting_weights"),
+                            })
+                        elif ens["type"] == "stacking":
+                            _ens_model_keys.append("custom_stacking")
+                            _ens_config_list.append({
+                                "stacking_estimators":       ens.get("models", []),
+                                "stacking_final_estimator":  ens.get("meta_model", "logistic_regression"),
+                            })
+                        elif ens["type"] == "bagging":
+                            _ens_model_keys.append("custom_bagging")
+                            _ens_config_list.append({
+                                "bagging_base_estimator": ens.get("base_estimator", "decision_tree"),
+                            })
 
-                    cfg['ensemble_config'] = ens_cfg
+                    _final_sel = _base_sel + _ens_model_keys
+                    cfg["selected_models"] = _final_sel if _final_sel else None
+                    # For backward compat with trainer: store first ensemble config in ensemble_config
+                    cfg["ensemble_config"]      = _ens_config_list[0] if _ens_config_list else {}
+                    cfg["ensemble_configs_list"] = _ens_config_list
+
                 else:
-                    cfg['selected_models'] = None
+                    # Automatic mode OR Single-Models-only Manual mode — clear manual ensemble config
+                    cfg["ensemble_config"]       = {}
+                    cfg["ensemble_configs_list"] = []
+                    if "custom_ensembles" not in cfg:
+                        cfg["custom_ensembles"] = []
 
             elif model_source == "Model Registry (Registered)":
                 reg_models_list = get_registered_models()
