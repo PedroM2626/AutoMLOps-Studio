@@ -62,6 +62,13 @@ except ImportError:
 # Modular imports
 from src.core.processor import AutoMLDataProcessor
 from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS, _NEURAL_NET_KEYS, ENSEMBLE_DISPLAY_NAMES, get_ensemble_display_name
+
+# Preset/fixed-structure composites — no meaningful HP space, run only 1 trial each.
+# Distinct from _ENSEMBLE_MODEL_KEYS (which governs _filter_models mode-based exclusion).
+_STATIC_ENSEMBLE_KEYS = frozenset([
+    'voting_ensemble', 'stacking_ensemble',
+    'custom_voting', 'custom_stacking', 'custom_bagging',
+])
 from src.engines.stability import StabilityAnalyzer
 from src.tracking.mlflow import MLFlowTracker
 from src.utils.helpers import get_consumption_code, generate_model_card
@@ -1226,11 +1233,11 @@ class AutoMLTrainer:
             # Determine number of trials for this specific model
             m_n_trials = n_trials
             
-            # Ensembles and static models should only run once
-            from src.core.trainer import _ENSEMBLE_MODEL_KEYS
-            if m_name in _ENSEMBLE_MODEL_KEYS or m_name in static_models:
+            # Fixed-structure ensembles and parameter-less models only need a single trial.
+            # bagging / adaboost / hist_gradient_boosting have real HP spaces and use full n_trials.
+            if m_name in _STATIC_ENSEMBLE_KEYS or m_name in static_models:
                 m_n_trials = 1
-                logger.info(f"Setting n_trials=1 for model: {m_name}")
+                logger.info(f"Setting n_trials=1 for static/preset model: {m_name}")
 
             logger.info(f"Starting optimization for model: {m_name} ({m_n_trials} trials, Timeout: {(current_timeout or 0.0):.2f}s)")
             
