@@ -1,3 +1,9 @@
+*.db
+*.py[cod]
+__pycache__/
+assets/external/
+.states
+.web
 node_modules/
 *temp*
 dist/
@@ -6,7 +12,7 @@ dist/
 *models*
 *reports*
 *logs*
-*mlruns*    
+*mlruns*
 *pycache*
 *.db*
 *.log

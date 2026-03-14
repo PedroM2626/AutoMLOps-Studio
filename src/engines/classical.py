@@ -116,7 +116,7 @@ class AutoMLTrainer:
                 'n_trials': 40,
                 'timeout': 1800, # 30 min
                 'cv': 5,
-                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting', 'bagging']
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting']
             },
             'high': {
                 'n_trials': 100, 
@@ -125,7 +125,7 @@ class AutoMLTrainer:
                 'models': [
                     'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 
                     'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 
-                    'voting_ensemble', 'stacking_ensemble', 'hist_gradient_boosting', 'bagging',
+                    'voting_ensemble', 'stacking_ensemble', 'hist_gradient_boosting',
                     'bert-base-uncased', 'distilbert-base-uncased'
                 ]
             },
@@ -917,6 +917,9 @@ class AutoMLTrainer:
                 else: # holdout
                     test_size = validation_params.get('test_size', 0.2)
                     split_ratio = 1.0 - test_size
+
+                shuffle_splits = bool(validation_params.get('shuffle', True))
+                stratify_holdout = bool(validation_params.get('stratify', False))
                 
                 # Cache key should include if we are using raw or vectorized data
                 is_raw = (effective_X is X_raw)
@@ -936,9 +939,22 @@ class AutoMLTrainer:
                             y_tr, y_val = y_train[:split_idx], y_train[split_idx:]
                     else:
                         if y_train is not None:
-                            X_tr, X_val, y_tr, y_val = train_test_split(effective_X, y_train, train_size=split_ratio, random_state=current_seed)
+                            stratify_target = y_train if (self.task_type == 'classification' and stratify_holdout and validation_strategy == 'holdout' and shuffle_splits) else None
+                            X_tr, X_val, y_tr, y_val = train_test_split(
+                                effective_X,
+                                y_train,
+                                train_size=split_ratio,
+                                random_state=current_seed,
+                                shuffle=shuffle_splits,
+                                stratify=stratify_target,
+                            )
                         else:
-                            X_tr, X_val = train_test_split(effective_X, train_size=split_ratio, random_state=current_seed)
+                            X_tr, X_val = train_test_split(
+                                effective_X,
+                                train_size=split_ratio,
+                                random_state=current_seed,
+                                shuffle=shuffle_splits,
+                            )
                             y_tr, y_val = None, None
                     if len(self._split_cache) > 10: self._split_cache.clear()
                     self._split_cache[cache_key] = (X_tr, X_val, y_tr, y_val)
@@ -995,21 +1011,38 @@ class AutoMLTrainer:
                     else:
                         # Cross Validation Logic
                         n_splits = validation_params.get('folds', 3) if validation_params else 3
+                        shuffle_splits = bool(validation_params.get('shuffle', True)) if validation_params else True
+                        gap = int(validation_params.get('gap', 0) or 0) if validation_params else 0
+                        max_train_size = validation_params.get('max_train_size') if validation_params else None
+                        if isinstance(max_train_size, (int, float)) and max_train_size <= 0:
+                            max_train_size = None
                         
                         # Define metrics to calculate via cross_validate
                         if self.task_type == 'classification':
                             scoring_list = ['accuracy', 'f1_weighted', 'precision_weighted', 'recall_weighted', 'roc_auc_ovr']
                             
                             if validation_strategy == 'stratified_cv':
-                                cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                                cv = StratifiedKFold(
+                                    n_splits=n_splits,
+                                    shuffle=shuffle_splits,
+                                    random_state=current_seed if shuffle_splits else None,
+                                )
                             else:
-                                cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                                cv = KFold(
+                                    n_splits=n_splits,
+                                    shuffle=shuffle_splits,
+                                    random_state=current_seed if shuffle_splits else None,
+                                )
                         elif self.task_type == 'regression' or self.task_type == 'time_series':
                             scoring_list = ['r2', 'neg_root_mean_squared_error', 'neg_mean_absolute_error']
                             if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
-                                cv = TimeSeriesSplit(n_splits=n_splits)
+                                cv = TimeSeriesSplit(n_splits=n_splits, gap=gap, max_train_size=max_train_size)
                             else:
-                                cv = KFold(n_splits=n_splits, shuffle=True, random_state=current_seed)
+                                cv = KFold(
+                                    n_splits=n_splits,
+                                    shuffle=shuffle_splits,
+                                    random_state=current_seed if shuffle_splits else None,
+                                )
                         
                         from sklearn.model_selection import cross_validate
                         cv_results = cross_validate(model, X_tr, y_tr, cv=cv, scoring=scoring_list, error_score='raise')
@@ -1247,7 +1280,6 @@ class AutoMLTrainer:
                     lambda t: objective(t, forced_model=m_name),
                     n_trials=m_n_trials,
                     timeout=current_timeout,
-                    callbacks=[lambda s, t: callback(t, t.value, f"{display_model_name} - Trial {getattr(t, 'number', 0)+1}", 0)] if callback else None
                 )
             except Exception as e:
                 logger.error(f"Error during optimization of {m_name}: {e}")
@@ -1691,7 +1723,6 @@ class AutoMLTrainer:
                                 
                                 # Generate and Log Model Card
                                 from src.utils.helpers import generate_model_card
-                                import os
                                 try:
                                     mc_content = generate_model_card(
                                         model_name=m_name,

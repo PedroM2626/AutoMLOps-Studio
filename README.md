@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v4.5.2-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v4.6.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -16,22 +16,23 @@
 
 ---
 
-## 🌟 What's New in v4.5.0
+## 🌟 What's New in v4.6.0
 
-### 🏗️ Integrated Custom Ensemble Builder
-The **Custom Ensemble Builder** is now fully integrated into the **Manual (Select)** mode. Users can hand-pick base models and then add any number of **Voting, Stacking, or Bagging** configurations using those models. This merge provides a unified experience for building sophisticated model combinations.
+### 🛠️ Enhanced Training Presets
+- **Fast Preset Fix**: Resolved premature trial termination issue, ensuring consistent behavior across all presets.
+- **Customizable Trials**: Added flexibility for manual configuration of trials and timeouts in "Custom" mode.
 
-### 🤖 Smart Automatic Configuration
-An improved **Automatic (Preset)** mode now handles ensemble creation intelligently. Based on your **Training Focus** (Single, Ensembles, or Both) and **Deep Learning** settings, the engine automatically selects the best candidate models and configures optimized ensembles without requiring manual input.
+### 🎯 Improved Model Selection
+- **`bagging` Removed**: Hidden from user-facing model lists to streamline the selection process.
+- **Dynamic Forms**: Replaced manual JSON editor with interactive forms for algorithm parameter tuning.
 
-### ⚡ Background Infrastructure (Big Tech Style)
-The entire training pipeline now runs in **isolated background subprocesses**. This prevents UI freezes and allows for:
-- **Live Log Streaming**: Watch the model training logs in real-time.
-- **Concurrent Experiments**: Queue and run multiple trials simultaneously.
-- **Job Control**: Pause, Resume, or Cancel training jobs without losing the main application state.
+### ⚡ MLflow Integration
+- **Warning Fixes**: Addressed `os` variable scope conflicts for seamless logging.
+- **Enhanced Tracking**: Improved parameter and metric logging for better experiment reproducibility.
 
-### 🎯 Refined Model Privacy
-Internal training methods like `custom_voting`, `bagging`, and `stacking_ensemble` are now hidden from the primary model selection list. The UI focuses purely on **Base Estimators**, ensuring that ensembles are built explicitly through the builder or automatically by the preset engine.
+### 🖥️ Streamlit Wizard Updates
+- **Robustness Improvements**: Enhanced error handling for missing dataset versions and invalid configurations.
+- **UI Refinements**: Polished interface for a smoother user experience.
 
 ---
 
@@ -91,6 +92,13 @@ This starts the **Dashboard (8501)**, the **Serving API (8000)**, and the **MLfl
 pip install -r requirements.txt
 python -m streamlit run app.py
 ```
+
+### Reflex Interface
+```bash
+pip install -r requirements.txt
+reflex run
+```
+The Reflex app adds a modular native control plane in dark mode, covering data operations, AutoML jobs, experiments, registry/deploy flows, DagsHub tracking integration, monitoring, and computer vision workflows without depending on the Streamlit interface.
 
 ---
 

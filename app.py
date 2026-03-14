@@ -2070,7 +2070,7 @@ with tabs[1]:
                           <div class='task-name'>{fname}</div>
                           <div class='task-desc'>{fdesc}</div>
                         </div>""", unsafe_allow_html=True)
-                        if st.button(f"{'\u2713 Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
+                        if st.button(f"{'Selected' if is_sel else 'Select'}", key=f"focus_{fid}"):
                             cfg["ensemble_mode"] = fid
                             cfg["use_ensemble"] = (fid != "single")
                             st.session_state["automl_config"] = cfg
@@ -2097,7 +2097,7 @@ with tabs[1]:
                           <div class='task-name'>{dname}</div>
                           <div class='task-desc'>{ddesc}</div>
                         </div>""", unsafe_allow_html=True)
-                        if st.button(f"{'\u2713 Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
+                        if st.button(f"{'Selected' if is_sel else 'Select'}", key=f"dl_{did}"):
                             cfg["use_deep_learning"] = (did == "deep")
                             st.session_state["automl_config"] = cfg
                             st.rerun()
@@ -2370,7 +2370,7 @@ with tabs[1]:
 
             # Training preset (slider)
             preset_labels = ["test", "fast", "medium", "high", "custom"]
-            preset_descs  = {"test": "⚡ 1 trial for quick pipeline validation", "fast": "🚀 Fast search (~5 trials)",
+            preset_descs  = {"test": "⚡ 1 trial for quick pipeline validation", "fast": "🚀 Fast search (~15 trials)",
                              "medium": "⚖️ Balanced speed/quality (default)", "high": "🎯 Exhaustive search",
                              "custom": "🔧 Manual trial/timeout configuration"}
             col_preset, col_metric = st.columns(2)
