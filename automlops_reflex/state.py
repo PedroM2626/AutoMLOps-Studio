@@ -240,7 +240,7 @@ class AppState(rx.State):
 
     @rx.var
     def dataset_options_optional(self) -> list[str]:
-        return ["", *self.dataset_options]
+        return list(self.dataset_options)
 
     @rx.var
     def selected_dataset_version_options(self) -> list[str]:
@@ -248,7 +248,7 @@ class AppState(rx.State):
 
     @rx.var
     def data_column_options_optional(self) -> list[str]:
-        return ["", *self.data_column_options]
+        return list(self.data_column_options)
 
     @rx.var
     def drift_reference_version_options(self) -> list[str]:
@@ -268,7 +268,7 @@ class AppState(rx.State):
 
     @rx.var
     def automl_test_version_options_optional(self) -> list[str]:
-        return ["", *self.automl_test_version_options]
+        return list(self.automl_test_version_options)
 
     @rx.var
     def stability_version_options(self) -> list[str]:
@@ -285,7 +285,7 @@ class AppState(rx.State):
 
     @rx.var
     def selected_model_version_options_optional(self) -> list[str]:
-        return ["", *self.selected_model_version_options]
+        return list(self.selected_model_version_options)
 
     @rx.var
     def stability_model_version_options(self) -> list[str]:
@@ -293,7 +293,7 @@ class AppState(rx.State):
 
     @rx.var
     def stability_model_version_options_optional(self) -> list[str]:
-        return ["", *self.stability_model_version_options]
+        return list(self.stability_model_version_options)
 
     @rx.var
     def register_model_name_options(self) -> list[str]:
@@ -314,11 +314,11 @@ class AppState(rx.State):
 
     @rx.var
     def cv_data_dir_options_optional(self) -> list[str]:
-        return ["", *self.cv_data_dir_options]
+        return list(self.cv_data_dir_options)
 
     @rx.var
     def cv_label_csv_options_optional(self) -> list[str]:
-        return ["", *self.cv_label_csv_options]
+        return list(self.cv_label_csv_options)
 
     @rx.event
     def set_module(self, module_name: str):

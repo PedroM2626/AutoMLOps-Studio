@@ -207,23 +207,7 @@ def sidebar() -> rx.Component:
     )
 
 
-def header() -> rx.Component:
-    return card(
-        rx.hstack(
-            rx.hstack(
-                status_chip(AppState.api_status_label, AppState.api_status),
-                status_chip(AppState.mlflow_status_label, AppState.mlflow_status),
-                spacing="2",
-            ),
-            rx.spacer(),
-            rx.button("Refresh", on_click=AppState.refresh, background=ACCENT, color="#06122d", border_radius="12px"),
-            width="100%",
-            align_items="center",
-        ),
-        position="sticky",
-        top="0",
-        z_index="10",
-    )
+
 
 
 def overview_page() -> rx.Component:
@@ -386,8 +370,8 @@ def data_page() -> rx.Component:
                     ),
                 ),
                 input_block("Train percentage", rx.input(type="number", value=AppState.data_train_percent, on_change=AppState.set_data_train_percent, width="100%")),
-                input_block("Time column (chrono)", rx.select(AppState.data_column_options_optional, value=AppState.data_time_column, on_change=AppState.set_data_time_column, width="100%")),
-                input_block("Manual split column", rx.select(AppState.data_column_options_optional, value=AppState.data_manual_split_column, on_change=AppState.set_data_manual_split_column, width="100%")),
+                input_block("Time column (chrono)", rx.select(AppState.data_column_options_optional, placeholder="— none —", value=AppState.data_time_column, on_change=AppState.set_data_time_column, width="100%")),
+                input_block("Manual split column", rx.select(AppState.data_column_options_optional, placeholder="— none —", value=AppState.data_manual_split_column, on_change=AppState.set_data_manual_split_column, width="100%")),
                 columns="2",
                 spacing="3",
                 width="100%",
@@ -460,8 +444,8 @@ def automl_page() -> rx.Component:
             rx.grid(
                 input_block("Train dataset", rx.select(AppState.dataset_options, value=AppState.automl_train_dataset, on_change=AppState.update_automl_train_dataset, width="100%")),
                 input_block("Train version", rx.select(AppState.automl_train_version_options, value=AppState.automl_train_version, on_change=AppState.update_automl_train_version, width="100%")),
-                input_block("Test dataset (optional)", rx.select(AppState.dataset_options_optional, value=AppState.automl_test_dataset, on_change=AppState.update_automl_test_dataset, width="100%")),
-                input_block("Test version (optional)", rx.select(AppState.automl_test_version_options_optional, value=AppState.automl_test_version, on_change=AppState.set_automl_test_version, width="100%")),
+                input_block("Test dataset (optional)", rx.select(AppState.dataset_options_optional, placeholder="— none —", value=AppState.automl_test_dataset, on_change=AppState.update_automl_test_dataset, width="100%")),
+                input_block("Test version (optional)", rx.select(AppState.automl_test_version_options_optional, placeholder="— none —", value=AppState.automl_test_version, on_change=AppState.set_automl_test_version, width="100%")),
                 columns="2",
                 spacing="3",
                 width="100%",
@@ -803,7 +787,7 @@ def registry_deploy_page() -> rx.Component:
             ),
             rx.grid(
                 input_block("Model name", rx.select(AppState.model_name_options, value=AppState.selected_model_name, on_change=AppState.update_selected_model_name, width="100%")),
-                input_block("Model version (optional)", rx.select(AppState.selected_model_version_options_optional, value=AppState.selected_model_version, on_change=AppState.set_selected_model_version, width="100%")),
+                input_block("Model version (optional)", rx.select(AppState.selected_model_version_options_optional, placeholder="— none —", value=AppState.selected_model_version, on_change=AppState.set_selected_model_version, width="100%")),
                 columns="2",
                 spacing="3",
                 width="100%",
@@ -871,7 +855,7 @@ def monitoring_page() -> rx.Component:
             rx.text("Model Stability", color=TEXT_PRIMARY, font_weight="700"),
             rx.grid(
                 input_block("Model name", rx.select(AppState.model_name_options, value=AppState.stability_model_name, on_change=AppState.update_stability_model_name, width="100%")),
-                input_block("Version (optional)", rx.select(AppState.stability_model_version_options_optional, value=AppState.stability_model_version, on_change=AppState.set_stability_model_version, width="100%")),
+                input_block("Version (optional)", rx.select(AppState.stability_model_version_options_optional, placeholder="— none —", value=AppState.stability_model_version, on_change=AppState.set_stability_model_version, width="100%")),
                 input_block("Dataset", rx.select(AppState.dataset_options, value=AppState.stability_dataset, on_change=AppState.update_stability_dataset, width="100%")),
                 input_block("Dataset version", rx.select(AppState.stability_version_options, value=AppState.stability_version, on_change=AppState.update_stability_version, width="100%")),
                 columns="2",
@@ -912,8 +896,8 @@ def cv_page() -> rx.Component:
                 width="100%",
             ),
             rx.grid(
-                input_block("Data directory", rx.select(AppState.cv_data_dir_options_optional, value=AppState.cv_data_dir, on_change=AppState.update_cv_data_dir, width="100%")),
-                input_block("Label CSV (optional)", rx.select(AppState.cv_label_csv_options_optional, value=AppState.cv_label_csv, on_change=AppState.set_cv_label_csv, width="100%")),
+                input_block("Data directory", rx.select(AppState.cv_data_dir_options_optional, placeholder="— select —", value=AppState.cv_data_dir, on_change=AppState.update_cv_data_dir, width="100%")),
+                input_block("Label CSV (optional)", rx.select(AppState.cv_label_csv_options_optional, placeholder="— none —", value=AppState.cv_label_csv, on_change=AppState.set_cv_label_csv, width="100%")),
                 columns="2",
                 spacing="3",
                 width="100%",
@@ -986,8 +970,7 @@ def shell() -> rx.Component:
         ),
         sidebar(),
         rx.box(
-            header(),
-            rx.box(module_view(), width="100%", margin_top="1rem"),
+            rx.box(module_view(), width="100%"),
             padding="1.2rem",
             width="100%",
             height="100vh",
