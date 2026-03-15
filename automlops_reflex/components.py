@@ -15,29 +15,44 @@ MODULES = [
 ]
 
 DARK_BG = "#090c12"
-DARK_SURFACE = "#121826"
-DARK_CARD = "#171f2f"
-DARK_BORDER = "#283247"
+DARK_SURFACE = "#0f1420"
+DARK_CARD = "#141c2e"
+DARK_BORDER = "#1e2d47"
 TEXT_PRIMARY = "#e7eefb"
-TEXT_MUTED = "#9dafcf"
+TEXT_MUTED = "#7a90b8"
 ACCENT = "#4f8cff"
 ACCENT_2 = "#32c9a8"
 ACCENT_3 = "#ffb84d"
+ACCENT_RED = "#f04f5f"
+
+GLOBAL_CSS = """
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+* { font-family: 'Inter', sans-serif !important; box-sizing: border-box; }
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #090c12; }
+::-webkit-scrollbar-thumb { background: #1e2d47; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #4f8cff44; }
+.log-line-info  { color: #58a6ff; }
+.log-line-warn  { color: #ffb84d; }
+.log-line-error { color: #f04f5f; font-weight: 700; }
+.log-line-ok    { color: #32c9a8; }
+.log-line-def   { color: #7a90b8; }
+"""
 
 
 def card(*children, **kwargs) -> rx.Component:
     style = {
-        "background": "linear-gradient(180deg, rgba(23,31,47,0.98) 0%, rgba(15,22,36,0.98) 100%)",
+        "background": "linear-gradient(160deg, rgba(20,28,46,0.98) 0%, rgba(12,18,32,0.98) 100%)",
         "border": f"1px solid {DARK_BORDER}",
-        "border_radius": "18px",
+        "border_radius": "16px",
         "padding": "1.1rem",
-        "box_shadow": "0 18px 40px rgba(0,0,0,0.28)",
+        "box_shadow": "0 12px 32px rgba(0,0,0,0.32)",
         "backdrop_filter": "blur(18px)",
-        "transition": "transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease",
+        "transition": "transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease",
         "_hover": {
             "transform": "translateY(-2px)",
-            "box_shadow": "0 24px 54px rgba(0,0,0,0.34)",
-            "border_color": "rgba(79, 140, 255, 0.45)",
+            "box_shadow": "0 20px 48px rgba(0,0,0,0.40)",
+            "border_color": "rgba(79,140,255,0.5)",
         },
     }
     style.update(kwargs)
@@ -45,7 +60,7 @@ def card(*children, **kwargs) -> rx.Component:
 
 
 def label(text: str) -> rx.Component:
-    return rx.text(text, color=TEXT_MUTED, font_size="0.82rem", margin_bottom="0.25rem")
+    return rx.text(text, color=TEXT_MUTED, font_size="0.80rem", margin_bottom="0.2rem", font_weight="500")
 
 
 def input_block(title: str, component: rx.Component) -> rx.Component:
@@ -55,28 +70,159 @@ def input_block(title: str, component: rx.Component) -> rx.Component:
 def status_chip(text_var: rx.Var, kind_var: rx.Var) -> rx.Component:
     return rx.box(
         text_var,
-        padding="0.2rem 0.65rem",
+        padding="0.2rem 0.7rem",
         border_radius="999px",
-        font_size="0.78rem",
+        font_size="0.75rem",
         font_weight="700",
-        color=rx.cond(kind_var == "online", "#0b2a21", "#261b0b"),
-        background=rx.cond(kind_var == "online", "#72f1cf", "#ffd89b"),
+        color=rx.cond(kind_var == "online", "#041a17", rx.cond(kind_var == "starting", "#1a1400", "#1a0a0f")),
+        background=rx.cond(kind_var == "online", ACCENT_2, rx.cond(kind_var == "starting", ACCENT_3, "#f04f5f")),
     )
 
 
 def section_title(title: str, subtitle: str) -> rx.Component:
     return rx.vstack(
-        rx.text(title, color=TEXT_PRIMARY, font_size="1.02rem", font_weight="800"),
-        rx.text(subtitle, color=TEXT_MUTED, font_size="0.82rem"),
+        rx.text(title, color=TEXT_PRIMARY, font_size="1.05rem", font_weight="800"),
+        rx.text(subtitle, color=TEXT_MUTED, font_size="0.80rem"),
         spacing="1",
         align_items="start",
         width="100%",
+        margin_bottom="0.5rem",
+    )
+
+
+def hero_header(title: str, subtitle: str) -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.text(
+                title,
+                font_size="2rem",
+                font_weight="900",
+                background="linear-gradient(90deg, #4f8cff 0%, #32c9a8 60%, #a78bfa 100%)",
+                background_clip="text",
+                color="transparent",
+                style={"-webkit-background-clip": "text", "-webkit-text-fill-color": "transparent"},
+                line_height="1.15",
+            ),
+            rx.text(subtitle, color=TEXT_MUTED, font_size="0.88rem", margin_top="2px"),
+            spacing="1",
+            align_items="start",
+        ),
+        padding="0.6rem 0 1rem 0",
+        width="100%",
+    )
+
+
+def stat_card(value_var: rx.Var, label_text: str, accent: str = ACCENT) -> rx.Component:
+    return rx.box(
+        rx.vstack(
+            rx.heading(value_var, size="7", color=TEXT_PRIMARY, font_weight="900"),
+            rx.text(label_text, color=TEXT_MUTED, font_size="0.72rem", font_weight="600",
+                    text_transform="uppercase", letter_spacing="0.8px"),
+            spacing="1",
+            align_items="start",
+        ),
+        background=f"linear-gradient(160deg, rgba(20,28,46,0.98) 0%, rgba(12,18,32,0.98) 100%)",
+        border=f"1px solid {DARK_BORDER}",
+        border_left=f"3px solid {accent}",
+        border_radius="12px",
+        padding="0.9rem 1rem",
+        transition="transform 200ms ease, box-shadow 200ms ease",
+        _hover={"transform": "translateY(-2px)", "box_shadow": f"0 8px 24px {accent}22"},
+    )
+
+
+def badge(text_var, kind: str = "info") -> rx.Component:
+    colors = {
+        "running": ("#27ae60", "rgba(39,174,96,0.15)", "rgba(39,174,96,0.3)"),
+        "done": (ACCENT, "rgba(79,140,255,0.15)", "rgba(79,140,255,0.3)"),
+        "failed": (ACCENT_RED, "rgba(240,79,95,0.15)", "rgba(240,79,95,0.3)"),
+        "queued": ("#a78bfa", "rgba(167,139,250,0.15)", "rgba(167,139,250,0.3)"),
+        "paused": (ACCENT_3, "rgba(255,184,77,0.15)", "rgba(255,184,77,0.3)"),
+        "info": (ACCENT, "rgba(79,140,255,0.15)", "rgba(79,140,255,0.3)"),
+    }
+    fg, bg, border = colors.get(kind, colors["info"])
+    return rx.box(
+        text_var,
+        display="inline-block",
+        padding="0.15rem 0.6rem",
+        border_radius="999px",
+        font_size="0.72rem",
+        font_weight="700",
+        letter_spacing="0.3px",
+        color=fg,
+        background=bg,
+        border=f"1px solid {border}",
+    )
+
+
+def colored_log_view(log_text_var: rx.Var) -> rx.Component:
+    """Styled terminal box for logs - shows log text with monospace font."""
+    return rx.box(
+        rx.text(
+            log_text_var,
+            white_space="pre-wrap",
+            word_break="break-all",
+            font_family="'Courier New', Consolas, monospace",
+            font_size="0.76rem",
+            line_height="1.7",
+            color="#8b949e",
+        ),
+        background="#050810",
+        border=f"1px solid {DARK_BORDER}",
+        border_radius="10px",
+        padding="1rem",
+        max_height="400px",
+        overflow_y="auto",
+        width="100%",
+    )
+
+
+def service_row(label_text: str, url_var: rx.Var, status_var: rx.Var, status_label_var: rx.Var, service_key: str) -> rx.Component:
+    return rx.hstack(
+        rx.vstack(
+            rx.text(label_text, color=TEXT_PRIMARY, font_weight="700", font_size="0.88rem"),
+            rx.text(url_var, color=TEXT_MUTED, font_size="0.74rem"),
+            spacing="0",
+            align_items="start",
+        ),
+        rx.spacer(),
+        status_chip(status_label_var, status_var),
+        rx.button(
+            "Start",
+            on_click=lambda: AppState.start_service(service_key),
+            background="rgba(79,140,255,0.15)",
+            color=ACCENT,
+            border=f"1px solid rgba(79,140,255,0.3)",
+            border_radius="8px",
+            padding="0.3rem 0.8rem",
+            font_size="0.78rem",
+            font_weight="600",
+            _hover={"background": "rgba(79,140,255,0.25)"},
+            size="1",
+        ),
+        rx.button(
+            "Stop",
+            on_click=lambda: AppState.stop_service(service_key),
+            background="rgba(240,79,95,0.12)",
+            color=ACCENT_RED,
+            border=f"1px solid rgba(240,79,95,0.25)",
+            border_radius="8px",
+            padding="0.3rem 0.8rem",
+            font_size="0.78rem",
+            font_weight="600",
+            _hover={"background": "rgba(240,79,95,0.22)"},
+            size="1",
+        ),
+        width="100%",
+        align_items="center",
+        padding="0.6rem 0",
+        border_bottom=f"1px solid {DARK_BORDER}",
     )
 
 
 def manual_param_cards() -> rx.Component:
     return rx.vstack(
-        section_title("Manual Parameters by Algorithm", "Cada algoritmo agora usa campos visuais interativos, sincronizados automaticamente com o payload final."),
+        section_title("Manual Parameters by Algorithm", "Each algorithm now uses interactive visual fields, automatically synchronized with the final payload."),
         rx.foreach(
             AppState.automl_manual_param_cards,
             lambda block: card(
@@ -164,43 +310,163 @@ def manual_param_cards() -> rx.Component:
 
 def sidebar() -> rx.Component:
     def nav_btn(name: str) -> rx.Component:
+        icons = {
+            "Overview": "home", "Data": "database", "AutoML": "brain",
+            "Experiments": "flask-conical", "Registry & Deploy": "package",
+            "Monitoring": "activity", "Computer Vision": "eye",
+        }
         return rx.button(
-            name,
+            rx.hstack(
+                rx.icon(icons.get(name, "circle"), size=14, color=rx.cond(AppState.active_module == name, ACCENT, TEXT_MUTED)),
+                rx.text(name, font_size="0.84rem", font_weight=rx.cond(AppState.active_module == name, "700", "500")),
+                spacing="2",
+                align_items="center",
+            ),
             width="100%",
             justify_content="start",
-            padding="0.85rem 0.95rem",
-            background=rx.cond(AppState.active_module == name, "linear-gradient(90deg, rgba(79,140,255,0.24), rgba(50,201,168,0.12))", "transparent"),
-            border=rx.cond(AppState.active_module == name, "1px solid rgba(79,140,255,0.55)", "1px solid rgba(255,255,255,0.04)"),
-            color=TEXT_PRIMARY,
-            border_radius="12px",
+            padding="0.7rem 0.95rem",
+            background=rx.cond(AppState.active_module == name, "linear-gradient(90deg, rgba(79,140,255,0.18), rgba(50,201,168,0.08))", "transparent"),
+            border=rx.cond(AppState.active_module == name, f"1px solid rgba(79,140,255,0.4)", "1px solid transparent"),
+            color=rx.cond(AppState.active_module == name, TEXT_PRIMARY, TEXT_MUTED),
+            border_radius="10px",
             transition="all 180ms ease",
-            _hover={"background": "rgba(79,140,255,0.12)", "transform": "translateX(3px)"},
+            _hover={"background": "rgba(79,140,255,0.10)", "color": TEXT_PRIMARY, "transform": "translateX(3px)"},
             on_click=lambda: AppState.set_module(name),
         )
 
     return rx.box(
         rx.vstack(
+            # Brand header
             rx.box(
-                rx.text("AutoMLOps Studio", font_size="1.35rem", font_weight="900", color=TEXT_PRIMARY),
-                rx.text("Reflex Native Console", font_size="0.82rem", color=TEXT_MUTED),
-                padding="0.95rem",
-                border_radius="16px",
+                rx.hstack(
+                    rx.box(
+                        rx.icon("bot", size=20, color=ACCENT),
+                        background="rgba(79,140,255,0.15)",
+                        border_radius="8px",
+                        padding="0.4rem",
+                    ),
+                    rx.vstack(
+                        rx.text("AutoMLOps Studio", font_size="0.95rem", font_weight="900", color=TEXT_PRIMARY, line_height="1"),
+                        rx.hstack(
+                            rx.text("v4.7.1", font_size="0.65rem", color=ACCENT, font_weight="700"),
+                            rx.text("Open Source", font_size="0.65rem", color=TEXT_MUTED),
+                            spacing="2",
+                        ),
+                        spacing="0",
+                        align_items="start",
+                    ),
+                    spacing="2",
+                    align_items="center",
+                ),
+                padding="0.8rem",
+                border_radius="12px",
                 width="100%",
-                background="linear-gradient(145deg, rgba(79,140,255,0.22), rgba(50,201,168,0.08))",
+                background="linear-gradient(145deg, rgba(79,140,255,0.1), rgba(50,201,168,0.05))",
                 border=f"1px solid {DARK_BORDER}",
             ),
-            rx.divider(border_color=DARK_BORDER),
-            rx.vstack(*[nav_btn(name) for name in MODULES], width="100%", spacing="2"),
-            rx.spacer(),
+            rx.divider(border_color=DARK_BORDER, margin_y="0.3rem"),
+            # Navigation
+            rx.vstack(*[nav_btn(name) for name in MODULES], width="100%", spacing="1"),
+            rx.divider(border_color=DARK_BORDER, margin_y="0.3rem"),
+            # System Overview stats
+            rx.text("SYSTEM OVERVIEW", font_size="0.62rem", color=TEXT_MUTED, font_weight="700", letter_spacing="1.2px"),
+            rx.grid(
+                rx.box(
+                    rx.heading(AppState.dataset_count, size="5", color=TEXT_PRIMARY, font_weight="800"),
+                    rx.text("Datasets", color=TEXT_MUTED, font_size="0.68rem"),
+                    border_left=f"2px solid {ACCENT}",
+                    padding_left="0.5rem",
+                ),
+                rx.box(
+                    rx.heading(AppState.run_count, size="5", color=TEXT_PRIMARY, font_weight="800"),
+                    rx.text("Runs", color=TEXT_MUTED, font_size="0.68rem"),
+                    border_left=f"2px solid {ACCENT_2}",
+                    padding_left="0.5rem",
+                ),
+                rx.box(
+                    rx.heading(AppState.registered_model_count, size="5", color=TEXT_PRIMARY, font_weight="800"),
+                    rx.text("Models", color=TEXT_MUTED, font_size="0.68rem"),
+                    border_left=f"2px solid #a78bfa",
+                    padding_left="0.5rem",
+                ),
+                rx.box(
+                    rx.heading(AppState.dataset_version_count, size="5", color=TEXT_PRIMARY, font_weight="800"),
+                    rx.text("Versions", color=TEXT_MUTED, font_size="0.68rem"),
+                    border_left=f"2px solid {ACCENT_3}",
+                    padding_left="0.5rem",
+                ),
+                columns="2",
+                spacing="3",
+                width="100%",
+            ),
+            rx.divider(border_color=DARK_BORDER, margin_y="0.3rem"),
+            # Service statuses
+            rx.text("SERVICES", font_size="0.62rem", color=TEXT_MUTED, font_weight="700", letter_spacing="1.2px"),
+            rx.vstack(
+                rx.hstack(
+                    rx.text("Serving API", color=TEXT_MUTED, font_size="0.76rem"),
+                    rx.spacer(),
+                    status_chip(AppState.api_status_label, AppState.api_status),
+                    width="100%",
+                    align_items="center",
+                ),
+                rx.hstack(
+                    rx.text("MLflow", color=TEXT_MUTED, font_size="0.76rem"),
+                    rx.spacer(),
+                    status_chip(AppState.mlflow_status_label, AppState.mlflow_status),
+                    width="100%",
+                    align_items="center",
+                ),
+                spacing="2",
+                width="100%",
+            ),
+            rx.divider(border_color=DARK_BORDER, margin_y="0.3rem"),
+            # DagsHub integration
+            rx.text("DAGSHUB", font_size="0.62rem", color=TEXT_MUTED, font_weight="700", letter_spacing="1.2px"),
+            rx.vstack(
+                input_block("Username", rx.input(value=AppState.dagshub_username, on_change=AppState.set_dagshub_username, size="1", width="100%", placeholder="dagshub_user")),
+                input_block("Repository", rx.input(value=AppState.dagshub_repo, on_change=AppState.set_dagshub_repo, size="1", width="100%", placeholder="repo_name")),
+                input_block("Token", rx.input(value=AppState.dagshub_token, on_change=AppState.set_dagshub_token, type="password", size="1", width="100%", placeholder="api_token")),
+                rx.hstack(
+                    rx.button("Connect", on_click=AppState.connect_dagshub_tracking, background=ACCENT_2, color="#041a17", size="1", font_weight="700"),
+                    rx.button("Disconnect", on_click=AppState.disconnect_dagshub_tracking, background="rgba(240,79,95,0.12)", color=ACCENT_RED, border=f"1px solid rgba(240,79,95,0.25)", size="1"),
+                    spacing="2",
+                    width="100%",
+                ),
+                rx.text(
+                    AppState.dagshub_status_label,
+                    color=rx.cond(AppState.dagshub_connected, ACCENT_2, TEXT_MUTED),
+                    font_size="0.74rem", font_weight="700",
+                ),
+                rx.cond(
+                    AppState.dagshub_message != "",
+                    rx.text(AppState.dagshub_message, color=TEXT_MUTED, font_size="0.70rem"),
+                ),
+                spacing="2",
+                width="100%",
+                align_items="start",
+            ),
+            rx.text(AppState.tracking_uri, color=TEXT_MUTED, font_size="0.62rem", word_break="break-all"),
+            rx.button(
+                rx.hstack(rx.icon("refresh-cw", size=12), rx.text("Refresh All", font_size="0.76rem"), spacing="1", align_items="center"),
+                on_click=AppState.refresh,
+                width="100%",
+                background="rgba(79,140,255,0.08)",
+                color=TEXT_MUTED,
+                border=f"1px solid {DARK_BORDER}",
+                border_radius="8px",
+                _hover={"background": "rgba(79,140,255,0.16)", "color": TEXT_PRIMARY},
+                margin_top="0.5rem",
+            ),
             width="100%",
             align_items="start",
-            min_height="100%",
+            spacing="2",
         ),
-        width=["100%", "100%", "280px"],
+        width=["100%", "100%", "290px"],
         height="100vh",
         background=DARK_SURFACE,
         border_right=f"1px solid {DARK_BORDER}",
-        padding="1rem",
+        padding="0.9rem",
         overflow_y="auto",
         overflow_x="hidden",
         flex_shrink="0",
@@ -212,98 +478,132 @@ def sidebar() -> rx.Component:
 
 def overview_page() -> rx.Component:
     return rx.vstack(
+        hero_header("AutoMLOps Studio", "Automated Machine Learning & MLOps Platform"),
+        # Stat cards
         rx.grid(
-            card(
-                rx.text("Datasets", color=TEXT_MUTED),
-                rx.heading(AppState.dataset_count, size="6", color=TEXT_PRIMARY),
-                rx.text("Collections in Data Lake", color=TEXT_MUTED, font_size="0.8rem"),
-            ),
-            card(
-                rx.text("Versions", color=TEXT_MUTED),
-                rx.heading(AppState.dataset_version_count, size="6", color=TEXT_PRIMARY),
-                rx.text("Versioned files", color=TEXT_MUTED, font_size="0.8rem"),
-            ),
-            card(
-                rx.text("MLflow Runs", color=TEXT_MUTED),
-                rx.heading(AppState.run_count, size="6", color=TEXT_PRIMARY),
-                rx.text("Tracked experiments", color=TEXT_MUTED, font_size="0.8rem"),
-            ),
-            card(
-                rx.text("Registered Models", color=TEXT_MUTED),
-                rx.heading(AppState.registered_model_count, size="6", color=TEXT_PRIMARY),
-                rx.text("Registry entries", color=TEXT_MUTED, font_size="0.8rem"),
-            ),
-            columns="2",
+            stat_card(AppState.dataset_count, "Datasets", ACCENT),
+            stat_card(AppState.dataset_version_count, "Versions", ACCENT_2),
+            stat_card(AppState.run_count, "MLflow Runs", "#a78bfa"),
+            stat_card(AppState.registered_model_count, "Registered Models", ACCENT_3),
+            columns="4",
             spacing="4",
             width="100%",
         ),
-        rx.grid(
-            card(
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("Serving API", color=TEXT_PRIMARY, font_weight="700"),
-                        rx.text(AppState.api_url, color=TEXT_MUTED, font_size="0.8rem"),
-                        align_items="start",
-                        spacing="1",
-                    ),
-                    rx.spacer(),
-                    status_chip(AppState.api_status_label, AppState.api_status),
-                    width="100%",
-                ),
-            ),
-            card(
-                rx.hstack(
-                    rx.vstack(
-                        rx.text("MLflow", color=TEXT_PRIMARY, font_weight="700"),
-                        rx.text(AppState.mlflow_url, color=TEXT_MUTED, font_size="0.8rem"),
-                        align_items="start",
-                        spacing="1",
-                    ),
-                    rx.spacer(),
-                    status_chip(AppState.mlflow_status_label, AppState.mlflow_status),
-                    width="100%",
-                ),
-            ),
-            columns="2",
-            spacing="4",
-            width="100%",
-        ),
+        # Services
         card(
-            rx.text("Recent Runs", color=TEXT_PRIMARY, font_weight="700", margin_bottom="0.6rem"),
-            rx.foreach(
-                AppState.runs,
-                lambda item: rx.box(
-                    rx.hstack(
-                        rx.text(item["experiment"], color=TEXT_PRIMARY, font_weight="700"),
-                        rx.spacer(),
-                        rx.text(item["status"], color=TEXT_MUTED),
-                        width="100%",
-                    ),
-                    rx.text(item["metrics"], color=TEXT_MUTED, font_size="0.78rem"),
-                    padding="0.55rem",
-                    border_bottom=f"1px solid {DARK_BORDER}",
-                ),
-            ),
-        ),
-        card(
-            rx.text("DagsHub Integration", color=TEXT_PRIMARY, font_weight="700"),
-            rx.text("Conecte o tracking do MLflow ao repositorio remoto no DagsHub.", color=TEXT_MUTED, font_size="0.82rem"),
-            rx.grid(
-                input_block("DagsHub Username", rx.input(value=AppState.dagshub_username, on_change=AppState.set_dagshub_username, width="100%")),
-                input_block("Repository Name", rx.input(value=AppState.dagshub_repo, on_change=AppState.set_dagshub_repo, width="100%")),
-                columns="2",
-                spacing="3",
-                width="100%",
-            ),
-            input_block("DagsHub Token", rx.input(value=AppState.dagshub_token, on_change=AppState.set_dagshub_token, type="password", width="100%")),
+            section_title("Infrastructure Services", "Start and monitor background services for serving and experiment tracking."),
+            service_row("Serving API", AppState.api_url, AppState.api_status, AppState.api_status_label, "api"),
+            service_row("MLflow Tracking UI", AppState.mlflow_url, AppState.mlflow_status, AppState.mlflow_status_label, "mlflow"),
             rx.hstack(
-                rx.button("Connect", on_click=AppState.connect_dagshub_tracking, background=ACCENT_2, color="#041a17"),
-                rx.button("Disconnect", on_click=AppState.disconnect_dagshub_tracking, background="#3b4357", color=TEXT_PRIMARY),
+                rx.link(
+                    rx.button(
+                        rx.hstack(rx.icon("external-link", size=12), rx.text("Open MLflow UI", font_size="0.78rem"), spacing="1"),
+                        background="rgba(79,140,255,0.1)", color=ACCENT, border=f"1px solid rgba(79,140,255,0.25)",
+                        border_radius="8px", size="1",
+                        _hover={"background": "rgba(79,140,255,0.2)"},
+                    ),
+                    href=AppState.mlflow_url,
+                    is_external=True,
+                ),
+                rx.link(
+                    rx.button(
+                        rx.hstack(rx.icon("external-link", size=12), rx.text("Open API Docs", font_size="0.78rem"), spacing="1"),
+                        background="rgba(50,201,168,0.1)", color=ACCENT_2, border=f"1px solid rgba(50,201,168,0.25)",
+                        border_radius="8px", size="1",
+                        _hover={"background": "rgba(50,201,168,0.2)"},
+                    ),
+                    href=AppState.api_url,
+                    is_external=True,
+                ),
+                rx.button(
+                    rx.hstack(rx.icon("refresh-cw", size=12), rx.text("Refresh", font_size="0.78rem"), spacing="1"),
+                    on_click=AppState.refresh,
+                    background="rgba(255,255,255,0.04)", color=TEXT_MUTED,
+                    border=f"1px solid {DARK_BORDER}", border_radius="8px", size="1",
+                    _hover={"color": TEXT_PRIMARY},
+                ),
                 spacing="2",
+                margin_top="0.6rem",
             ),
-            rx.text(AppState.dagshub_status_label, color=rx.cond(AppState.dagshub_connected, ACCENT_2, TEXT_MUTED), font_weight="700"),
-            rx.text(AppState.tracking_uri, color=TEXT_MUTED, font_size="0.78rem"),
-            rx.cond(AppState.dagshub_message != "", rx.text(AppState.dagshub_message, color=TEXT_PRIMARY, font_size="0.82rem")),
+        ),
+        # Datasets catalog
+        card(
+            section_title("Dataset Catalog", "Datasets stored in the Data Lake."),
+            rx.cond(
+                AppState.datasets.length() > 0,
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("NAME", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="140px"),
+                        rx.text("VERSIONS", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="80px"),
+                        rx.text("LATEST", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="120px"),
+                        rx.text("COLUMNS (PREVIEW)", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px"),
+                        width="100%",
+                        padding="0.4rem 0.5rem",
+                        border_bottom=f"1px solid {DARK_BORDER}",
+                    ),
+                    rx.foreach(
+                        AppState.datasets,
+                        lambda row: rx.hstack(
+                            rx.hstack(
+                                rx.icon("database", size=13, color=ACCENT),
+                                rx.text(row["name"], color=TEXT_PRIMARY, font_weight="600", font_size="0.84rem"),
+                                spacing="1",
+                                min_width="140px",
+                            ),
+                            rx.text(row["versions"], color=ACCENT_2, font_weight="700", font_size="0.82rem", min_width="80px"),
+                            rx.text(row["latest_updated"], color=TEXT_MUTED, font_size="0.76rem", min_width="120px"),
+                            rx.text(row["preview_columns"], color=TEXT_MUTED, font_size="0.73rem", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+                            width="100%",
+                            padding="0.45rem 0.5rem",
+                            border_bottom=f"1px solid rgba(30,45,71,0.5)",
+                            _hover={"background": "rgba(79,140,255,0.04)"},
+                        ),
+                    ),
+                    width="100%",
+                    spacing="0",
+                ),
+                rx.text("No datasets in Data Lake yet.", color=TEXT_MUTED, font_size="0.85rem", padding="1rem 0"),
+            ),
+        ),
+        # Recent runs
+        card(
+            section_title("Recent Experiment Runs", "Latest MLflow tracked runs."),
+            rx.cond(
+                AppState.runs.length() > 0,
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("EXPERIMENT", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="150px"),
+                        rx.text("STATUS", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="90px"),
+                        rx.text("STARTED", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px", min_width="130px"),
+                        rx.text("METRICS", color=TEXT_MUTED, font_size="0.68rem", font_weight="700", letter_spacing="0.8px"),
+                        width="100%",
+                        padding="0.4rem 0.5rem",
+                        border_bottom=f"1px solid {DARK_BORDER}",
+                    ),
+                    rx.foreach(
+                        AppState.runs,
+                        lambda row: rx.hstack(
+                            rx.text(row["experiment"], color=TEXT_PRIMARY, font_weight="600", font_size="0.82rem", min_width="150px"),
+                            rx.box(
+                                row["status"],
+                                padding="0.1rem 0.5rem", border_radius="999px", font_size="0.70rem", font_weight="700",
+                                color=rx.cond(row["status"] == "FINISHED", ACCENT_2, rx.cond(row["status"] == "RUNNING", ACCENT, ACCENT_RED)),
+                                background=rx.cond(row["status"] == "FINISHED", "rgba(50,201,168,0.12)", rx.cond(row["status"] == "RUNNING", "rgba(79,140,255,0.12)", "rgba(240,79,95,0.12)")),
+                                min_width="90px",
+                            ),
+                            rx.text(row["started"], color=TEXT_MUTED, font_size="0.76rem", min_width="130px"),
+                            rx.text(row["metrics"], color=TEXT_MUTED, font_size="0.74rem", overflow="hidden", text_overflow="ellipsis", white_space="nowrap"),
+                            width="100%",
+                            padding="0.45rem 0.5rem",
+                            border_bottom=f"1px solid rgba(30,45,71,0.5)",
+                            _hover={"background": "rgba(79,140,255,0.04)"},
+                        ),
+                    ),
+                    width="100%",
+                    spacing="0",
+                ),
+                rx.text("No experiment runs yet.", color=TEXT_MUTED, font_size="0.85rem", padding="1rem 0"),
+            ),
         ),
         spacing="4",
         width="100%",
@@ -314,11 +614,17 @@ def data_page() -> rx.Component:
     return rx.vstack(
         card(
             rx.text("Data Ingestion", color=TEXT_PRIMARY, font_weight="700"),
-            rx.text("Anexe um ou mais arquivos (CSV, JSON, Parquet, TXT, ZIP) para salvar no Data Lake.", color=TEXT_MUTED, font_size="0.82rem"),
+            rx.text("Attach one or more files (CSV, JSON, Parquet, TXT, ZIP) to save in the Data Lake.", color=TEXT_MUTED, font_size="0.82rem"),
             rx.upload(
                 rx.vstack(
-                    rx.button("Select File(s)", background=ACCENT_2, color="#041a17"),
-                    rx.text("Drag and drop files here", color=TEXT_MUTED, font_size="0.8rem"),
+                    rx.box(
+                        rx.icon("upload-cloud", size=24, color=ACCENT),
+                        background="rgba(79,140,255,0.12)",
+                        padding="0.8rem",
+                        border_radius="12px",
+                    ),
+                    rx.button("Select File(s)", background=ACCENT_2, color="#041a17", font_weight="700"),
+                    rx.text("Drag and drop files here (CSV, JSON, Parquet, TXT, ZIP)", color=TEXT_MUTED, font_size="0.8rem"),
                     spacing="2",
                     align_items="center",
                     width="100%",
@@ -327,8 +633,37 @@ def data_page() -> rx.Component:
                 multiple=True,
                 width="100%",
                 border=f"1px dashed {DARK_BORDER}",
-                padding="1rem",
-                border_radius="10px",
+                padding="2rem",
+                border_radius="14px",
+                _hover={"border_color": ACCENT, "background": "rgba(79,140,255,0.02)"},
+            ),
+            rx.accordion.root(
+                rx.accordion.item(
+                    rx.accordion.header(
+                        rx.hstack(
+                            rx.icon("settings-2", size=14),
+                            rx.text("Advanced Parsing Options", font_size="0.85rem", font_weight="600"),
+                            rx.spacer(),
+                            rx.accordion.icon(),
+                            width="100%",
+                        ),
+                    ),
+                    rx.accordion.content(
+                        rx.grid(
+                            input_block("File Format", rx.select(["Auto", "CSV", "JSON", "Parquet", "TXT"], value="Auto", width="100%")),
+                            input_block("Delimiter", rx.select([",", ";", "|", "tab"], value=",", width="100%")),
+                            input_block("Encoding", rx.select(["utf-8", "latin-1", "ascii"], value="utf-8", width="100%")),
+                            columns="3",
+                            spacing="3",
+                            width="100%",
+                            padding_top="0.5rem",
+                        ),
+                    ),
+                    value="advanced",
+                ),
+                width="100%",
+                margin_top="0.8rem",
+                variant="ghost",
             ),
             rx.hstack(
                 rx.button(
@@ -385,7 +720,7 @@ def data_page() -> rx.Component:
                     width="100%",
                 ),
             ),
-            rx.text("Use o mesmo formato da interface Streamlit: lista de objetos com Include/Column/Type.", color=TEXT_MUTED, font_size="0.78rem"),
+            rx.text("Use the same format as the Streamlit interface: list of objects with Include/Column/Type.", color=TEXT_MUTED, font_size="0.78rem"),
         ),
         card(
             rx.text("Dataset Preview", color=TEXT_PRIMARY, font_weight="700"),
@@ -424,7 +759,7 @@ def data_page() -> rx.Component:
 def automl_page() -> rx.Component:
     return rx.vstack(
         card(
-            section_title("Classical AutoML Training", "Selecione modelos-base, ajuste validação e monte ensembles customizados sem misturar estratégias com algoritmos."),
+            section_title("Classical AutoML Training", "Select base models, adjust validation, and build custom ensembles without mixing strategies with algorithms."),
             rx.grid(
                 input_block(
                     "Task",
@@ -551,7 +886,7 @@ def automl_page() -> rx.Component:
                 width="100%",
             ),
             card(
-                section_title("Advanced Validation", "A Reflex agora usa os nomes corretos do trainer e expõe parâmetros extras que eram do wizard Streamlit."),
+                section_title("Advanced Validation", "Reflex now uses the correct trainer names and exposes extra parameters that were from the Streamlit wizard."),
                 rx.grid(
                     input_block(
                         "Validation strategy",
@@ -579,12 +914,12 @@ def automl_page() -> rx.Component:
                     spacing="4",
                     margin_top="0.55rem",
                 ),
-                rx.text("Use holdout/auto_split para test size; use cv/stratified_cv para folds; use time_series_cv para gap e janela máxima.", color=TEXT_MUTED, font_size="0.78rem", margin_top="0.45rem"),
+                rx.text("Use holdout/auto_split for test size; use cv/stratified_cv for folds; use time_series_cv for gap and max window.", color=TEXT_MUTED, font_size="0.78rem", margin_top="0.45rem"),
             ),
             rx.cond(
                 AppState.automl_mode_selection == "Manual (Select)",
                 card(
-                    section_title("Base Model Picker", "Voting, stacking e bagging saem daqui e ficam apenas no ensemble builder."),
+                    section_title("Base Model Picker", "Voting, stacking, and bagging are removed from here and are only available in the ensemble builder."),
                     rx.flex(
                         rx.foreach(
                             AppState.automl_available_models,
@@ -614,7 +949,7 @@ def automl_page() -> rx.Component:
                             width="100%",
                         ),
                     ),
-                    rx.text("Clique nos chips para incluir/remover modelos ou cole uma lista separada por vírgulas.", color=TEXT_MUTED, font_size="0.78rem"),
+                    rx.text("Click the chips to include/remove models or paste a comma-separated list.", color=TEXT_MUTED, font_size="0.78rem"),
                 ),
             ),
             rx.cond(
@@ -631,7 +966,7 @@ def automl_page() -> rx.Component:
                 ),
             ),
             card(
-                section_title("Custom Ensemble Builder", "Configure strategies explicitamente aqui, sem poluir a seleção de modelos-base."),
+                section_title("Custom Ensemble Builder", "Configure strategies explicitly here, without cluttering the base model selection."),
                 rx.grid(
                     input_block(
                         "Ensemble type",
@@ -700,66 +1035,145 @@ def automl_page() -> rx.Component:
 
 def experiments_page() -> rx.Component:
     return rx.vstack(
+        hero_header("Experiments", "Monitor training jobs, view logs, and analyze results."),
+        # Training results chart
         card(
-            rx.text("Training Results Chart", color=TEXT_PRIMARY, font_weight="700"),
-            rx.text("Top jobs por melhor score (normalizado).", color=TEXT_MUTED, font_size="0.82rem"),
-            rx.foreach(
-                AppState.job_chart_rows,
-                lambda row: rx.vstack(
-                    rx.hstack(
-                        rx.text(row["name"], color=TEXT_PRIMARY, font_size="0.8rem"),
-                        rx.spacer(),
-                        rx.text(row["score"], color=ACCENT_2, font_size="0.8rem"),
-                        width="100%",
+            section_title("Training Results", "Top jobs by best score (normalized)."),
+            rx.cond(
+                AppState.job_chart_rows.length() > 0,
+                rx.vstack(
+                    rx.foreach(
+                        AppState.job_chart_rows,
+                        lambda row: rx.vstack(
+                            rx.hstack(
+                                rx.text(row["name"], color=TEXT_PRIMARY, font_size="0.82rem", font_weight="600"),
+                                rx.spacer(),
+                                rx.text(row["score"], color=ACCENT_2, font_size="0.82rem", font_weight="700"),
+                                width="100%",
+                            ),
+                            rx.box(
+                                rx.box(
+                                    height="6px",
+                                    width=row["width"],
+                                    background=f"linear-gradient(90deg, {ACCENT}, {ACCENT_2})",
+                                    border_radius="999px",
+                                    transition="width 600ms ease",
+                                ),
+                                height="6px",
+                                width="100%",
+                                background=DARK_BORDER,
+                                border_radius="999px",
+                            ),
+                            spacing="1",
+                            width="100%",
+                            align_items="start",
+                        ),
                     ),
-                    rx.box(
-                        rx.box(height="8px", width=row["width"], background=ACCENT, border_radius="999px"),
-                        height="8px",
-                        width="100%",
-                        background="#1f2a42",
-                        border_radius="999px",
-                    ),
-                    spacing="1",
                     width="100%",
-                    align_items="start",
+                    spacing="3",
                 ),
+                rx.text("No completed jobs with scores yet.", color=TEXT_MUTED, font_size="0.85rem", padding="0.5rem 0"),
             ),
         ),
+        # Job manager
         card(
             rx.hstack(
-                rx.text("Background Training Jobs", color=TEXT_PRIMARY, font_weight="700"),
+                section_title("Background Training Jobs", "Manage and monitor background training processes."),
                 rx.spacer(),
-                rx.button("Refresh Jobs", on_click=AppState.refresh_jobs, background=ACCENT, color="#06122d"),
+                rx.button(
+                    rx.hstack(rx.icon("refresh-cw", size=13), rx.text("Refresh"), spacing="1"),
+                    on_click=AppState.refresh_jobs,
+                    background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                    color="#05112a",
+                    font_weight="700",
+                    border_radius="8px",
+                    size="1",
+                ),
+                align_items="start",
                 width="100%",
             ),
-            rx.foreach(
-                AppState.jobs,
-                lambda item: rx.box(
+            # Job table
+            rx.cond(
+                AppState.jobs.length() > 0,
+                rx.vstack(
                     rx.hstack(
-                        rx.text(item["job_id"], color=TEXT_PRIMARY, font_weight="700"),
-                        rx.text(item["name"], color=TEXT_MUTED),
-                        rx.spacer(),
-                        rx.text(item["status_label"], color=TEXT_PRIMARY),
-                        rx.text(item["best_score"], color=ACCENT_2),
+                        rx.text("JOB ID", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="80px"),
+                        rx.text("NAME", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="120px"),
+                        rx.text("STATUS", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="90px"),
+                        rx.text("BEST SCORE", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="90px"),
+                        rx.text("DURATION", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px"),
                         width="100%",
+                        padding="0.4rem 0.5rem",
+                        border_bottom=f"1px solid {DARK_BORDER}",
                     ),
-                    rx.text("Duration: ", item["duration"], color=TEXT_MUTED, font_size="0.78rem"),
-                    rx.text("Run: ", item["mlflow_run_id"], color=TEXT_MUTED, font_size="0.74rem"),
-                    border_bottom=f"1px solid {DARK_BORDER}",
-                    padding="0.55rem",
+                    rx.foreach(
+                        AppState.jobs,
+                        lambda item: rx.hstack(
+                            rx.text(item["job_id"], color=TEXT_MUTED, font_size="0.74rem", font_family="monospace", min_width="80px"),
+                            rx.text(item["name"], color=TEXT_PRIMARY, font_weight="600", font_size="0.80rem", min_width="120px"),
+                            rx.box(
+                                item["status_label"],
+                                padding="0.1rem 0.5rem", border_radius="999px", font_size="0.70rem", font_weight="700",
+                                color=rx.cond(item["status"] == "JobStatus.COMPLETED", ACCENT_2,
+                                             rx.cond(item["status"] == "JobStatus.RUNNING", ACCENT, TEXT_MUTED)),
+                                background=rx.cond(item["status"] == "JobStatus.COMPLETED", "rgba(50,201,168,0.12)",
+                                                  rx.cond(item["status"] == "JobStatus.RUNNING", "rgba(79,140,255,0.12)", "rgba(255,255,255,0.05)")),
+                                min_width="90px",
+                            ),
+                            rx.text(item["best_score"], color=ACCENT_2, font_weight="700", font_size="0.80rem", min_width="90px"),
+                            rx.text(item["duration"], color=TEXT_MUTED, font_size="0.76rem"),
+                            width="100%",
+                            padding="0.45rem 0.5rem",
+                            border_bottom=f"1px solid rgba(30,45,71,0.4)",
+                            _hover={"background": "rgba(79,140,255,0.04)"},
+                        ),
+                    ),
+                    width="100%",
+                    spacing="0",
+                ),
+                rx.text("No training jobs submitted yet.", color=TEXT_MUTED, font_size="0.85rem", padding="0.5rem 0"),
+            ),
+            rx.hstack(
+                input_block(
+                    "Select Job",
+                    rx.select(AppState.job_id_options, value=AppState.selected_job_id, on_change=AppState.update_selected_job, width="240px"),
+                ),
+                rx.spacer(),
+                rx.vstack(
+                    rx.text("Actions", color=TEXT_MUTED, font_size="0.78rem", font_weight="500"),
+                    rx.hstack(
+                        rx.button("Pause", on_click=AppState.pause_selected_job, background="rgba(255,184,77,0.12)", color=ACCENT_3, border=f"1px solid rgba(255,184,77,0.25)", border_radius="7px", size="1"),
+                        rx.button("Resume", on_click=AppState.resume_selected_job, background="rgba(50,201,168,0.12)", color=ACCENT_2, border=f"1px solid rgba(50,201,168,0.25)", border_radius="7px", size="1"),
+                        rx.button("Cancel", on_click=AppState.cancel_selected_job, background="rgba(240,79,95,0.12)", color=ACCENT_RED, border=f"1px solid rgba(240,79,95,0.25)", border_radius="7px", size="1"),
+                        rx.button("Delete", on_click=AppState.delete_selected_job, background="rgba(240,79,95,0.06)", color=ACCENT_RED, border=f"1px solid rgba(240,79,95,0.15)", border_radius="7px", size="1"),
+                        spacing="2",
+                    ),
+                    spacing="1",
+                    align_items="start",
+                ),
+                width="100%",
+                align_items="end",
+                margin_top="0.8rem",
+            ),
+        ),
+        # Logs
+        card(
+            section_title("Training Logs", "Live output from the selected training job."),
+            colored_log_view(AppState.selected_job_logs),
+            rx.cond(
+                AppState.selected_job_error != "",
+                rx.box(
+                    rx.hstack(
+                        rx.icon("circle-x", size=14, color=ACCENT_RED),
+                        rx.text("Error", color=ACCENT_RED, font_weight="700", font_size="0.82rem"),
+                        spacing="1",
+                        align_items="center",
+                    ),
+                    colored_log_view(AppState.selected_job_error),
+                    margin_top="0.6rem",
+                    width="100%",
                 ),
             ),
-            input_block("Selected job id", rx.select(AppState.job_id_options, value=AppState.selected_job_id, on_change=AppState.update_selected_job, width="100%")),
-            rx.hstack(
-                rx.button("Pause", on_click=AppState.pause_selected_job, background="#6b5b30", color=TEXT_PRIMARY),
-                rx.button("Resume", on_click=AppState.resume_selected_job, background="#2f5f53", color=TEXT_PRIMARY),
-                rx.button("Cancel", on_click=AppState.cancel_selected_job, background="#763a43", color=TEXT_PRIMARY),
-                rx.button("Delete", on_click=AppState.delete_selected_job, background="#522b32", color=TEXT_PRIMARY),
-                spacing="2",
-            ),
-            rx.text("Logs (tail)", color=TEXT_MUTED),
-            rx.code_block(AppState.selected_job_logs, language="log", width="100%"),
-            rx.cond(AppState.selected_job_error != "", rx.code_block(AppState.selected_job_error, language="log", width="100%")),
         ),
         spacing="4",
         width="100%",
@@ -767,23 +1181,92 @@ def experiments_page() -> rx.Component:
 
 
 def registry_deploy_page() -> rx.Component:
+    CONSUMPTION_CODE = '''import joblib
+
+# Load the pipeline (preprocessor + model)
+pipeline = joblib.load("model.pkl")  # or path from registry
+
+import pandas as pd
+data = pd.DataFrame([{"feature1": 1.0, "feature2": "A"}])
+predictions = pipeline.predict(data)
+print(predictions)
+
+# Or use the REST API:
+import requests
+resp = requests.post(
+    "http://127.0.0.1:8000/predict",
+    headers={"x-api-key": "YOUR_KEY"},
+    json={"data": [[1.0, 0]]}
+)
+print(resp.json())
+'''
     return rx.vstack(
+        hero_header("Registry & Deploy", "Manage registered models, register runs, and deploy to production."),
+        # Model Consumption Code
         card(
-            rx.text("Model Registry", color=TEXT_PRIMARY, font_weight="700"),
-            rx.foreach(
-                AppState.registry_rows,
-                lambda item: rx.box(
-                    rx.hstack(
-                        rx.text(item["name"], color=TEXT_PRIMARY, font_weight="700"),
-                        rx.spacer(),
-                        rx.text(item["stage"], color=TEXT_MUTED),
-                        rx.text("v", item["version"], color=ACCENT_2),
-                        width="100%",
-                    ),
-                    rx.text(item["description"], color=TEXT_MUTED, font_size="0.8rem"),
-                    border_bottom=f"1px solid {DARK_BORDER}",
-                    padding="0.5rem",
+            section_title("Model Consumption Code", "How to use your trained model pipeline in production."),
+            rx.box(
+                rx.code_block(
+                    AppState.consumption_code,
+                    language="python",
+                    width="100%",
+                    show_line_numbers=True,
+                    theme="nord",
                 ),
+                background="#050810",
+                border=f"1px solid {DARK_BORDER}",
+                border_radius="10px",
+                overflow="auto",
+                width="100%",
+                on_mount=AppState.load_consumption_code,
+            ),
+            rx.text(
+                "Download the .pkl file from MLflow artifacts or via the API, then use it as shown above.",
+                color=TEXT_MUTED, font_size="0.78rem", margin_top="0.5rem",
+            ),
+        ),
+        # Registry table
+        card(
+            section_title("Model Registry", "All registered models and their current stage."),
+            rx.cond(
+                AppState.registry_rows.length() > 0,
+                rx.vstack(
+                    rx.hstack(
+                        rx.text("NAME", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="150px"),
+                        rx.text("VER", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="50px"),
+                        rx.text("STAGE", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px", min_width="100px"),
+                        rx.text("DESCRIPTION", color=TEXT_MUTED, font_size="0.65rem", font_weight="700", letter_spacing="0.8px"),
+                        width="100%",
+                        padding="0.4rem 0.5rem",
+                        border_bottom=f"1px solid {DARK_BORDER}",
+                    ),
+                    rx.foreach(
+                        AppState.registry_rows,
+                        lambda item: rx.hstack(
+                            rx.hstack(
+                                rx.icon("package", size=13, color="#a78bfa"),
+                                rx.text(item["name"], color=TEXT_PRIMARY, font_weight="700", font_size="0.82rem"),
+                                spacing="1",
+                                min_width="150px",
+                            ),
+                            rx.text("v", item["version"], color=ACCENT_2, font_weight="700", font_size="0.82rem", min_width="50px"),
+                            rx.box(
+                                item["stage"],
+                                padding="0.1rem 0.5rem", border_radius="999px", font_size="0.70rem", font_weight="700",
+                                color=ACCENT, background="rgba(79,140,255,0.12)",
+                                min_width="100px",
+                            ),
+                            rx.text(item["description"], color=TEXT_MUTED, font_size="0.75rem"),
+                            width="100%",
+                            padding="0.45rem 0.5rem",
+                            border_bottom=f"1px solid rgba(30,45,71,0.4)",
+                            _hover={"background": "rgba(79,140,255,0.04)"},
+                        ),
+                    ),
+                    width="100%",
+                    spacing="0",
+                ),
+                rx.text("No models registered yet.", color=TEXT_MUTED, font_size="0.85rem", padding="0.5rem 0"),
             ),
             rx.grid(
                 input_block("Model name", rx.select(AppState.model_name_options, value=AppState.selected_model_name, on_change=AppState.update_selected_model_name, width="100%")),
@@ -791,9 +1274,16 @@ def registry_deploy_page() -> rx.Component:
                 columns="2",
                 spacing="3",
                 width="100%",
+                margin_top="0.8rem",
             ),
-            rx.button("Load model details", on_click=AppState.load_model_details, background=ACCENT, color="#06122d"),
-            rx.code_block(AppState.model_details_json, language="json", width="100%"),
+            rx.button(
+                rx.hstack(rx.icon("search", size=13), rx.text("Load model details"), spacing="1"),
+                on_click=AppState.load_model_details,
+                background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                color="#05112a", font_weight="700", border_radius="8px", size="1",
+                margin_top="0.5rem",
+            ),
+            rx.code_block(AppState.model_details_json, language="json", width="100%", margin_top="0.5rem"),
         ),
         card(
             rx.text("Register Model from Run", color=TEXT_PRIMARY, font_weight="700"),
@@ -948,25 +1438,40 @@ def module_view() -> rx.Component:
 
 def shell() -> rx.Component:
     return rx.box(
+        rx.html(f"<style>{GLOBAL_CSS}</style>"),
+        # ambient glow orbs (decorative)
         rx.box(
             position="fixed",
             top="-120px",
             right="-40px",
-            width="320px",
-            height="320px",
+            width="380px",
+            height="380px",
             border_radius="999px",
-            background="radial-gradient(circle, rgba(79,140,255,0.22) 0%, rgba(79,140,255,0) 72%)",
+            background="radial-gradient(circle, rgba(79,140,255,0.18) 0%, rgba(79,140,255,0) 72%)",
             pointer_events="none",
+            z_index="0",
         ),
         rx.box(
             position="fixed",
             bottom="-140px",
-            left="20%",
-            width="360px",
-            height="360px",
+            left="22%",
+            width="420px",
+            height="420px",
             border_radius="999px",
-            background="radial-gradient(circle, rgba(50,201,168,0.16) 0%, rgba(50,201,168,0) 72%)",
+            background="radial-gradient(circle, rgba(50,201,168,0.12) 0%, rgba(50,201,168,0) 72%)",
             pointer_events="none",
+            z_index="0",
+        ),
+        rx.box(
+            position="fixed",
+            top="40%",
+            right="-80px",
+            width="280px",
+            height="280px",
+            border_radius="999px",
+            background="radial-gradient(circle, rgba(167,139,250,0.10) 0%, rgba(167,139,250,0) 72%)",
+            pointer_events="none",
+            z_index="0",
         ),
         sidebar(),
         rx.box(
@@ -977,10 +1482,12 @@ def shell() -> rx.Component:
             background=DARK_BG,
             overflow_y="auto",
             overflow_x="hidden",
+            position="relative",
+            z_index="1",
         ),
         display="flex",
         height="100vh",
         background=DARK_BG,
         overflow="hidden",
+        on_mount=AppState.initialize,
     )
-

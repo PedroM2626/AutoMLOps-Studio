@@ -7,6 +7,27 @@ from dotenv import load_dotenv
 load_dotenv()
 from src.utils.helpers import get_consumption_code
 
+# Monkeypatch RunInfo to handle potential run_uuid/run_id mismatch in this environment
+try:
+    from mlflow.entities import RunInfo
+    import inspect
+    _orig_run_info_init = RunInfo.__init__
+    _sig = inspect.signature(_orig_run_info_init)
+    if "run_uuid" in _sig.parameters and "run_id" in _sig.parameters:
+        def _patched_run_info_init(self, *args, **kwargs):
+            if "run_uuid" not in kwargs and len(args) == 0:
+                kwargs["run_uuid"] = kwargs.get("run_id")
+            return _orig_run_info_init(self, *args, **kwargs)
+        RunInfo.__init__ = _patched_run_info_init
+    elif "run_uuid" in _sig.parameters and "run_id" not in _sig.parameters:
+        def _patched_run_info_init(self, *args, **kwargs):
+            if "run_uuid" not in kwargs and len(args) == 0:
+                kwargs["run_uuid"] = kwargs.get("run_id")
+            return _orig_run_info_init(self, *args, **kwargs)
+        RunInfo.__init__ = _patched_run_info_init
+except Exception:
+    pass
+
 class MLFlowTracker:
     def __init__(self, experiment_name):
         self.experiment_name = experiment_name
@@ -68,7 +89,9 @@ def get_all_runs():
             return pd.concat(all_runs, ignore_index=True)
         return pd.DataFrame()
     except Exception as e:
-        print(f"Error searching for runs: {e}")
+        import traceback
+        traceback.print_exc()
+        print(f"Error searching for runs in MLflow: {e}")
         return pd.DataFrame()
 
 def get_model_registry():

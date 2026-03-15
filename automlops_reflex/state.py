@@ -92,6 +92,7 @@ class AppState(rx.State):
     runs: list[dict[str, str]] = []
     registry_rows: list[dict[str, str]] = []
     jobs: list[dict[str, str]] = []
+    consumption_code: str = ""
 
     dataset_name: str = ""
     selected_dataset: str = ""
@@ -359,16 +360,17 @@ class AppState(rx.State):
             self.registry_rows = get_registry_snapshot()
         except Exception as exc:
             self.registry_rows = []
-            self.register_result = f"Falha ao listar registry: {exc}"
+            self.register_result = f"Failed to list registry: {exc}"
 
         try:
             self.jobs = list_jobs_summary()
         except Exception as exc:
             self.jobs = []
-            self.automl_submit_status = f"Falha ao listar jobs: {exc}"
+            self.automl_submit_status = f"Failed to list jobs: {exc}"
 
         self._refresh_dynamic_selectors()
         self._sync_job_selection()
+        self._build_job_chart_rows()
 
         if not self.automl_available_models:
             self.refresh_models_for_task()
@@ -398,12 +400,12 @@ class AppState(rx.State):
             self.automl_models_csv = ", ".join(self.automl_selected_model_list)
             self.refresh_manual_param_cards()
             if len(models) > 60:
-                self.automl_submit_status = f"Mostrando 60 de {len(models)} modelos disponiveis para manter a interface responsiva."
+                self.automl_submit_status = f"Showing 60 of {len(models)} available models to keep the interface responsive."
             else:
-                self.automl_submit_status = f"{len(models)} modelos carregados."
+                self.automl_submit_status = f"{len(models)} models loaded."
         except Exception as exc:
             self.automl_available_models = []
-            self.automl_submit_status = f"Erro ao carregar modelos: {exc}"
+            self.automl_submit_status = f"Error loading models: {exc}"
 
     @rx.event
     def update_automl_task(self, task: str):
@@ -644,7 +646,7 @@ class AppState(rx.State):
     def add_custom_ensemble(self):
         models = [item.strip() for item in self.new_ensemble_models_csv.split(",") if item.strip()]
         if self.new_ensemble_type in ["Voting", "Stacking"] and len(models) < 2:
-            self.automl_submit_status = "Custom ensemble precisa de pelo menos 2 modelos base."
+            self.automl_submit_status = "Custom ensemble needs at least 2 base models."
             return
 
         payload = {
@@ -674,10 +676,10 @@ class AppState(rx.State):
                 out_path = model_dir / fname
                 out_path.write_bytes(data)
                 self.automl_uploaded_model_path = str(out_path)
-                self.automl_uploaded_model_status = f"Modelo anexado: {fname}"
+                self.automl_uploaded_model_status = f"Model attached: {fname}"
                 return
             except Exception as exc:
-                self.automl_uploaded_model_status = f"Falha no upload do modelo: {exc}"
+                self.automl_uploaded_model_status = f"Model upload failed: {exc}"
                 return
 
     @rx.event
@@ -698,17 +700,17 @@ class AppState(rx.State):
 
         parts: list[str] = []
         if saved:
-            parts.append(f"{len(saved)} arquivo(s) salvo(s): {', '.join(saved[:5])}")
+            parts.append(f"{len(saved)} file(s) saved: {', '.join(saved[:5])}")
         if failed:
-            parts.append(f"Falha em {len(failed)} arquivo(s): {', '.join(failed[:5])}")
-        self.data_upload_status = " | ".join(parts) if parts else "Nenhum arquivo enviado."
+            parts.append(f"Failed on {len(failed)} file(s): {', '.join(failed[:5])}")
+        self.data_upload_status = " | ".join(parts) if parts else "No files uploaded."
         self.refresh()
 
     @rx.event
     def save_local_file_to_lake(self):
         path = Path(self.local_file_path.strip())
         if not path.exists() or not path.is_file():
-            self.dataset_preview_md = "Arquivo local nao encontrado."
+            self.dataset_preview_md = "Local file not found."
             return
 
         dataset_name = self.dataset_name.strip() or path.stem
@@ -716,15 +718,15 @@ class AppState(rx.State):
         try:
             lake = DataLake("./data_lake")
             lake.save_raw_file(payload, dataset_name, path.name)
-            self.dataset_preview_md = f"Arquivo salvo no Data Lake: {dataset_name}"
+            self.dataset_preview_md = f"File saved to Data Lake: {dataset_name}"
             self.refresh()
         except Exception as exc:
-            self.dataset_preview_md = f"Erro ao salvar no Data Lake: {exc}"
+            self.dataset_preview_md = f"Error saving to Data Lake: {exc}"
 
     @rx.event
     def preview_dataset(self):
         if not self.selected_dataset or not self.selected_version:
-            self.dataset_preview_md = "Selecione dataset e versao."
+            self.dataset_preview_md = "Select dataset and version."
             return
 
         try:
@@ -732,7 +734,7 @@ class AppState(rx.State):
             df = lake.load_version(self.selected_dataset, self.selected_version, nrows=20)
             self.dataset_preview_md = df.to_markdown(index=False)
         except Exception as exc:
-            self.dataset_preview_md = f"Erro no preview: {exc}"
+            self.dataset_preview_md = f"Error in preview: {exc}"
 
     @rx.event
     def delete_selected_version(self):
@@ -742,15 +744,15 @@ class AppState(rx.State):
             lake = DataLake("./data_lake")
             lake.delete_version(self.selected_dataset, self.selected_version)
             self.selected_version = ""
-            self.dataset_preview_md = "Versao removida."
+            self.dataset_preview_md = "Version removed."
             self.refresh()
         except Exception as exc:
-            self.dataset_preview_md = f"Erro ao remover versao: {exc}"
+            self.dataset_preview_md = f"Error removing version: {exc}"
 
     @rx.event
     def run_drift_detection(self):
         if not (self.drift_reference_dataset and self.drift_reference_version and self.drift_current_dataset and self.drift_current_version):
-            self.drift_results_json = json.dumps({"error": "Selecione datasets de referencia e atual."}, indent=2)
+            self.drift_results_json = json.dumps({"error": "Select reference and current datasets."}, indent=2)
             return
 
         try:
@@ -788,7 +790,7 @@ class AppState(rx.State):
                 if isinstance(parsed, dict):
                     manual_params.update(parsed)
             except Exception:
-                self.automl_submit_status = "JSON de manual params invalido."
+                self.automl_submit_status = "Invalid manual params JSON."
                 return
 
         ensemble_config: dict[str, str | list[str] | None] = {}
@@ -832,12 +834,12 @@ class AppState(rx.State):
             if self.automl_registry_model_name.strip():
                 selected_models = [self.automl_registry_model_name.strip()]
             else:
-                self.automl_submit_status = "Selecione um modelo do registry."
+                self.automl_submit_status = "Select a model from registry."
                 return
 
         if self.automl_model_source == "Local Upload":
             if not self.automl_uploaded_model_path.strip():
-                self.automl_submit_status = "Anexe um modelo local para continuar."
+                self.automl_submit_status = "Attach a local model to continue."
                 return
             manual_params["uploaded_model_path"] = self.automl_uploaded_model_path
 
@@ -869,10 +871,10 @@ class AppState(rx.State):
                 ensemble_configs_list=ensemble_configs_list,
                 model_source=self.automl_model_source,
             )
-            self.automl_submit_status = f"Job enviado: {job_id}"
+            self.automl_submit_status = f"Job submitted: {job_id}"
             self.refresh()
         except Exception as exc:
-            self.automl_submit_status = f"Erro ao enviar job: {exc}"
+            self.automl_submit_status = f"Error submitting job: {exc}"
 
     @rx.event
     def refresh_jobs(self):
@@ -881,7 +883,7 @@ class AppState(rx.State):
             self._sync_job_selection()
             self._build_job_chart_rows()
         except Exception as exc:
-            self.automl_submit_status = f"Erro ao atualizar jobs: {exc}"
+            self.automl_submit_status = f"Error updating jobs: {exc}"
 
     @rx.event
     def pause_selected_job(self):
@@ -942,14 +944,14 @@ class AppState(rx.State):
     @rx.event
     def register_selected_run(self):
         if not self.selected_run_id or not self.register_model_name.strip():
-            self.register_result = "Informe run_id e nome de modelo."
+            self.register_result = "Provide run_id and model name."
             return
         try:
             ok = register_from_run(self.selected_run_id, self.register_model_name.strip())
-            self.register_result = "Modelo registrado com sucesso." if ok else "Falha ao registrar modelo."
+            self.register_result = "Model registered successfully." if ok else "Failed to register model."
             self.refresh()
         except Exception as exc:
-            self.register_result = f"Erro no registro: {exc}"
+            self.register_result = f"Error in registration: {exc}"
 
     @rx.event
     def deploy_to_hf(self):
@@ -961,7 +963,7 @@ class AppState(rx.State):
                 private_repo=self.hf_private,
             )
         except Exception as exc:
-            self.hf_result = f"Erro no deploy: {exc}"
+            self.hf_result = f"Error in deploy: {exc}"
 
     @rx.event
     def send_predict_request(self):
@@ -1010,24 +1012,45 @@ class AppState(rx.State):
             self.cv_result_json = json.dumps({"error": str(exc)}, indent=2)
 
     @rx.event
+    def load_consumption_code(self):
+        """Generates a snippet for model consumption."""
+        model_name = self.selected_model_name or "model"
+        self.consumption_code = f"""import joblib
+import pandas as pd
+
+# 1. Load the pipeline
+pipeline = joblib.load("{model_name}.pkl")
+
+# 2. Prepare data
+data = pd.DataFrame([{{
+    "feature1": 1.0,
+    "feature2": "Value"
+}}])
+
+# 3. Predict
+predictions = pipeline.predict(data)
+print(f"Predictions: {{predictions}}")
+"""
+
+    @rx.event
     def connect_dagshub_tracking(self):
         try:
             result = connect_dagshub(self.dagshub_username, self.dagshub_repo, self.dagshub_token)
             self._apply_tracking_status(result)
-            self.dagshub_message = "Conectado ao DagsHub com sucesso."
+            self.dagshub_message = "Successfully connected to DagsHub."
             self.refresh()
         except Exception as exc:
-            self.dagshub_message = f"Falha ao conectar DagsHub: {exc}"
+            self.dagshub_message = f"Failed to connect to DagsHub: {exc}"
 
     @rx.event
     def disconnect_dagshub_tracking(self):
         try:
             result = disconnect_dagshub()
             self._apply_tracking_status(result)
-            self.dagshub_message = "Conexao DagsHub removida."
+            self.dagshub_message = "DagsHub connection removed."
             self.refresh()
         except Exception as exc:
-            self.dagshub_message = f"Falha ao desconectar DagsHub: {exc}"
+            self.dagshub_message = f"Failed to disconnect DagsHub: {exc}"
 
     @rx.event
     def set_automl_n_trials_input(self, value: str):
