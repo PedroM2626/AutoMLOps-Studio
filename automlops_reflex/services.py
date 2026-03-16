@@ -405,6 +405,31 @@ def list_jobs_summary() -> list[dict[str, Any]]:
     _JOB_MANAGER.poll_updates()
     rows: list[dict[str, Any]] = []
     for job in _JOB_MANAGER.list_jobs():
+        # Build serializable trials data for plotly charts
+        trials_data_safe: list[dict[str, Any]] = []
+        for t in (job.trials_data or []):
+            try:
+                row_safe = {k: (float(v) if isinstance(v, (int, float)) else str(v)) for k, v in t.items()}
+                trials_data_safe.append(row_safe)
+            except Exception:
+                pass
+
+        # Build serializable model summaries for result dashboard
+        model_summaries_safe: dict[str, Any] = {}
+        for m_name, m_info in (job.model_summaries or {}).items():
+            try:
+                safe_info = {k: (float(v) if isinstance(v, (int, float)) else str(v)) for k, v in m_info.items() if k != "confusion_matrix"}
+                # Include nested metrics dict if present
+                if isinstance(m_info.get("metrics"), dict):
+                    safe_info["metrics"] = {
+                        mk: float(mv) if isinstance(mv, (int, float)) else str(mv)
+                        for mk, mv in m_info["metrics"].items()
+                        if mk != "confusion_matrix"
+                    }
+                model_summaries_safe[m_name] = safe_info
+            except Exception:
+                model_summaries_safe[m_name] = {"score": str(m_info.get("score", "-"))}
+
         rows.append(
             {
                 "job_id": job.job_id,
@@ -419,8 +444,115 @@ def list_jobs_summary() -> list[dict[str, Any]]:
                 "logs_tail": "\n".join(job.logs[-40:]) if job.logs else "",
                 "trials_count": len(job.trials_data),
                 "model_summaries": json.dumps(job.model_summaries, default=str) if job.model_summaries else "{}",
+                # Extended data for charts and dashboard
+                "trials_data_json": json.dumps(trials_data_safe, default=str),
+                "model_summaries_json": json.dumps(model_summaries_safe, default=str),
             }
         )
+    return rows
+
+
+def run_cv_inference_on_bytes(
+    trainer_state: Any,
+    image_bytes: bytes,
+    task_type: str,
+    class_names: list[str],
+    label_names: list[str],
+    multilabel_threshold: float = 0.5,
+) -> dict[str, Any]:
+    """Run inference with a CVAutoMLTrainer instance on raw image bytes.
+
+    Returns a structured dict with task-specific prediction data.
+    Images are not base64-encoded here; the caller handles display.
+    """
+    import io
+    import base64
+    import numpy as np
+    from PIL import Image as PILImage
+
+    if trainer_state is None or not hasattr(trainer_state, "predict"):
+        return {"error": "Trainer not available. Train a model first."}
+
+    # Save bytes to a temp file so CVAutoMLTrainer.predict() can open it
+    import tempfile
+    suffix = ".jpg"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp.write(image_bytes)
+        tmp_path = tmp.name
+
+    try:
+        result = trainer_state.predict(tmp_path)
+    finally:
+        try:
+            import os
+            os.remove(tmp_path)
+        except Exception:
+            pass
+
+    if result is None:
+        return {"error": "Model returned no prediction. Ensure the model was trained successfully."}
+
+    if task_type == "image_segmentation":
+        # result is a numpy array (H x W)
+        mask: "np.ndarray" = result
+        max_val = int(mask.max()) if mask.max() > 0 else 1
+        mask_uint8 = ((mask / max_val) * 255).astype("uint8")
+        img_pil = PILImage.fromarray(mask_uint8, mode="L")
+        buf = io.BytesIO()
+        img_pil.save(buf, format="PNG")
+        mask_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+        return {"task_type": task_type, "mask_b64": mask_b64}
+
+    elif task_type == "image_multi_label":
+        probs_list = [float(p) for p in result.get("probabilities", [])]
+        labels = result.get("label_names", label_names)
+        return {
+            "task_type": task_type,
+            "probabilities": probs_list,
+            "label_names": [str(l) for l in labels],
+        }
+
+    else:  # image_classification
+        probs_list = [float(p) for p in result.get("probabilities", [])]
+        names = result.get("class_names", class_names)
+        return {
+            "task_type": task_type,
+            "probabilities": probs_list,
+            "class_names": [str(n) for n in names],
+            "predicted_class": str(names[int(result.get("class_id", 0))]) if names else str(result.get("class_id", 0)),
+        }
+
+
+def get_schema_for_dataset(dataset_name: str, version: str, project_root: Any = None) -> list[dict[str, str]]:
+    """Return a list of column schema rows for the Schema Override UI.
+
+    Each row: {column, dtype, include, override_type}
+    override_type mirrors the Streamlit schema overrides format:
+    'Categorical', 'Numerical', 'Text', 'Datetime', or 'Auto'.
+    """
+    root = _root(project_root)
+    lake = DataLake(root / "data_lake")
+    try:
+        df = lake.load_version(dataset_name, version, nrows=5)
+    except Exception:
+        return []
+
+    DTYPE_MAP = {
+        "int64": "Numerical", "int32": "Numerical", "float64": "Numerical", "float32": "Numerical",
+        "object": "Categorical", "bool": "Categorical",
+        "datetime64[ns]": "Datetime", "datetime64": "Datetime",
+    }
+
+    rows: list[dict[str, str]] = []
+    for col in df.columns:
+        dtype_str = str(df[col].dtype)
+        default_type = DTYPE_MAP.get(dtype_str, "Categorical")
+        rows.append({
+            "column": str(col),
+            "dtype": dtype_str,
+            "include": "true",
+            "override_type": default_type,
+        })
     return rows
 
 

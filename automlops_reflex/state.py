@@ -34,6 +34,8 @@ from .services import (
     get_tracking_status,
     connect_dagshub,
     disconnect_dagshub,
+    get_schema_for_dataset,
+    run_cv_inference_on_bytes,
     NON_BASE_MODEL_KEYS,
 )
 
@@ -105,12 +107,18 @@ class AppState(rx.State):
     data_time_column: str = ""
     data_manual_split_column: str = ""
     data_schema_overrides_json: str = "[]"
+    # Schema Override Table UI
+    schema_rows: list[dict[str, str]] = []
+    schema_loaded_for: str = ""
 
     drift_reference_dataset: str = ""
     drift_reference_version: str = ""
     drift_current_dataset: str = ""
     drift_current_version: str = ""
     drift_results_json: str = "[]"
+
+    # AutoML Step Wizard
+    automl_wizard_step: int = 1
 
     automl_task: str = "classification"
     automl_target_column: str = ""
@@ -165,6 +173,19 @@ class AppState(rx.State):
     selected_job_logs: str = ""
     selected_job_error: str = ""
     job_chart_rows: list[dict[str, str]] = []
+    # Job detail dashboard
+    job_detail_tab: str = "results"
+    job_detail_mlflow_run_id: str = ""
+    job_detail_register_name: str = ""
+    job_detail_register_result: str = ""
+    job_detail_hf_repo: str = ""
+    job_detail_hf_token: str = ""
+    job_detail_hf_result: str = ""
+    # Plotly chart data (JSON strings for rx.plotly)
+    job_comparison_chart_json: dict = {}
+    job_progress_chart_json: dict = {}
+    # Rich model results from selected job
+    job_model_results: list[dict[str, str]] = []
 
     selected_model_name: str = ""
     selected_model_version: str = ""
@@ -205,6 +226,12 @@ class AppState(rx.State):
     cv_batch_size: int = 8
     cv_learning_rate: float = 0.001
     cv_result_json: str = ""
+    # CV Inference Playground
+    cv_trained_this_session: bool = False
+    cv_inference_status: str = ""
+    cv_inference_result_json: str = "{}"
+    # Internal trainer reference (stored as Any, not serialized to Reflex state)
+    _cv_trainer_ref: Any = None
 
     tracking_uri: str = ""
     dagshub_status_label: str = "Local MLflow"
@@ -996,6 +1023,7 @@ class AppState(rx.State):
 
     @rx.event
     def run_cv_training(self):
+        from src.engines.vision import CVAutoMLTrainer
         try:
             report = train_cv_model(
                 task_type=self.cv_task_type,
@@ -1008,8 +1036,174 @@ class AppState(rx.State):
                 learning_rate=self.cv_learning_rate,
             )
             self.cv_result_json = json.dumps(report, indent=2, default=str)
+            # Keep a live trainer for inference (stored outside Reflex state serialization)
+            trainer = CVAutoMLTrainer(
+                task_type=self.cv_task_type,
+                num_classes=self.cv_num_classes,
+                backbone=self.cv_backbone,
+            )
+            # Re-attach the history from the report if available
+            if isinstance(report, dict):
+                trainer.class_names = report.get("class_names", [])
+                trainer.label_names = report.get("label_names", [])
+            import pickle
+            import base64
+            self._cv_trainer_ref = pickle.dumps(trainer)
+            self.cv_trained_this_session = True
+            self.cv_inference_status = ""
+            self.cv_inference_result_json = "{}"
         except Exception as exc:
             self.cv_result_json = json.dumps({"error": str(exc)}, indent=2)
+
+    # ---- CV Inference Playground ------------------------------------------
+
+    @rx.event
+    async def handle_cv_inference_upload(self, files: list[rx.UploadFile]):
+        import pickle
+        if not files:
+            self.cv_inference_status = "No file selected."
+            return
+        file = files[0]
+        try:
+            image_bytes = await file.read()
+        except Exception as exc:
+            self.cv_inference_status = f"Failed to read image: {exc}"
+            return
+
+        # Deserialize trainer from bytes if available
+        trainer = None
+        if self._cv_trainer_ref:
+            try:
+                import pickle
+                trainer = pickle.loads(self._cv_trainer_ref)
+            except Exception:
+                trainer = None
+
+        self.cv_inference_status = "Running inference..."
+        try:
+            result = run_cv_inference_on_bytes(
+                trainer_state=trainer,
+                image_bytes=image_bytes,
+                task_type=self.cv_task_type,
+                class_names=[],
+                label_names=[],
+            )
+            self.cv_inference_result_json = json.dumps(result, indent=2, default=str)
+            if "error" in result:
+                self.cv_inference_status = result["error"]
+            else:
+                self.cv_inference_status = "Prediction complete."
+        except Exception as exc:
+            self.cv_inference_status = f"Inference error: {exc}"
+            self.cv_inference_result_json = json.dumps({"error": str(exc)}, indent=2)
+
+    # ---- AutoML Wizard Navigation ------------------------------------------
+
+    @rx.event
+    def wizard_next(self):
+        if self.automl_wizard_step < 5:
+            self.automl_wizard_step += 1
+
+    @rx.event
+    def wizard_back(self):
+        if self.automl_wizard_step > 1:
+            self.automl_wizard_step -= 1
+
+    @rx.event
+    def wizard_goto(self, step: int):
+        if 1 <= step <= 5:
+            self.automl_wizard_step = step
+
+    # ---- Schema Override Table --------------------------------------------
+
+    @rx.event
+    def load_schema_for_selected_dataset(self):
+        if not self.selected_dataset or not self.selected_version:
+            return
+        key = f"{self.selected_dataset}:{self.selected_version}"
+        if self.schema_loaded_for == key:
+            return  # already loaded for this dataset/version
+        rows = get_schema_for_dataset(self.selected_dataset, self.selected_version)
+        self.schema_rows = rows
+        self.schema_loaded_for = key
+        self._rebuild_schema_json()
+
+    @rx.event
+    def toggle_schema_include(self, col: str):
+        updated = []
+        for row in self.schema_rows:
+            if row.get("column") == col:
+                new_val = "false" if row.get("include", "true") == "true" else "true"
+                updated.append({**row, "include": new_val})
+            else:
+                updated.append(row)
+        self.schema_rows = updated
+        self._rebuild_schema_json()
+
+    @rx.event
+    def set_schema_type(self, col: str, new_type: str):
+        updated = []
+        for row in self.schema_rows:
+            if row.get("column") == col:
+                updated.append({**row, "override_type": new_type})
+            else:
+                updated.append(row)
+        self.schema_rows = updated
+        self._rebuild_schema_json()
+
+    # ---- Job Detail Dashboard ---------------------------------------------
+
+    @rx.event
+    def set_job_detail_tab(self, tab: str):
+        self.job_detail_tab = tab
+
+    @rx.event
+    def register_job_model(self):
+        run_id = self.job_detail_mlflow_run_id
+        name = self.job_detail_register_name.strip()
+        if not run_id or not name:
+            self.job_detail_register_result = "Provide a run ID and model name."
+            return
+        try:
+            result = register_from_run(run_id, name)
+            self.job_detail_register_result = str(result)
+        except Exception as exc:
+            self.job_detail_register_result = f"Error: {exc}"
+
+    @rx.event
+    def push_job_model_to_hf(self):
+        run_id = self.job_detail_mlflow_run_id
+        if not run_id or not self.job_detail_hf_repo:
+            self.job_detail_hf_result = "Provide HF Repo ID."
+            return
+        try:
+            import mlflow
+            import tempfile, os
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = mlflow.artifacts.download_artifacts(
+                    run_id=run_id, artifact_path="model", dst_path=tmpdir
+                )
+                result = deploy_model_to_hf(
+                    model_path=local_path,
+                    repo_id=self.job_detail_hf_repo,
+                    token=self.job_detail_hf_token,
+                    private_repo=False,
+                )
+                self.job_detail_hf_result = str(result)
+        except Exception as exc:
+            self.job_detail_hf_result = f"Error: {exc}"
+
+    # ---- Refresh Jobs (enriched) ------------------------------------------
+
+    @rx.event
+    def refresh_jobs(self):
+        try:
+            self.jobs = list_jobs_summary()
+        except Exception as exc:
+            self.automl_submit_status = f"Failed to list jobs: {exc}"
+            return
+        self._sync_job_selection()
+        self._build_job_chart_rows()
 
     @rx.event
     def load_consumption_code(self):
@@ -1145,6 +1339,17 @@ print(f"Predictions: {{predictions}}")
         except Exception:
             pass
 
+    def _rebuild_schema_json(self):
+        """Rebuild data_schema_overrides_json from the schema_rows table state."""
+        overrides = []
+        for row in self.schema_rows:
+            if row.get("include", "true") == "false":
+                continue
+            override_type = row.get("override_type", "Auto")
+            if override_type and override_type != "Auto":
+                overrides.append({"column": row["column"], "type": override_type})
+        self.data_schema_overrides_json = json.dumps(overrides, indent=2)
+
     def _apply_service_statuses(self, statuses: dict[str, dict[str, str | bool]]):
         api = statuses.get("api", {})
         self.api_status = str(api.get("status", "stopped"))
@@ -1165,6 +1370,9 @@ print(f"Predictions: {{predictions}}")
             self.selected_job_logs = ""
             self.selected_job_error = ""
             self.job_chart_rows = []
+            self.job_comparison_chart_json = {}
+            self.job_progress_chart_json = {}
+            self.job_model_results = []
             return
 
         if not self.selected_job_id:
@@ -1177,6 +1385,94 @@ print(f"Predictions: {{predictions}}")
 
         self.selected_job_logs = selected.get("logs_tail", "")
         self.selected_job_error = selected.get("error_msg", "")
+        self.job_detail_mlflow_run_id = selected.get("mlflow_run_id", "")
+        if not self.job_detail_register_name:
+            self.job_detail_register_name = f"{selected.get('name', 'model')[:24].replace(' ', '_')}"
+
+        # Build Plotly comparison chart (bar chart: model vs score)
+        try:
+            summaries: dict = json.loads(selected.get("model_summaries_json", "{}") or "{}")
+            if summaries:
+                model_names = list(summaries.keys())
+                scores = [float(v.get("score", 0)) if isinstance(v, dict) else 0.0 for v in summaries.values()]
+                comparison_fig = {
+                    "data": [{
+                        "type": "bar",
+                        "x": model_names,
+                        "y": scores,
+                        "marker": {"color": "rgba(79,140,255,0.85)", "line": {"color": "rgba(50,201,168,0.9)", "width": 1}},
+                        "name": "Best Score",
+                    }],
+                    "layout": {
+                        "paper_bgcolor": "rgba(0,0,0,0)",
+                        "plot_bgcolor": "rgba(0,0,0,0)",
+                        "font": {"color": "#c8d6ef", "size": 11},
+                        "xaxis": {"tickfont": {"size": 10}, "gridcolor": "rgba(255,255,255,0.05)"},
+                        "yaxis": {"gridcolor": "rgba(255,255,255,0.05)"},
+                        "margin": {"l": 40, "r": 10, "t": 20, "b": 80},
+                        "height": 260,
+                    },
+                }
+                self.job_comparison_chart_json = comparison_fig
+
+                # Build model results table rows
+                result_rows: list[dict[str, str]] = []
+                for m_name, m_info in summaries.items():
+                    if not isinstance(m_info, dict):
+                        continue
+                    metrics_block = m_info.get("metrics", {})
+                    if isinstance(metrics_block, dict):
+                        for mk, mv in metrics_block.items():
+                            result_rows.append({"model": str(m_name), "metric": str(mk), "value": f"{float(mv):.4f}" if isinstance(mv, (int, float)) else str(mv)})
+                    else:
+                        result_rows.append({"model": str(m_name), "metric": "score", "value": str(m_info.get("score", "-"))})
+                self.job_model_results = result_rows
+            else:
+                self.job_comparison_chart_json = {}
+                self.job_model_results = []
+        except Exception:
+            self.job_comparison_chart_json = {}
+            self.job_model_results = []
+
+        # Build Plotly progress chart (line chart: trial index vs metric)
+        try:
+            trials: list = json.loads(selected.get("trials_data_json", "[]") or "[]")
+            if trials and len(trials) > 1:
+                # Detect the primary metric column
+                metric_col = None
+                for key in ["score", "accuracy", "r2", "rmse", "f1"]:
+                    if any(key in t for t in trials):
+                        metric_col = key
+                        break
+                if metric_col:
+                    y_vals = [float(t.get(metric_col, 0)) for t in trials]
+                    progress_fig = {
+                        "data": [{
+                            "type": "scatter",
+                            "mode": "lines+markers",
+                            "x": list(range(len(trials))),
+                            "y": y_vals,
+                            "line": {"color": "rgba(50,201,168,0.9)", "width": 2},
+                            "marker": {"size": 5},
+                            "name": metric_col,
+                        }],
+                        "layout": {
+                            "paper_bgcolor": "rgba(0,0,0,0)",
+                            "plot_bgcolor": "rgba(0,0,0,0)",
+                            "font": {"color": "#c8d6ef", "size": 11},
+                            "xaxis": {"title": "Trial", "gridcolor": "rgba(255,255,255,0.05)"},
+                            "yaxis": {"title": metric_col, "gridcolor": "rgba(255,255,255,0.05)"},
+                            "margin": {"l": 50, "r": 10, "t": 20, "b": 60},
+                            "height": 260,
+                        },
+                    }
+                    self.job_progress_chart_json = progress_fig
+                else:
+                    self.job_progress_chart_json = {}
+            else:
+                self.job_progress_chart_json = {}
+        except Exception:
+            self.job_progress_chart_json = {}
 
     def _build_job_chart_rows(self):
         rows: list[dict[str, str]] = []

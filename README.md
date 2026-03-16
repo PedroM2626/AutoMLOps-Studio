@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v4.7.1-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v4.8.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -43,18 +43,6 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 - **Visual Experimentation**: Visualize the impact of hyperparameters and architectures in real-time.
 - **Production Concepts**: Learn about Data Drift, Model Serving, and Performance Monitoring without the need to configure complex servers.
 
-## ✨ Features & Technical Details
-
-### 1. 📊 Data Engineering & Drift
-- **Smart Data Lake**: Versioned ingestion for CSV, JSON, and Parquet.
-- **Schema Control**: Manual data type overrides and interactive column selection.
-- **Integrated Monitoring**: Drift detection (KS-Test) comparing current data vs. training history.
-
-### 2. 🤖 AutoML Engine (v4.0+)
-- **Multi-Task**: Classification, Regression, Clustering, and Time Series.
-- **NLP & Transformers**: TF-IDF and Hugging Face integration for text data.
-- **Computer Vision**: PyTorch-based training with MLflow tracking for vision tasks.
-- **Optimization**: Optuna with Bayesian Search and early stopping.
 
 ### 3. 🧪 Experiments & MLOps
 - **Job Manager**: Comprehensive dashboard for background job control.

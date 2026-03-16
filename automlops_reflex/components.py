@@ -618,7 +618,7 @@ def data_page() -> rx.Component:
             rx.upload(
                 rx.vstack(
                     rx.box(
-                        rx.icon("upload-cloud", size=24, color=ACCENT),
+                        rx.icon("cloud_upload", size=24, color=ACCENT),
                         background="rgba(79,140,255,0.12)",
                         padding="0.8rem",
                         border_radius="12px",
@@ -693,7 +693,17 @@ def data_page() -> rx.Component:
             rx.button("Save file to Data Lake", on_click=AppState.save_local_file_to_lake, background=ACCENT, color="#06122d"),
         ),
         card(
-            rx.text("Schema & Split Controls", color=TEXT_PRIMARY, font_weight="700"),
+            rx.hstack(
+                rx.text("Schema & Split Controls", color=TEXT_PRIMARY, font_weight="700"),
+                rx.spacer(),
+                rx.button(
+                    rx.hstack(rx.icon("table", size=12), rx.text("Load Schema"), spacing="1"),
+                    on_click=AppState.load_schema_for_selected_dataset,
+                    background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                    color="#05112a", font_weight="700", size="1", border_radius="7px",
+                ),
+                width="100%", align_items="center",
+            ),
             rx.grid(
                 input_block(
                     "Split strategy",
@@ -711,16 +721,73 @@ def data_page() -> rx.Component:
                 spacing="3",
                 width="100%",
             ),
-            input_block(
-                "Schema overrides JSON",
-                rx.text_area(
-                    value=AppState.data_schema_overrides_json,
-                    on_change=AppState.set_data_schema_overrides_json,
-                    min_height="120px",
-                    width="100%",
+            # Schema Override interactive table
+            rx.cond(
+                AppState.schema_rows.length() > 0,
+                rx.vstack(
+                    rx.text("Column Schema Override", color=TEXT_PRIMARY, font_size="0.85rem", font_weight="700", margin_top="0.8rem"),
+                    rx.box(
+                        # Header row
+                        rx.hstack(
+                            rx.text("COLUMN", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px", min_width="120px"),
+                            rx.text("DTYPE", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px", min_width="90px"),
+                            rx.text("OVERRIDE TYPE", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px", min_width="130px"),
+                            rx.text("INCLUDE", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px"),
+                            width="100%", padding="0.35rem 0.5rem",
+                            border_bottom=f"1px solid {DARK_BORDER}",
+                        ),
+                        rx.foreach(
+                            AppState.schema_rows,
+                            lambda row: rx.hstack(
+                                rx.hstack(
+                                    rx.icon("table_columns_split", size=12, color=ACCENT),
+                                    rx.text(row["column"], color=TEXT_PRIMARY, font_size="0.80rem", font_weight="600"),
+                                    spacing="1", min_width="120px",
+                                ),
+                                rx.text(row["dtype"], color=TEXT_MUTED, font_size="0.74rem", min_width="90px"),
+                                rx.select(
+                                    ["Auto", "Categorical", "Numerical", "Text", "Datetime"],
+                                    value=row["override_type"],
+                                    on_change=lambda t: AppState.set_schema_type(row["column"], t),
+                                    size="1",
+                                    width="130px",
+                                ),
+                                rx.checkbox(
+                                    "",
+                                    is_checked=(row["include"] == "true"),
+                                    on_change=lambda _: AppState.toggle_schema_include(row["column"]),
+                                ),
+                                width="100%", padding="0.35rem 0.5rem",
+                                border_bottom=f"1px solid rgba(30,45,71,0.4)",
+                                _hover={"background": "rgba(79,140,255,0.04)"},
+                            ),
+                        ),
+                        border=f"1px solid {DARK_BORDER}",
+                        border_radius="10px",
+                        overflow="hidden",
+                        width="100%",
+                    ),
+                    rx.vstack(
+                        rx.text("Generated JSON Override", color=TEXT_MUTED, font_size="0.75rem", font_weight="500", margin_top="0.6rem"),
+                        rx.code_block(AppState.data_schema_overrides_json, language="json", width="100%"),
+                        width="100%", spacing="1", align_items="start",
+                    ),
+                    width="100%", spacing="2", align_items="start",
+                ),
+                rx.vstack(
+                    rx.text("No schema loaded. Select a dataset & version above, then click Load Schema.", color=TEXT_MUTED, font_size="0.80rem"),
+                    input_block(
+                        "Manual JSON override (optional)",
+                        rx.text_area(
+                            value=AppState.data_schema_overrides_json,
+                            on_change=AppState.set_data_schema_overrides_json,
+                            min_height="80px",
+                            width="100%",
+                        ),
+                    ),
+                    width="100%", spacing="2", align_items="start",
                 ),
             ),
-            rx.text("Use the same format as the Streamlit interface: list of objects with Include/Column/Type.", color=TEXT_MUTED, font_size="0.78rem"),
         ),
         card(
             rx.text("Dataset Preview", color=TEXT_PRIMARY, font_weight="700"),
@@ -756,137 +823,263 @@ def data_page() -> rx.Component:
     )
 
 
+# ---------------------------------------------------------------------------
+# AutoML Step Wizard helpers
+# ---------------------------------------------------------------------------
+
+def _wizard_step_btn(step_num: int, label_text: str) -> rx.Component:
+    is_active = AppState.automl_wizard_step == step_num
+    is_done = AppState.automl_wizard_step > step_num
+    return rx.button(
+        rx.hstack(
+            rx.box(
+                str(step_num),
+                width="22px", height="22px",
+                border_radius="999px",
+                display="flex",
+                align_items="center",
+                justify_content="center",
+                font_size="0.70rem",
+                font_weight="800",
+                background=rx.cond(is_active, f"linear-gradient(90deg, {ACCENT}, {ACCENT_2})",
+                                   rx.cond(is_done, ACCENT_2, "#253048")),
+                color=rx.cond(is_active, "#04122d", rx.cond(is_done, "#041a17", TEXT_MUTED)),
+                flex_shrink="0",
+            ),
+            rx.text(
+                label_text,
+                font_size="0.74rem",
+                font_weight=rx.cond(is_active, "700", "500"),
+                color=rx.cond(is_active, TEXT_PRIMARY, rx.cond(is_done, ACCENT_2, TEXT_MUTED)),
+            ),
+            spacing="2", align_items="center",
+        ),
+        on_click=lambda: AppState.wizard_goto(step_num),
+        background="transparent",
+        padding="0.4rem 0.6rem",
+        border_radius="8px",
+        border=rx.cond(is_active, f"1px solid rgba(79,140,255,0.5)", "1px solid transparent"),
+        cursor="pointer",
+        _hover={"background": "rgba(79,140,255,0.08)"},
+    )
+
+
+def wizard_nav_bar() -> rx.Component:
+    steps = [(1, "Dataset & Task"), (2, "Model Source"), (3, "Optimization"), (4, "Validation"), (5, "Review & Submit")]
+    return card(
+        rx.hstack(
+            *[_wizard_step_btn(n, lbl) for n, lbl in steps],
+            rx.spacer(),
+            rx.text(AppState.automl_wizard_step, "/5", color=TEXT_MUTED, font_size="0.75rem"),
+            width="100%",
+            align_items="center",
+            overflow_x="auto",
+        ),
+        padding="0.65rem 0.9rem",
+    )
+
+
+def wizard_footer_btns() -> rx.Component:
+    return rx.hstack(
+        rx.button(
+            rx.hstack(rx.icon("chevron-left", size=13), rx.text("Back"), spacing="1"),
+            on_click=AppState.wizard_back,
+            background="#253048",
+            color=TEXT_PRIMARY,
+            border_radius="8px",
+            size="2",
+            display=rx.cond(AppState.automl_wizard_step > 1, "flex", "none"),
+        ),
+        rx.spacer(),
+        rx.cond(
+            AppState.automl_wizard_step < 5,
+            rx.button(
+                rx.hstack(rx.text("Next"), rx.icon("chevron-right", size=13), spacing="1"),
+                on_click=AppState.wizard_next,
+                background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                color="#05112a", font_weight="700", border_radius="8px", size="2",
+            ),
+            rx.button(
+                rx.hstack(rx.icon("play", size=13), rx.text("Submit AutoML Job"), spacing="1"),
+                on_click=AppState.submit_automl,
+                background=f"linear-gradient(90deg, {ACCENT_2}, #26ddb5)",
+                color="#04170f", font_weight="700", border_radius="8px", size="2",
+            ),
+        ),
+        width="100%",
+        margin_top="0.7rem",
+    )
+
+
 def automl_page() -> rx.Component:
     return rx.vstack(
-        card(
-            section_title("Classical AutoML Training", "Select base models, adjust validation, and build custom ensembles without mixing strategies with algorithms."),
-            rx.grid(
-                input_block(
-                    "Task",
-                    rx.select(
-                        ["classification", "regression", "clustering", "time_series", "anomaly_detection"],
-                        value=AppState.automl_task,
-                        on_change=AppState.update_automl_task,
-                        width="100%",
-                    ),
-                ),
-                input_block("Target column", rx.select(AppState.automl_target_options, value=AppState.automl_target_column, on_change=AppState.set_automl_target_column, width="100%")),
-                input_block("Experiment name", rx.input(value=AppState.automl_experiment_name, on_change=AppState.set_automl_experiment_name, width="100%")),
-                columns="2",
-                spacing="3",
-                width="100%",
-            ),
-            rx.grid(
-                input_block("Train dataset", rx.select(AppState.dataset_options, value=AppState.automl_train_dataset, on_change=AppState.update_automl_train_dataset, width="100%")),
-                input_block("Train version", rx.select(AppState.automl_train_version_options, value=AppState.automl_train_version, on_change=AppState.update_automl_train_version, width="100%")),
-                input_block("Test dataset (optional)", rx.select(AppState.dataset_options_optional, placeholder="— none —", value=AppState.automl_test_dataset, on_change=AppState.update_automl_test_dataset, width="100%")),
-                input_block("Test version (optional)", rx.select(AppState.automl_test_version_options_optional, placeholder="— none —", value=AppState.automl_test_version, on_change=AppState.set_automl_test_version, width="100%")),
-                columns="2",
-                spacing="3",
-                width="100%",
-            ),
-            rx.grid(
-                input_block(
-                    "Model Source",
-                    rx.select(
-                        ["Standard AutoML", "Model Registry", "Local Upload"],
-                        value=AppState.automl_model_source,
-                        on_change=AppState.update_model_source,
-                        width="100%",
-                    ),
-                ),
-                input_block(
-                    "Model Selection",
-                    rx.select(
-                        ["Automatic (Preset)", "Manual (Select)"],
-                        value=AppState.automl_mode_selection,
-                        on_change=AppState.update_mode_selection,
-                        width="100%",
-                    ),
-                ),
-                input_block(
-                    "Training Strategy",
-                    rx.select(
-                        ["Automatic", "Manual"],
-                        value=AppState.automl_training_strategy,
-                        on_change=AppState.update_training_strategy,
-                        width="100%",
-                    ),
-                ),
-                input_block(
-                    "Training Focus",
-                    rx.select(
-                        ["single", "ensemble_only", "both"],
-                        value=AppState.automl_ensemble_mode,
-                        on_change=AppState.update_ensemble_mode,
-                        width="100%",
-                    ),
-                ),
-                columns="2",
-                spacing="3",
-                width="100%",
-            ),
-            rx.cond(
-                AppState.automl_model_source == "Model Registry",
-                input_block("Registry model name", rx.select(AppState.model_name_options, value=AppState.automl_registry_model_name, on_change=AppState.set_automl_registry_model_name, width="100%")),
-            ),
-            rx.cond(
-                AppState.automl_model_source == "Local Upload",
-                rx.vstack(
-                    rx.upload(
-                        rx.vstack(
-                            rx.button("Select model file (.pkl/.joblib/.onnx)", background=ACCENT_2, color="#041a17"),
-                            rx.text("Drop model file here", color=TEXT_MUTED, font_size="0.8rem"),
-                            spacing="2",
-                            align_items="center",
+        hero_header("AutoML Training Wizard", "Step-by-step guided training configuration."),
+        wizard_nav_bar(),
+
+        # ---- Step 1: Dataset & Task ----------------------------------------
+        rx.cond(
+            AppState.automl_wizard_step == 1,
+            card(
+                section_title("Step 1 - Dataset & Task", "Choose task type, dataset, and the target column."),
+                rx.grid(
+                    input_block(
+                        "Task type",
+                        rx.select(
+                            ["classification", "regression", "clustering", "time_series", "anomaly_detection"],
+                            value=AppState.automl_task,
+                            on_change=AppState.update_automl_task,
                             width="100%",
                         ),
-                        id="model_upload",
-                        multiple=False,
-                        width="100%",
-                        border=f"1px dashed {DARK_BORDER}",
-                        padding="1rem",
-                        border_radius="10px",
                     ),
-                    rx.button(
-                        "Upload model",
-                        on_click=AppState.handle_model_upload(rx.upload_files(upload_id="model_upload")),
-                        background=ACCENT,
-                        color="#06122d",
-                    ),
-                    rx.cond(AppState.automl_uploaded_model_status != "", rx.text(AppState.automl_uploaded_model_status, color=ACCENT_2, font_size="0.82rem")),
-                    spacing="2",
-                    width="100%",
-                    align_items="start",
+                    input_block("Target column", rx.select(AppState.automl_target_options, value=AppState.automl_target_column, on_change=AppState.set_automl_target_column, width="100%")),
+                    input_block("Experiment name", rx.input(value=AppState.automl_experiment_name, on_change=AppState.set_automl_experiment_name, width="100%")),
+                    columns="2", spacing="3", width="100%",
                 ),
-            ),
-            rx.checkbox("Include Deep Learning Models", is_checked=AppState.automl_use_deep_learning, on_change=AppState.update_use_deep_learning),
-            rx.grid(
-                input_block("Preset", rx.select(["test", "fast", "medium", "high", "custom"], value=AppState.automl_preset, on_change=AppState.set_automl_preset, width="100%")),
-                input_block("Optimization mode", rx.select(["bayesian", "random", "grid", "hyperband"], value=AppState.automl_optimization_mode, on_change=AppState.set_automl_optimization_mode, width="100%")),
-                input_block(
-                    "Optimization metric",
-                    rx.select(
-                        AppState.automl_metric_options,
-                        value=AppState.automl_optimization_metric,
-                        on_change=AppState.set_automl_optimization_metric,
-                        width="100%",
-                    ),
+                rx.grid(
+                    input_block("Train dataset", rx.select(AppState.dataset_options, value=AppState.automl_train_dataset, on_change=AppState.update_automl_train_dataset, width="100%")),
+                    input_block("Train version", rx.select(AppState.automl_train_version_options, value=AppState.automl_train_version, on_change=AppState.update_automl_train_version, width="100%")),
+                    input_block("Test dataset (optional)", rx.select(AppState.dataset_options_optional, placeholder="— none —", value=AppState.automl_test_dataset, on_change=AppState.update_automl_test_dataset, width="100%")),
+                    input_block("Test version (optional)", rx.select(AppState.automl_test_version_options_optional, placeholder="— none —", value=AppState.automl_test_version, on_change=AppState.set_automl_test_version, width="100%")),
+                    columns="2", spacing="3", width="100%",
                 ),
-                columns="2",
-                spacing="3",
-                width="100%",
+                wizard_footer_btns(),
             ),
-            rx.grid(
-                input_block("Trials", rx.input(type="number", value=AppState.automl_n_trials, on_change=AppState.set_automl_n_trials_input, width="100%")),
-                input_block("Timeout (s)", rx.input(type="number", value=AppState.automl_timeout, on_change=AppState.set_automl_timeout_input, width="100%")),
-                input_block("Time budget (s)", rx.input(type="number", value=AppState.automl_time_budget, on_change=AppState.set_automl_time_budget_input, width="100%")),
-                columns="2",
-                spacing="3",
-                width="100%",
-            ),
+        ),
+
+        # ---- Step 2: Model Source & Focus ----------------------------------
+        rx.cond(
+            AppState.automl_wizard_step == 2,
             card(
-                section_title("Advanced Validation", "Reflex now uses the correct trainer names and exposes extra parameters that were from the Streamlit wizard."),
+                section_title("Step 2 - Model Source & Focus", "Choose what kind of model to train."),
+                rx.grid(
+                    input_block(
+                        "Model source",
+                        rx.select(
+                            ["Standard AutoML", "Model Registry", "Local Upload"],
+                            value=AppState.automl_model_source,
+                            on_change=AppState.update_model_source,
+                            width="100%",
+                        ),
+                    ),
+                    input_block(
+                        "Training focus",
+                        rx.select(["single", "ensemble_only", "both"], value=AppState.automl_ensemble_mode, on_change=AppState.update_ensemble_mode, width="100%"),
+                    ),
+                    input_block(
+                        "Model selection mode",
+                        rx.select(["Automatic (Preset)", "Manual (Select)"], value=AppState.automl_mode_selection, on_change=AppState.update_mode_selection, width="100%"),
+                    ),
+                    input_block(
+                        "Training strategy",
+                        rx.select(["Automatic", "Manual"], value=AppState.automl_training_strategy, on_change=AppState.update_training_strategy, width="100%"),
+                    ),
+                    columns="2", spacing="3", width="100%",
+                ),
+                rx.checkbox("Include Deep Learning Models", is_checked=AppState.automl_use_deep_learning, on_change=AppState.update_use_deep_learning, margin_top="0.5rem"),
+                rx.cond(
+                    AppState.automl_model_source == "Model Registry",
+                    input_block("Registry model name", rx.select(AppState.model_name_options, value=AppState.automl_registry_model_name, on_change=AppState.set_automl_registry_model_name, width="100%")),
+                ),
+                rx.cond(
+                    AppState.automl_model_source == "Local Upload",
+                    rx.vstack(
+                        rx.upload(
+                            rx.vstack(
+                                rx.button("Select model file (.pkl/.joblib/.onnx)", background=ACCENT_2, color="#041a17"),
+                                rx.text("Drop model file here", color=TEXT_MUTED, font_size="0.8rem"),
+                                spacing="2", align_items="center", width="100%",
+                            ),
+                            id="model_upload", multiple=False, width="100%",
+                            border=f"1px dashed {DARK_BORDER}", padding="1rem", border_radius="10px",
+                        ),
+                        rx.button("Upload model", on_click=AppState.handle_model_upload(rx.upload_files(upload_id="model_upload")), background=ACCENT, color="#06122d"),
+                        rx.cond(AppState.automl_uploaded_model_status != "", rx.text(AppState.automl_uploaded_model_status, color=ACCENT_2, font_size="0.82rem")),
+                        spacing="2", width="100%", align_items="start",
+                    ),
+                ),
+                rx.cond(
+                    AppState.automl_mode_selection == "Manual (Select)",
+                    card(
+                        section_title("Base Model Picker", "Select individual models to include."),
+                        rx.flex(
+                            rx.foreach(
+                                AppState.automl_available_models,
+                                lambda model_name: rx.button(
+                                    model_name,
+                                    on_click=lambda: AppState.toggle_automl_model(model_name),
+                                    border_radius="999px", padding="0.35rem 0.75rem", font_size="0.78rem",
+                                    background=rx.cond(AppState.automl_selected_model_list.contains(model_name), f"linear-gradient(90deg, rgba(79,140,255,0.95), rgba(50,201,168,0.8))", "#1b2539"),
+                                    color=rx.cond(AppState.automl_selected_model_list.contains(model_name), "#051325", TEXT_PRIMARY),
+                                    border=rx.cond(AppState.automl_selected_model_list.contains(model_name), "1px solid rgba(50,201,168,0.6)", f"1px solid {DARK_BORDER}"),
+                                    transition="all 160ms ease",
+                                ),
+                            ),
+                            wrap="wrap", spacing="2", margin_top="0.85rem",
+                        ),
+                        input_block(
+                            "Selected models (comma separated)",
+                            rx.text_area(value=AppState.automl_models_csv, on_change=AppState.set_automl_models_csv_input, min_height="70px", width="100%"),
+                        ),
+                    ),
+                ),
+                rx.hstack(
+                    rx.button("Refresh available models", on_click=AppState.refresh_models_for_task, background="#3b4357", color=TEXT_PRIMARY, size="1"),
+                    spacing="2",
+                ),
+                wizard_footer_btns(),
+            ),
+        ),
+
+        # ---- Step 3: Optimization ------------------------------------------
+        rx.cond(
+            AppState.automl_wizard_step == 3,
+            card(
+                section_title("Step 3 - Optimization", "Configure preset, trials, budget, and metric."),
+                rx.grid(
+                    input_block("Preset", rx.select(["test", "fast", "medium", "high", "custom"], value=AppState.automl_preset, on_change=AppState.set_automl_preset, width="100%")),
+                    input_block("Optimization mode", rx.select(["bayesian", "random", "grid", "hyperband"], value=AppState.automl_optimization_mode, on_change=AppState.set_automl_optimization_mode, width="100%")),
+                    input_block(
+                        "Optimization metric",
+                        rx.select(AppState.automl_metric_options, value=AppState.automl_optimization_metric, on_change=AppState.set_automl_optimization_metric, width="100%"),
+                    ),
+                    input_block("Trials", rx.input(type="number", value=AppState.automl_n_trials, on_change=AppState.set_automl_n_trials_input, width="100%")),
+                    input_block("Timeout (s)", rx.input(type="number", value=AppState.automl_timeout, on_change=AppState.set_automl_timeout_input, width="100%")),
+                    input_block("Time budget (s)", rx.input(type="number", value=AppState.automl_time_budget, on_change=AppState.set_automl_time_budget_input, width="100%")),
+                    columns="2", spacing="3", width="100%",
+                ),
+                card(
+                    section_title("Custom Ensemble Builder", "Add custom voting, stacking, or bagging ensembles."),
+                    rx.grid(
+                        input_block("Ensemble type", rx.select(["Voting", "Stacking", "Bagging"], value=AppState.new_ensemble_type, on_change=AppState.set_new_ensemble_type, width="100%")),
+                        input_block("Base models (comma separated)", rx.input(value=AppState.new_ensemble_models_csv, on_change=AppState.set_new_ensemble_models_csv, width="100%")),
+                        input_block("Meta model (stacking)", rx.select(AppState.automl_available_models, value=AppState.new_ensemble_meta_model, on_change=AppState.set_new_ensemble_meta_model, width="100%")),
+                        input_block("Voting type", rx.select(["soft", "hard"], value=AppState.new_ensemble_voting_type, on_change=AppState.set_new_ensemble_voting_type, width="100%")),
+                        input_block("Bagging base", rx.select(AppState.automl_available_models, value=AppState.new_ensemble_bagging_base, on_change=AppState.set_new_ensemble_bagging_base, width="100%")),
+                        columns="2", spacing="3", width="100%",
+                    ),
+                    rx.button("Add ensemble", on_click=AppState.add_custom_ensemble, background=ACCENT_2, color="#041a17"),
+                    rx.foreach(
+                        AppState.automl_custom_ensembles,
+                        lambda item: card(
+                            rx.hstack(
+                                rx.text(item["type"], " | ", item["models"], " | meta: ", item["meta_model"], color=TEXT_MUTED, font_size="0.78rem"),
+                                rx.spacer(),
+                                rx.button("Remove", on_click=lambda: AppState.remove_custom_ensemble(item["id"]), background="#522b32", color=TEXT_PRIMARY, size="1"),
+                                width="100%",
+                            ),
+                            padding="0.7rem",
+                        ),
+                    ),
+                ),
+                wizard_footer_btns(),
+            ),
+        ),
+
+        # ---- Step 4: Validation --------------------------------------------
+        rx.cond(
+            AppState.automl_wizard_step == 4,
+            card(
+                section_title("Step 4 - Validation Strategy", "Configure cross-validation, holdout, and time-series settings."),
                 rx.grid(
                     input_block(
                         "Validation strategy",
@@ -897,137 +1090,74 @@ def automl_page() -> rx.Component:
                             width="100%",
                         ),
                     ),
-                    input_block("Validation folds", rx.input(type="number", value=AppState.automl_validation_folds, on_change=AppState.set_automl_validation_folds_input, width="100%")),
+                    input_block("Folds", rx.input(type="number", value=AppState.automl_validation_folds, on_change=AppState.set_automl_validation_folds_input, width="100%")),
                     input_block("Holdout test size (%)", rx.input(type="number", value=AppState.automl_validation_test_size, on_change=AppState.set_automl_validation_test_size_input, width="100%")),
                     input_block("Time-series gap", rx.input(type="number", value=AppState.automl_validation_gap, on_change=AppState.set_automl_validation_gap_input, width="100%")),
-                    input_block("Max train window (0 = full)", rx.input(type="number", value=AppState.automl_validation_max_train_size, on_change=AppState.set_automl_validation_max_train_size_input, width="100%")),
+                    input_block("Max train window (0=full)", rx.input(type="number", value=AppState.automl_validation_max_train_size, on_change=AppState.set_automl_validation_max_train_size_input, width="100%")),
                     input_block("Random seed", rx.input(type="number", value=AppState.automl_random_state, on_change=AppState.set_automl_random_state_input, width="100%")),
                     input_block("Early stopping", rx.input(type="number", value=AppState.automl_early_stopping, on_change=AppState.set_automl_early_stopping_input, width="100%")),
-                    columns="2",
-                    spacing="3",
-                    width="100%",
-                    margin_top="0.85rem",
+                    columns="2", spacing="3", width="100%",
                 ),
                 rx.hstack(
-                    rx.checkbox("Shuffle CV / holdout", is_checked=AppState.automl_validation_shuffle, on_change=AppState.set_automl_validation_shuffle),
+                    rx.checkbox("Shuffle", is_checked=AppState.automl_validation_shuffle, on_change=AppState.set_automl_validation_shuffle),
                     rx.checkbox("Stratify holdout", is_checked=AppState.automl_validation_stratify, on_change=AppState.set_automl_validation_stratify),
-                    spacing="4",
-                    margin_top="0.55rem",
+                    spacing="4", margin_top="0.55rem",
                 ),
-                rx.text("Use holdout/auto_split for test size; use cv/stratified_cv for folds; use time_series_cv for gap and max window.", color=TEXT_MUTED, font_size="0.78rem", margin_top="0.45rem"),
-            ),
-            rx.cond(
-                AppState.automl_mode_selection == "Manual (Select)",
-                card(
-                    section_title("Base Model Picker", "Voting, stacking, and bagging are removed from here and are only available in the ensemble builder."),
-                    rx.flex(
-                        rx.foreach(
-                            AppState.automl_available_models,
-                            lambda model_name: rx.button(
-                                model_name,
-                                on_click=lambda: AppState.toggle_automl_model(model_name),
-                                border_radius="999px",
-                                padding="0.35rem 0.75rem",
-                                font_size="0.78rem",
-                                background=rx.cond(model_name == "", "transparent", rx.cond(AppState.automl_selected_model_list.contains(model_name), "linear-gradient(90deg, rgba(79,140,255,0.95), rgba(50,201,168,0.8))", "#1b2539")),
-                                color=rx.cond(AppState.automl_selected_model_list.contains(model_name), "#051325", TEXT_PRIMARY),
-                                border=rx.cond(AppState.automl_selected_model_list.contains(model_name), "1px solid rgba(50,201,168,0.6)", f"1px solid {DARK_BORDER}"),
-                                transition="all 160ms ease",
-                                _hover={"transform": "translateY(-1px)", "border_color": "rgba(79,140,255,0.55)"},
-                            ),
+                rx.cond(
+                    AppState.automl_training_strategy == "Manual",
+                    rx.vstack(
+                        rx.cond(AppState.automl_manual_param_cards != [], manual_param_cards()),
+                        card(
+                            rx.text("Manual Params Payload", color=TEXT_PRIMARY, font_weight="700"),
+                            rx.code_block(AppState.automl_manual_params_json, language="json", width="100%"),
                         ),
-                        wrap="wrap",
-                        spacing="2",
-                        margin_top="0.85rem",
-                    ),
-                    input_block(
-                        "Selected models (comma separated)",
-                        rx.text_area(
-                            value=AppState.automl_models_csv,
-                            on_change=AppState.set_automl_models_csv_input,
-                            min_height="90px",
-                            width="100%",
-                        ),
-                    ),
-                    rx.text("Click the chips to include/remove models or paste a comma-separated list.", color=TEXT_MUTED, font_size="0.78rem"),
-                ),
-            ),
-            rx.cond(
-                AppState.automl_training_strategy == "Manual",
-                rx.vstack(
-                    rx.cond(AppState.automl_manual_param_cards != [], manual_param_cards()),
-                    card(
-                        rx.text("Manual Params Payload (auto-generated)", color=TEXT_PRIMARY, font_weight="700"),
-                        rx.code_block(AppState.automl_manual_params_json, language="json", width="100%"),
-                    ),
-                    width="100%",
-                    spacing="3",
-                    align_items="start",
-                ),
-            ),
-            card(
-                section_title("Custom Ensemble Builder", "Configure strategies explicitly here, without cluttering the base model selection."),
-                rx.grid(
-                    input_block(
-                        "Ensemble type",
-                        rx.select(["Voting", "Stacking", "Bagging"], value=AppState.new_ensemble_type, on_change=AppState.set_new_ensemble_type, width="100%"),
-                    ),
-                    input_block("Base models (comma separated)", rx.input(value=AppState.new_ensemble_models_csv, on_change=AppState.set_new_ensemble_models_csv, width="100%")),
-                    input_block("Meta model (stacking)", rx.select(AppState.automl_available_models, value=AppState.new_ensemble_meta_model, on_change=AppState.set_new_ensemble_meta_model, width="100%")),
-                    input_block("Voting type", rx.select(["soft", "hard"], value=AppState.new_ensemble_voting_type, on_change=AppState.set_new_ensemble_voting_type, width="100%")),
-                    input_block("Bagging base", rx.select(AppState.automl_available_models, value=AppState.new_ensemble_bagging_base, on_change=AppState.set_new_ensemble_bagging_base, width="100%")),
-                    columns="2",
-                    spacing="3",
-                    width="100%",
-                ),
-                rx.button("Add ensemble", on_click=AppState.add_custom_ensemble, background=ACCENT_2, color="#041a17"),
-                rx.foreach(
-                    AppState.automl_custom_ensembles,
-                    lambda item: card(
-                        rx.hstack(
-                            rx.text(
-                                item["type"],
-                                " | models: ",
-                                item["models"],
-                                " | meta: ",
-                                item["meta_model"],
-                                " | voting: ",
-                                item["voting_type"],
-                                color=TEXT_MUTED,
-                                font_size="0.78rem",
-                            ),
-                            rx.spacer(),
-                            rx.button("Remove", on_click=lambda: AppState.remove_custom_ensemble(item["id"]), background="#522b32", color=TEXT_PRIMARY, size="1"),
-                            width="100%",
-                        ),
-                        padding="0.8rem",
+                        width="100%", spacing="3", align_items="start",
                     ),
                 ),
+                wizard_footer_btns(),
             ),
-            rx.hstack(
-                rx.button("Refresh available models", on_click=AppState.refresh_models_for_task, background="#3b4357", color=TEXT_PRIMARY),
-                rx.button("Submit AutoML Job", on_click=AppState.submit_automl, background=ACCENT, color="#06122d"),
-                spacing="2",
-            ),
-            rx.text("Eligible base models:", color=TEXT_MUTED),
-            rx.flex(
-                rx.foreach(
-                    AppState.automl_available_models,
-                    lambda model_name: rx.box(
-                        model_name,
-                        border=f"1px solid {DARK_BORDER}",
-                        border_radius="999px",
-                        padding="0.25rem 0.6rem",
-                        color=TEXT_PRIMARY,
-                        font_size="0.75rem",
-                        background="#1f2a42",
-                    ),
-                ),
-                wrap="wrap",
-                spacing="2",
-            ),
-            rx.text(AppState.automl_submit_status, color=ACCENT_2),
         ),
+
+        # ---- Step 5: Review & Submit ----------------------------------------
+        rx.cond(
+            AppState.automl_wizard_step == 5,
+            rx.vstack(
+                card(
+                    section_title("Step 5 - Review & Submit", "Review your configuration before launching."),
+                    rx.grid(
+                        card(
+                            rx.text("Task", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_task, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        card(
+                            rx.text("Target", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_target_column, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        card(
+                            rx.text("Dataset", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_train_dataset, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        card(
+                            rx.text("Preset", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_preset, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        card(
+                            rx.text("Metric", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_optimization_metric, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        card(
+                            rx.text("Validation", color=TEXT_MUTED, font_size="0.72rem"), rx.text(AppState.automl_validation_strategy, color=TEXT_PRIMARY, font_weight="700"),
+                            padding="0.7rem",
+                        ),
+                        columns="3", spacing="3", width="100%",
+                    ),
+                    rx.text(AppState.automl_submit_status, color=ACCENT_2, font_size="0.85rem"),
+                    wizard_footer_btns(),
+                ),
+                width="100%", spacing="3",
+            ),
+        ),
+
         spacing="4",
         width="100%",
     )
@@ -1038,41 +1168,70 @@ def experiments_page() -> rx.Component:
         hero_header("Experiments", "Monitor training jobs, view logs, and analyze results."),
         # Training results chart
         card(
-            section_title("Training Results", "Top jobs by best score (normalized)."),
+            section_title("Training Results", "Interactive comparison and trial-progress charts for the selected job."),
             rx.cond(
-                AppState.job_chart_rows.length() > 0,
-                rx.vstack(
-                    rx.foreach(
-                        AppState.job_chart_rows,
-                        lambda row: rx.vstack(
-                            rx.hstack(
-                                rx.text(row["name"], color=TEXT_PRIMARY, font_size="0.82rem", font_weight="600"),
-                                rx.spacer(),
-                                rx.text(row["score"], color=ACCENT_2, font_size="0.82rem", font_weight="700"),
-                                width="100%",
-                            ),
-                            rx.box(
-                                rx.box(
-                                    height="6px",
-                                    width=row["width"],
-                                    background=f"linear-gradient(90deg, {ACCENT}, {ACCENT_2})",
-                                    border_radius="999px",
-                                    transition="width 600ms ease",
-                                ),
-                                height="6px",
-                                width="100%",
-                                background=DARK_BORDER,
-                                border_radius="999px",
-                            ),
-                            spacing="1",
+                AppState.job_comparison_chart_json != "{}",
+                rx.grid(
+                    rx.vstack(
+                        rx.text("Model Score Comparison", color=TEXT_MUTED, font_size="0.74rem", font_weight="600"),
+                        rx.box(
+                            # rx.plotly(data=AppState.job_comparison_chart_json, width="100%"),
+                            rx.text("Chart data loading...", color=TEXT_MUTED),
                             width="100%",
-                            align_items="start",
                         ),
+                        spacing="1", width="100%",
                     ),
-                    width="100%",
-                    spacing="3",
+                    rx.vstack(
+                        rx.text("Trial Optimization Progress", color=TEXT_MUTED, font_size="0.74rem", font_weight="600"),
+                        rx.cond(
+                            AppState.job_progress_chart_json != "{}",
+                            rx.box(
+                                # rx.plotly(data=AppState.job_progress_chart_json, width="100%"),
+                                rx.text("Progress data loading...", color=TEXT_MUTED),
+                                width="100%",
+                            ),
+                            rx.vstack(
+                                rx.icon("trending-up", size=28, color=TEXT_MUTED),
+                                rx.text("Not enough trials to show progress.", color=TEXT_MUTED, font_size="0.80rem"),
+                                align_items="center", justify_content="center", padding="2rem", width="100%",
+                            ),
+                        ),
+                        spacing="1", width="100%",
+                    ),
+                    columns="2", spacing="4", width="100%",
                 ),
-                rx.text("No completed jobs with scores yet.", color=TEXT_MUTED, font_size="0.85rem", padding="0.5rem 0"),
+                rx.cond(
+                    AppState.job_chart_rows.length() > 0,
+                    rx.vstack(
+                        rx.foreach(
+                            AppState.job_chart_rows,
+                            lambda row: rx.vstack(
+                                rx.hstack(
+                                    rx.text(row["name"], color=TEXT_PRIMARY, font_size="0.82rem", font_weight="600"),
+                                    rx.spacer(),
+                                    rx.text(row["score"], color=ACCENT_2, font_size="0.82rem", font_weight="700"),
+                                    width="100%",
+                                ),
+                                rx.box(
+                                    rx.box(
+                                        height="6px",
+                                        width=row["width"],
+                                        background=f"linear-gradient(90deg, {ACCENT}, {ACCENT_2})",
+                                        border_radius="999px",
+                                        transition="width 600ms ease",
+                                    ),
+                                    height="6px",
+                                    width="100%",
+                                    background=DARK_BORDER,
+                                    border_radius="999px",
+                                ),
+                                spacing="1", width="100%", align_items="start",
+                            ),
+                        ),
+                        width="100%", spacing="3",
+                    ),
+                    rx.text("No completed jobs with scores yet.", color=TEXT_MUTED, font_size="0.85rem", padding="0.5rem 0"),
+                ),
             ),
         ),
         # Job manager
@@ -1154,6 +1313,148 @@ def experiments_page() -> rx.Component:
                 width="100%",
                 align_items="end",
                 margin_top="0.8rem",
+            ),
+        ),
+        # Job Detail Dashboard
+        rx.cond(
+            AppState.selected_job_id != "",
+            card(
+                rx.hstack(
+                    rx.icon("bar-chart-2", size=15, color=ACCENT),
+                    rx.text("Job Details", color=TEXT_PRIMARY, font_weight="700"),
+                    rx.text(AppState.selected_job_id, color=TEXT_MUTED, font_size="0.72rem", font_family="monospace"),
+                    spacing="2", align_items="center", width="100%",
+                ),
+                # Tab bar
+                rx.hstack(
+                    rx.button(
+                        rx.hstack(rx.icon("table-2", size=12), rx.text("Results"), spacing="1"),
+                        on_click=lambda: AppState.set_job_detail_tab("results"),
+                        background=rx.cond(AppState.job_detail_tab == "results", f"linear-gradient(90deg, {ACCENT}, #6aa3ff)", "#1b2539"),
+                        color=rx.cond(AppState.job_detail_tab == "results", "#05112a", TEXT_MUTED),
+                        border_radius="8px", size="1", font_weight="600",
+                    ),
+                    rx.button(
+                        rx.hstack(rx.icon("activity", size=12), rx.text("MLflow"), spacing="1"),
+                        on_click=lambda: AppState.set_job_detail_tab("mlflow"),
+                        background=rx.cond(AppState.job_detail_tab == "mlflow", f"linear-gradient(90deg, {ACCENT}, #6aa3ff)", "#1b2539"),
+                        color=rx.cond(AppState.job_detail_tab == "mlflow", "#05112a", TEXT_MUTED),
+                        border_radius="8px", size="1", font_weight="600",
+                    ),
+                    rx.button(
+                        rx.hstack(rx.icon("upload-cloud", size=12), rx.text("Register & Deploy"), spacing="1"),
+                        on_click=lambda: AppState.set_job_detail_tab("register"),
+                        background=rx.cond(AppState.job_detail_tab == "register", f"linear-gradient(90deg, {ACCENT_2}, #26ddb5)", "#1b2539"),
+                        color=rx.cond(AppState.job_detail_tab == "register", "#04170f", TEXT_MUTED),
+                        border_radius="8px", size="1", font_weight="600",
+                    ),
+                    spacing="2", margin_top="0.6rem", margin_bottom="0.7rem",
+                ),
+
+                # Results tab
+                rx.cond(
+                    AppState.job_detail_tab == "results",
+                    rx.vstack(
+                        rx.cond(
+                            AppState.job_model_results.length() > 0,
+                            rx.vstack(
+                                rx.hstack(
+                                    rx.text("MODEL", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px", min_width="130px"),
+                                    rx.text("METRIC", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px", min_width="110px"),
+                                    rx.text("VALUE", color=TEXT_MUTED, font_size="0.63rem", font_weight="700", letter_spacing="0.8px"),
+                                    width="100%", padding="0.3rem 0.5rem", border_bottom=f"1px solid {DARK_BORDER}",
+                                ),
+                                rx.foreach(
+                                    AppState.job_model_results,
+                                    lambda r: rx.hstack(
+                                        rx.text(r["model"], color=TEXT_PRIMARY, font_size="0.79rem", font_weight="600", min_width="130px"),
+                                        rx.text(r["metric"], color=TEXT_MUTED, font_size="0.76rem", min_width="110px"),
+                                        rx.text(r["value"], color=ACCENT_2, font_size="0.76rem", font_weight="700"),
+                                        width="100%", padding="0.32rem 0.5rem",
+                                        border_bottom=f"1px solid rgba(30,45,71,0.35)",
+                                        _hover={"background": "rgba(79,140,255,0.04)"},
+                                    ),
+                                ),
+                                width="100%", spacing="0",
+                            ),
+                            rx.text("No per-model metrics available for this job.", color=TEXT_MUTED, font_size="0.82rem"),
+                        ),
+                        width="100%", align_items="start",
+                    ),
+                ),
+
+                # MLflow tab
+                rx.cond(
+                    AppState.job_detail_tab == "mlflow",
+                    rx.vstack(
+                        rx.hstack(
+                            rx.icon("link", size=13, color=ACCENT_2),
+                            rx.text("MLflow Run ID:", color=TEXT_MUTED, font_size="0.82rem"),
+                            rx.text(AppState.job_detail_mlflow_run_id, color=ACCENT_2, font_size="0.82rem", font_family="monospace"),
+                            spacing="2", align_items="center",
+                        ),
+                        rx.cond(
+                            AppState.run_details_json != "",
+                            rx.vstack(
+                                rx.text("Run Details", color=TEXT_MUTED, font_size="0.74rem", font_weight="500"),
+                                rx.code_block(AppState.run_details_json, language="json", width="100%", max_height="300px", overflow_y="auto"),
+                                spacing="1", width="100%", align_items="start",
+                            ),
+                        ),
+                        width="100%", spacing="3", align_items="start",
+                    ),
+                ),
+
+                # Register & Deploy tab
+                rx.cond(
+                    AppState.job_detail_tab == "register",
+                    rx.grid(
+                        rx.vstack(
+                            rx.text("Register to MLflow Model Registry", color=TEXT_PRIMARY, font_size="0.84rem", font_weight="700"),
+                            input_block("Model name", rx.input(
+                                value=AppState.job_detail_register_name,
+                                on_change=AppState.set_job_detail_register_name,
+                                width="100%", placeholder="my_model_name",
+                            )),
+                            rx.button(
+                                rx.hstack(rx.icon("package", size=13), rx.text("Register Model"), spacing="1"),
+                                on_click=AppState.register_job_model,
+                                background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                                color="#05112a", font_weight="700", border_radius="8px", size="2",
+                            ),
+                            rx.cond(
+                                AppState.job_detail_register_result != "",
+                                rx.text(AppState.job_detail_register_result, color=ACCENT_2, font_size="0.82rem"),
+                            ),
+                            spacing="3", align_items="start", width="100%",
+                        ),
+                        rx.vstack(
+                            rx.text("Push to Hugging Face Hub", color=TEXT_PRIMARY, font_size="0.84rem", font_weight="700"),
+                            input_block("HF Repo ID", rx.input(
+                                value=AppState.job_detail_hf_repo,
+                                on_change=AppState.set_job_detail_hf_repo,
+                                width="100%", placeholder="username/model-name",
+                            )),
+                            input_block("HF Token", rx.input(
+                                value=AppState.job_detail_hf_token,
+                                on_change=AppState.set_job_detail_hf_token,
+                                type="password", width="100%",
+                            )),
+                            rx.button(
+                                rx.hstack(rx.icon("rocket", size=13), rx.text("Push to HF"), spacing="1"),
+                                on_click=AppState.push_job_model_to_hf,
+                                background=f"linear-gradient(90deg, #ffb84d, #ff9a00)",
+                                color="#1a0e00", font_weight="700", border_radius="8px", size="2",
+                            ),
+                            rx.cond(
+                                AppState.job_detail_hf_result != "",
+                                rx.text(AppState.job_detail_hf_result, color=ACCENT_3, font_size="0.82rem"),
+                            ),
+                            spacing="3", align_items="start", width="100%",
+                        ),
+                        columns="2", spacing="4", width="100%",
+                    ),
+                ),
             ),
         ),
         # Logs
@@ -1402,6 +1703,85 @@ def cv_page() -> rx.Component:
             ),
             rx.button("Run CV Training", on_click=AppState.run_cv_training, background=ACCENT_2, color="#041a17"),
             rx.code_block(AppState.cv_result_json, language="json", width="100%"),
+        ),
+        # CV Inference Playground - appears after training
+        rx.cond(
+            AppState.cv_trained_this_session,
+            card(
+                rx.hstack(
+                    rx.icon("image", size=16, color=ACCENT_2),
+                    rx.text("Inference Playground", color=TEXT_PRIMARY, font_weight="800", font_size="1rem"),
+                    rx.box(
+                        "Model Ready",
+                        background="rgba(50,201,168,0.14)",
+                        color=ACCENT_2,
+                        font_size="0.68rem",
+                        font_weight="700",
+                        padding="0.2rem 0.6rem",
+                        border_radius="999px",
+                        border="1px solid rgba(50,201,168,0.35)",
+                    ),
+                    spacing="2", align_items="center", width="100%",
+                ),
+                rx.text(
+                    "Upload an image to test your trained CV model with a live prediction.",
+                    color=TEXT_MUTED, font_size="0.82rem", margin_top="0.2rem",
+                ),
+                rx.upload(
+                    rx.vstack(
+                        rx.box(
+                            rx.icon("image-plus", size=22, color=ACCENT),
+                            background="rgba(79,140,255,0.12)",
+                            padding="0.8rem", border_radius="10px",
+                        ),
+                        rx.button(
+                            "Choose Image",
+                            background=f"linear-gradient(90deg, {ACCENT}, #6aa3ff)",
+                            color="#05112a", font_weight="700", size="2",
+                        ),
+                        rx.text(
+                            "PNG, JPG, WEBP — drop here or click to browse",
+                            color=TEXT_MUTED, font_size="0.78rem",
+                        ),
+                        spacing="2", align_items="center", width="100%",
+                    ),
+                    id="cv_inference_upload",
+                    multiple=False,
+                    on_drop=AppState.handle_cv_inference_upload(rx.upload_files(upload_id="cv_inference_upload")),
+                    width="100%",
+                    border=f"2px dashed {DARK_BORDER}",
+                    border_radius="12px",
+                    padding="1.5rem",
+                    margin_top="0.9rem",
+                    background="rgba(15,20,32,0.5)",
+                    _hover={"border_color": f"rgba(79,140,255,0.55)", "background": "rgba(79,140,255,0.04)"},
+                    transition="all 200ms ease",
+                ),
+                rx.cond(
+                    AppState.cv_inference_status != "",
+                    rx.hstack(
+                        rx.icon(
+                            "check-circle",
+                            size=14,
+                            color=rx.cond(AppState.cv_inference_status == "Prediction complete.", ACCENT_2, ACCENT_3),
+                        ),
+                        rx.text(
+                            AppState.cv_inference_status,
+                            color=rx.cond(AppState.cv_inference_status == "Prediction complete.", ACCENT_2, ACCENT_3),
+                            font_size="0.84rem", font_weight="600",
+                        ),
+                        spacing="2", align_items="center", margin_top="0.7rem",
+                    ),
+                ),
+                rx.cond(
+                    AppState.cv_inference_result_json != "{}",
+                    rx.vstack(
+                        rx.text("Prediction Result", color=TEXT_MUTED, font_size="0.76rem", font_weight="600", margin_top="0.8rem"),
+                        rx.code_block(AppState.cv_inference_result_json, language="json", width="100%"),
+                        spacing="1", width="100%", align_items="start",
+                    ),
+                ),
+            ),
         ),
         spacing="4",
         width="100%",
