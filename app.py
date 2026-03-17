@@ -113,6 +113,34 @@ html, body, [class*="css"], .stApp {
   color: var(--text-primary) !important;
 }
 
+/* ── Sidebar navigation ── */
+[data-testid="stSidebar"] [data-testid="stRadio"] {
+    margin-top: 6px;
+}
+[data-testid="stSidebar"] [role="radiogroup"] {
+    gap: 8px;
+}
+[data-testid="stSidebar"] [role="radiogroup"] > label {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 10px 12px;
+    transition: all 0.18s ease;
+}
+[data-testid="stSidebar"] [role="radiogroup"] > label:hover {
+    background: rgba(47,128,237,0.08);
+    border-color: rgba(47,128,237,0.35);
+}
+[data-testid="stSidebar"] [role="radiogroup"] > label:has(input:checked) {
+    background: linear-gradient(135deg, rgba(47,128,237,0.2), rgba(26,34,54,0.3));
+    border-color: rgba(47,128,237,0.55);
+    box-shadow: 0 4px 16px rgba(47,128,237,0.15);
+}
+[data-testid="stSidebar"] [role="radiogroup"] p {
+    font-size: 1.02rem;
+    font-weight: 600;
+}
+
 /* ── Tabs ── */
 .stTabs [data-baseweb="tab-list"] {
   gap: 4px;
@@ -254,6 +282,10 @@ html, body, [class*="css"], .stApp {
   transition: background 0.2s ease;
   position: relative;
 }
+.pipeline-step-link {
+    text-decoration: none !important;
+    color: inherit !important;
+}
 .pipeline-step:hover { background: var(--bg-surface); }
 .step-circle {
   width: 36px; height: 36px;
@@ -291,6 +323,50 @@ html, body, [class*="css"], .stApp {
 }
 .step-connector.done { background: linear-gradient(90deg, var(--accent-green), #2dba6e); }
 .step-connector.active { background: linear-gradient(90deg, var(--accent-green), var(--accent-blue)); }
+
+.wizard-step-label {
+    text-align: center;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    margin-top: 4px;
+    line-height: 1.15;
+    white-space: nowrap;
+}
+.wizard-step-label.active { color: var(--accent-blue); }
+.wizard-step-label.done { color: var(--accent-green); }
+.wizard-step-label.pending { color: var(--text-muted); opacity: 0.9; }
+
+/* Interactive wizard header shell */
+[class*="st-key-automl_step_hdr_wrap"] {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 12px 24px 10px 24px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+}
+[class*="st-key-automl_step_hdr_wrap"] .step-connector-inline {
+    width: 100%;
+    height: 2px;
+    margin-top: 16px;
+    background: var(--border);
+    border-radius: 999px;
+    transition: background 0.35s ease;
+}
+[class*="st-key-automl_step_hdr_wrap"] .step-connector-inline.done {
+    background: linear-gradient(90deg, var(--accent-green), #2dba6e);
+}
+[class*="st-key-automl_step_hdr_"] [data-testid="stMarkdown"] {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+[class*="st-key-automl_step_hdr_"] [data-testid="stMarkdownContainer"] {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+}
 
 /* ── Step info panel (glassmorphism) ── */
 .step-info-panel {
@@ -585,6 +661,26 @@ with st.sidebar:
         <p style='color:#8b949e; font-size:0.8rem;'>Studio v4.8.0</p>
     </div>
     """, unsafe_allow_html=True)
+
+    NAV_ITEMS = [
+        "🏠 Overview",
+        "🗄️ Data",
+        "⚙️ AutoML",
+        "🧪 Experiments",
+        "📦 Registry & Deploy",
+        "📉 Monitoring",
+    ]
+    nav_default = st.session_state.get('main_nav', NAV_ITEMS[0])
+    if nav_default not in NAV_ITEMS:
+        nav_default = NAV_ITEMS[0]
+    st.markdown("<p style='font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:#8b949e;margin-bottom:8px;'>Navigation</p>", unsafe_allow_html=True)
+    st.radio(
+        "Main Navigation",
+        NAV_ITEMS,
+        index=NAV_ITEMS.index(nav_default),
+        key="main_nav",
+        label_visibility="collapsed"
+    )
     
     # Pre-fetch sidebar data with cache
     all_runs_sidebar = get_cached_all_runs()
@@ -742,37 +838,143 @@ if 'automl_config' not in st.session_state: st.session_state['automl_config'] = 
 # poll_updates moved to Experiments tab fragment for performance
 
 
-def render_pipeline_header(steps: list, current: int):
-    """Render a horizontal WatsonX-style step indicator.
-    steps: list of (icon, label) tuples.
-    current: 0-based index of the active step.
+def render_pipeline_header(steps: list, current: int, can_jump_fn=None, cfg=None, key_prefix: str = "wiz_hdr"):
+    """Render an interactive horizontal step header without browser page reload.
+    Returns clicked step index or None.
     """
-    html_parts = ['<div class="pipeline-bar">']
-    for i, (icon, label) in enumerate(steps):
+    css_lines = []
+    # Global button normalization to ensure Streamlit's button HTML doesn't add
+    # extra padding/margins that push the visual circle off-center.
+    global_btn_sel = f"[class*='st-key-{key_prefix}_'] button"
+    css_lines.append(
+        f"{global_btn_sel} {{"
+        "display: flex !important;"
+        "align-items: center !important;"
+        "justify-content: center !important;"
+        "padding: 0 !important;"
+        "margin: 0 auto !important;"
+        "border-radius: 999px !important;"
+        "box-sizing: border-box !important;"
+        "line-height: 1 !important;"
+        "vertical-align: middle !important;"
+        "}"
+    )
+    css_lines.append(
+        f"{global_btn_sel} > div, {global_btn_sel} > span, {global_btn_sel} > div > span {{"
+        "margin: 0 !important;"
+        "padding: 0 !important;"
+        "display: flex !important;"
+        "align-items: center !important;"
+        "justify-content: center !important;"
+        "}"
+    )
+    for i in range(len(steps)):
+        # Parent slot for this step (Streamlit column cell)
+        slot_selector = f"[class*='st-key-{key_prefix}_{i}']"
+        # Make the slot a positioned container so we can overlay an invisible button
+        css_lines.append(
+            f"{slot_selector} {{"
+            "position: relative !important;"
+            "display: flex !important;"
+            "align-items: flex-start !important;"
+            "justify-content: center !important;"
+            "padding: 0 !important;"
+            "margin: 0 !important;"
+            "}"
+        )
+        # Button selector for this slot
+        selector_btn = f"{slot_selector} button"
+        # Style the Streamlit button itself to be the visual step circle (avoid using overlay)
+        css_lines.append(
+            f"{selector_btn} {{"
+            "width: 36px !important;"
+            "height: 36px !important;"
+            "min-height: 36px !important;"
+            "border-radius: 999px !important;"
+            "padding: 0 !important;"
+            "margin: 0 auto !important;"
+            "display: flex !important;"
+            "align-items: center !important;"
+            "justify-content: center !important;"
+            "font-weight: 800 !important;"
+            "font-size: 0.85rem !important;"
+            "line-height: 1 !important;"
+            "box-sizing: border-box !important;"
+            "}"
+        )
+        # State-specific styling applied below (green/done, active gradient, pending)
+
+        # Visual state styling for the Streamlit button (so it looks like the circle)
         if i < current:
-            circle_cls = 'done'
-            label_cls  = 'done'
-            circle_content = '✓'
+            css_lines.append(
+                f"{selector_btn} {{"
+                "background: var(--accent-green) !important;"
+                "border: none !important;"
+                "color: white !important;"
+                "box-shadow: 0 2px 8px rgba(39,174,96,0.35) !important;"
+                "}"
+            )
         elif i == current:
-            circle_cls = 'active'
-            label_cls  = 'active'
-            circle_content = str(i + 1)
+            css_lines.append(
+                f"{selector_btn} {{"
+                "background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple)) !important;"
+                "border: none !important;"
+                "color: white !important;"
+                "box-shadow: 0 0 0 4px rgba(47,128,237,0.2), 0 4px 12px rgba(47,128,237,0.4) !important;"
+                "}"
+            )
         else:
-            circle_cls = 'pending'
-            label_cls  = ''
-            circle_content = str(i + 1)
+            css_lines.append(
+                f"{selector_btn} {{"
+                "background: var(--bg-surface) !important;"
+                "border: 2px solid var(--border) !important;"
+                "color: var(--text-muted) !important;"
+                "}"
+            )
 
-        html_parts.append(f"""
-        <div class="pipeline-step">
-          <div class="step-circle {circle_cls}">{circle_content}</div>
-          <div class="step-label {label_cls}">{icon} {label}</div>
-        </div>""")
-        if i < len(steps) - 1:
-            connector_cls = 'done' if i < current else ''
-            html_parts.append(f'<div class="step-connector {connector_cls}"></div>')
+    st.markdown(f"<style>{''.join(css_lines)}</style>", unsafe_allow_html=True)
 
-    html_parts.append('</div>')
-    st.markdown(''.join(html_parts), unsafe_allow_html=True)
+    clicked_step = None
+    with st.container(key=f"{key_prefix}_wrap"):
+        _left_gutter, _center_track, _right_gutter = st.columns([0.5, 9.0, 0.5])
+        with _center_track:
+            total_cols = len(steps) * 2 - 1
+            circle_cols = st.columns(total_cols)
+
+            for i, (icon, label) in enumerate(steps):
+                if i < current:
+                    step_token = "✓"
+                    label_cls = "done"
+                elif i == current:
+                    step_token = str(i + 1)
+                    label_cls = "active"
+                else:
+                    step_token = str(i + 1)
+                    label_cls = "pending"
+
+                can_jump = True
+                jump_reason = ""
+                if can_jump_fn is not None and cfg is not None:
+                    can_jump, jump_reason = can_jump_fn(i, current, cfg)
+
+                with circle_cols[i * 2]:
+                    # Use the styled Streamlit button as the circular control
+                    if st.button(f"{step_token}", key=f"{key_prefix}_{i}", disabled=(not can_jump and i > current)):
+                        clicked_step = i
+                    st.markdown(
+                        f"<div class='wizard-step-label {label_cls}'>{icon} {label}</div>",
+                        unsafe_allow_html=True,
+                    )
+
+                if i < len(steps) - 1:
+                    connector_cls = "done" if i < current else ""
+                    with circle_cols[i * 2 + 1]:
+                        st.markdown(
+                            f"<div class='step-connector-inline {connector_cls}'></div>",
+                            unsafe_allow_html=True,
+                        )
+
+    return clicked_step
 
 
 
@@ -1007,17 +1209,59 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
     
     return full_train, full_test
 
-# 📑 TAB NAVIGATION (Corrected Indices)
-tabs = st.tabs([
-    "Data", 
-    "AutoML & CV", 
-    "Experiments", 
-    "Model Registry & Deploy",
-    "Monitoring 📉"
-])
+# 📑 MAIN NAVIGATION (Sidebar-driven)
+current_main_section = st.session_state.get('main_nav', '🏠 Overview')
+
+if current_main_section == "🏠 Overview":
+        st.markdown("""
+        <div class='hero-header'>
+            <div class='hero-title'>🏠 Overview</div>
+            <div class='hero-subtitle'>Operational snapshot of datasets, experiments, registry, and training activity.</div>
+        </div>""", unsafe_allow_html=True)
+
+        ov_runs = get_cached_all_runs()
+        ov_models = get_cached_registered_models()
+        ov_datasets = get_cached_datasets()
+        ov_active_jobs = 0
+        if 'job_manager' in st.session_state:
+                ov_active_jobs = len(st.session_state['job_manager'].list_jobs(status=JobStatus.RUNNING))
+
+        o1, o2, o3, o4 = st.columns(4)
+        with o1:
+                st.markdown(f"""
+                <div class='ui-metric' style='border-left-color:#2f80ed;'>
+                    <div class='metric-value'>{len(ov_runs)}</div>
+                    <div class='metric-label'>Experiments</div>
+                </div>""", unsafe_allow_html=True)
+        with o2:
+                st.markdown(f"""
+                <div class='ui-metric' style='border-left-color:#27ae60;'>
+                    <div class='metric-value'>{len(ov_models)}</div>
+                    <div class='metric-label'>Models</div>
+                </div>""", unsafe_allow_html=True)
+        with o3:
+                st.markdown(f"""
+                <div class='ui-metric' style='border-left-color:#8b5cf6;'>
+                    <div class='metric-value'>{len(ov_datasets)}</div>
+                    <div class='metric-label'>Datasets</div>
+                </div>""", unsafe_allow_html=True)
+        with o4:
+                st.markdown(f"""
+                <div class='ui-metric' style='border-left-color:#f59e0b;'>
+                    <div class='metric-value'>{ov_active_jobs}</div>
+                    <div class='metric-label'>Active Jobs</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class='ui-card' style='margin-top:14px;'>
+            <div style='font-weight:700;margin-bottom:8px;'>Quick Start</div>
+            <div style='color:#8b949e;'>1. Go to Data and load a dataset.</div>
+            <div style='color:#8b949e;'>2. Configure the AutoML wizard and submit an experiment.</div>
+            <div style='color:#8b949e;'>3. Track progress in Experiments and deploy from Registry.</div>
+        </div>""", unsafe_allow_html=True)
 
 # --- TAB 0: DATA & DRIFT ---
-with tabs[0]:
+if current_main_section == "🗄️ Data":
     st.markdown(f"""
     <div class='hero-header'>
       <div class='hero-title'>📦 Data Lake & Management</div>
@@ -1137,7 +1381,7 @@ with tabs[0]:
             st.dataframe(st.session_state['data_preview_df'], use_container_width=True)
 
 # --- TAB 4: MLOPS MONITORING ---
-with tabs[4]:
+if current_main_section == "📉 Monitoring":
     st.markdown(f"""
     <div class='hero-header'>
       <div class='hero-title'>📉 ML Monitoring & Observability</div>
@@ -1640,7 +1884,7 @@ with tabs[4]:
 
 
 # --- TAB 1: AUTOML & MODEL HUB ---
-with tabs[1]:
+if current_main_section == "⚙️ AutoML":
     st.markdown("""
     <div class='hero-header'>
       <div class='hero-title'>🤖 AutoML &amp; Model Hub</div>
@@ -1664,10 +1908,63 @@ with tabs[1]:
         ]
 
         cur_step = st.session_state.get('automl_step', 0)
-        render_pipeline_header(PIPELINE_STEPS, cur_step)
 
         # ── Shared state container ────────────────────────────────────
         cfg = st.session_state.get('automl_config', {})
+
+        # Smart direct step navigation (non-linear when prerequisites are met).
+        def _step_prereq(step_index: int, cfg_local: dict):
+            ds_ready = bool(cfg_local.get('ds_list')) and bool(cfg_local.get('selected_configs'))
+            task_ready = bool(cfg_local.get('task'))
+            model_source_local = cfg_local.get('model_source', 'Standard AutoML (Scikit-Learn/XGBoost/Transformers)')
+            mode_sel_local = cfg_local.get('mode_selection', 'Automatic (Preset)')
+            models_local = cfg_local.get('selected_models')
+            model_ready = (
+                model_source_local != 'Standard AutoML (Scikit-Learn/XGBoost/Transformers)'
+                or mode_sel_local != 'Manual (Select)'
+                or bool(models_local)
+            )
+
+            if step_index == 0:
+                return True, ""
+            if step_index == 1:
+                return ds_ready, "Configure datasets in Step 1 (Data)."
+            if step_index == 2:
+                return ds_ready and task_ready, "Set datasets and task before Models."
+            if step_index == 3:
+                return ds_ready and task_ready and model_ready, "Complete model source/selection before Optimization."
+            if step_index == 4:
+                return ds_ready and task_ready and bool(cfg_local.get('optimization_mode')), "Configure optimization before Validation."
+            if step_index == 5:
+                return ds_ready and task_ready and bool(cfg_local.get('validation_strategy')), "Choose a validation strategy before Advanced."
+            if step_index == 6:
+                return ds_ready and task_ready, "Configure data/task before Submit."
+            return True, ""
+
+        def _can_jump_to(target_index: int, current_index: int, cfg_local: dict):
+            if target_index <= current_index:
+                return True, ""
+            for idx in range(current_index + 1, target_index + 1):
+                ok, reason = _step_prereq(idx, cfg_local)
+                if not ok:
+                    return False, reason
+            return True, ""
+
+        clicked_step = render_pipeline_header(
+            PIPELINE_STEPS,
+            cur_step,
+            can_jump_fn=_can_jump_to,
+            cfg=cfg,
+            key_prefix="automl_step_hdr"
+        )
+        if clicked_step is not None and clicked_step != cur_step:
+            can_jump, jump_reason = _can_jump_to(clicked_step, cur_step, cfg)
+            if can_jump:
+                st.session_state['automl_config'] = cfg
+                st.session_state['automl_step'] = clicked_step
+                st.rerun()
+            else:
+                st.warning(f"Smart jump blocked: {jump_reason}")
 
         # ── Defaults that need to exist before any step ────────────────
         task                = cfg.get('task', 'classification')
@@ -2282,6 +2579,384 @@ with tabs[1]:
             # ── Manual Hyperparameter Inputs ──────────────────────────────
             if cfg.get('training_strategy') == 'Manual':
                 st.info("Manual tuning selected.") 
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step2_back"):
+                    st.session_state['automl_step'] = 1
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Optimization →", type="primary", key="step2_next"):
+                    st.session_state['automl_step'] = 3
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 3 — Optimization Strategy
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 3:
+            task = cfg.get('task', 'classification')
+
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>⚡ Step 4 — Optimization Strategy</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Optimization",
+                    "Configure how AutoML searches hyperparameters and which metric should be optimized.",
+                    ["Bayesian is usually the best default", "Custom preset gives full control", "Pick a metric aligned with your business goal"]
+                )
+
+            OPT_MODES = [
+                ("bayesian",  "🧠", "Bayesian (Default)", "Efficient surrogate model-based search. Best for most use cases."),
+                ("random",    "🎲", "Random Search",      "Randomly sample configurations. Fast and exploratory."),
+                ("grid",      "📐", "Grid Search",        "Exhaustive search over all combinations. Slow but thorough."),
+                ("hyperband", "⚡", "Hyperband",          "Early stopping of unpromising trials. Great for large datasets."),
+            ]
+            current_opt = cfg.get('optimization_mode', 'bayesian')
+
+            cols_opt = st.columns(4)
+            for i, (oid, oicon, oname, odesc) in enumerate(OPT_MODES):
+                with cols_opt[i]:
+                    is_sel = (oid == current_opt)
+                    border_style = "border: 2px solid #2f80ed; background: linear-gradient(135deg,rgba(47,128,237,0.08),rgba(139,92,246,0.08));" if is_sel else ""
+                    st.markdown(f"""
+                    <div class='task-card' style='min-height:130px;{border_style}'>
+                      <div class='task-icon'>{oicon}</div>
+                      <div class='task-name'>{oname}</div>
+                      <div class='task-desc'>{odesc}</div>
+                    </div>""", unsafe_allow_html=True)
+                    if st.button(f"{'✓' if is_sel else 'Select'}", key=f"opt_{oid}"):
+                        cfg['optimization_mode'] = oid
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
+
+            st.markdown('<br>', unsafe_allow_html=True)
+
+            preset_labels = ["test", "fast", "medium", "high", "custom"]
+            preset_descs = {
+                "test": "⚡ 1 trial for quick pipeline validation",
+                "fast": "🚀 Fast search (~5 trials)",
+                "medium": "⚖️ Balanced speed/quality (default)",
+                "high": "🎯 Exhaustive search",
+                "custom": "🔧 Manual trial/timeout configuration",
+            }
+            col_preset, col_metric = st.columns(2)
+            with col_preset:
+                training_preset = st.select_slider(
+                    "Training Mode",
+                    options=preset_labels,
+                    value=cfg.get('training_preset', 'medium'),
+                    key="wiz_preset"
+                )
+                cfg['training_preset'] = training_preset
+                st.caption(preset_descs.get(training_preset, ""))
+
+                if training_preset == "custom":
+                    cfg['n_trials'] = st.number_input("Trials per model", 1, 1000, 20, key="wiz_trials")
+                    cfg['timeout'] = st.number_input("Timeout per model (s)", 10, 7200, 600, key="wiz_timeout")
+                    cfg['time_budget'] = st.number_input("Total time budget (s)", 60, 86400, 3600, key="wiz_total_time")
+                    cfg['early_stopping'] = st.number_input("Early Stopping (rounds)", 0, 50, 7, key="wiz_es")
+                elif training_preset == "test":
+                    st.warning("⚠️ TEST MODE: 1 trial, short timeout.")
+                    cfg['n_trials'] = 1
+                    cfg['timeout'] = 30
+                    cfg['time_budget'] = 60
+                    cfg['early_stopping'] = 1
+                else:
+                    cfg['n_trials'] = None
+                    cfg['timeout'] = None
+                    cfg['time_budget'] = None
+                    cfg['early_stopping'] = 10
+
+            with col_metric:
+                metric_options = {
+                    'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
+                    'regression': ['r2', 'rmse', 'mae'],
+                    'clustering': ['silhouette'],
+                    'time_series': ['rmse', 'mae', 'mape'],
+                    'anomaly_detection': ['f1'],
+                    'dimensionality_reduction': ['explained_variance']
+                }
+                metric_list = metric_options.get(task, ['accuracy'])
+                cur_metric = cfg.get('optimization_metric', metric_list[0])
+                if cur_metric not in metric_list:
+                    cur_metric = metric_list[0]
+                cfg['optimization_metric'] = st.selectbox(
+                    "Optimization Metric",
+                    metric_list,
+                    index=metric_list.index(cur_metric),
+                    key="wiz_metric"
+                )
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step3_back"):
+                    st.session_state['automl_step'] = 2
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Validation →", type="primary", key="step3_next"):
+                    st.session_state['automl_step'] = 4
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 4 — Validation Strategy
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 4:
+            task = cfg.get('task', 'classification')
+
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Validation Strategy</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Validation",
+                    "Choose how the model is evaluated during optimization.",
+                    ["CV is robust for small datasets", "Holdout is faster", "Time Series Split preserves temporal order"]
+                )
+
+            validation_options = [
+                "Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold",
+                "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"
+            ]
+
+            if task == "time_series":
+                val_strategy_ui = "Time Series Split"
+                st.info("⏳ Time series must use temporal splitting.")
+            elif task == "classification":
+                val_strategy_ui = st.selectbox(
+                    "Validation Method",
+                    validation_options,
+                    index=max(0, validation_options.index(cfg.get('val_strategy_ui', 'Automatic (Recommended)'))
+                              if cfg.get('val_strategy_ui') in validation_options else 0),
+                    key="wiz_val_method"
+                )
+            else:
+                opts = [o for o in validation_options if o != "Stratified K-Fold"]
+                v_default = cfg.get('val_strategy_ui', 'Automatic (Recommended)')
+                if v_default not in opts:
+                    v_default = 'Automatic (Recommended)'
+                val_strategy_ui = st.selectbox("Validation Method", opts, index=opts.index(v_default), key="wiz_val_method_ns")
+
+            cfg['val_strategy_ui'] = val_strategy_ui
+
+            if val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
+                n_folds = st.slider("Number of Folds", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_folds")
+                cfg['validation_params'] = {'folds': n_folds}
+                cfg['validation_strategy'] = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
+            elif val_strategy_ui == "Holdout (Train/Test)":
+                test_size_pct = st.slider("Test Split (%)", 10, 50, int(cfg.get('validation_params', {}).get('test_size', 0.2) * 100), key="wiz_holdout")
+                cfg['validation_params'] = {'test_size': test_size_pct / 100.0}
+                cfg['validation_strategy'] = 'holdout'
+            elif val_strategy_ui == "Time Series Split":
+                n_splits = st.number_input("Temporal Splits", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_ts_splits")
+                cfg['validation_params'] = {'folds': n_splits}
+                cfg['validation_strategy'] = 'time_series_cv'
+            else:
+                cfg['validation_strategy'] = 'auto' if val_strategy_ui == "Automatic (Recommended)" else 'auto_split'
+                cfg['validation_params'] = {}
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step4_back"):
+                    st.session_state['automl_step'] = 3
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Advanced →", type="primary", key="step4_next"):
+                    st.session_state['automl_step'] = 5
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 5 — Advanced Settings
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 5:
+            task = cfg.get('task', 'classification')
+
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🔧 Step 6 — Advanced Settings</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Advanced",
+                    "Set random seeds and optional post-training stability analysis.",
+                    ["Fixed seed improves reproducibility", "Per-model seeds increase diversity", "Stability tests add extra runtime"]
+                )
+
+            with st.expander("🌱 Reproducibility (Seed)", expanded=True):
+                eff_models = cfg.get('selected_models') or (AutoMLTrainer(task_type=task).get_available_models())
+                seed_mode = st.radio(
+                    "Seed Mode",
+                    ["Automatic (Different per model)", "Automatic (Same for all)", "Manual (Same for all)", "Manual (Different per model)"],
+                    index=0,
+                    horizontal=True,
+                    key="wiz_seed_mode"
+                )
+                rseed = 42
+                if seed_mode == "Automatic (Different per model)":
+                    rseed = {m: np.random.randint(0, 999999) for m in eff_models}
+                elif seed_mode == "Automatic (Same for all)":
+                    rseed = int(np.random.randint(0, 999999))
+                elif seed_mode == "Manual (Same for all)":
+                    rseed = st.number_input("Global Seed", 0, 999999, cfg.get('random_state', 42) if isinstance(cfg.get('random_state'), int) else 42, key="wiz_seed_val")
+                elif seed_mode == "Manual (Different per model)":
+                    rseed = {}
+                    sc = st.columns(min(len(eff_models), 3))
+                    for si, sm in enumerate(eff_models):
+                        with sc[si % 3]:
+                            rseed[sm] = st.number_input(f"Seed: {sm}", 0, 999999, 42, key=f"wiz_seed_{sm}")
+                cfg['random_state'] = rseed
+
+            with st.expander("⚖️ Post-Training Stability Analysis (Optional)", expanded=False):
+                enable_stab = st.checkbox("Run Stability Analysis after training", value=cfg.get('enable_stability', False), key="wiz_enable_stab")
+                cfg['enable_stability'] = enable_stab
+                if enable_stab:
+                    stab_opts = ["Data Variation Robustness", "Initialization Robustness", "Hyperparameter Sensitivity", "General Analysis"]
+                    cfg['stability_tests'] = st.multiselect("Tests to Run", stab_opts, default=cfg.get('stability_tests', ["General Analysis"]), key="wiz_stab_tests")
+
+            st.markdown('<br>', unsafe_allow_html=True)
+            col_back, col_fwd, _ = st.columns([1, 1, 5])
+            with col_back:
+                if st.button("← Back", key="step5_back"):
+                    st.session_state['automl_step'] = 4
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+            with col_fwd:
+                if st.button("Next: Review & Submit →", type="primary", key="step5_next"):
+                    st.session_state['automl_step'] = 6
+                    st.session_state['automl_config'] = cfg
+                    st.rerun()
+
+        # ════════════════════════════════════════════════════════════════
+        # STEP 6 — Summary & Submit
+        # ════════════════════════════════════════════════════════════════
+        elif cur_step == 6:
+            task = cfg.get('task', 'classification')
+
+            _col_main, _col_track = st.columns([3, 1])
+            with _col_track:
+                render_pipeline_overview(PIPELINE_STEPS, cur_step)
+            with _col_main:
+                st.markdown("<h3 style='margin-bottom:4px;'>🚀 Step 7 — Review & Submit</h3>", unsafe_allow_html=True)
+                render_step_info_panel(
+                    "Submit",
+                    "Review your configuration, load data, and launch the experiment.",
+                    ["Validate target and split before submit", "Use clear experiment names", "Track live logs in Experiments tab"]
+                )
+
+            opt_labels = {"bayesian": "Bayesian Optimization", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
+            sel_mods_disp = ", ".join(cfg.get('selected_models') or ["All (Automatic)"])
+            st.markdown(f"""
+            <div class='summary-card'>
+              <div class='summary-row'><span class='summary-key'>📊 Dataset(s)</span><span class='summary-val'>{", ".join(cfg.get('ds_list', ["-"]))}</span></div>
+              <div class='summary-row'><span class='summary-key'>🎯 Task</span><span class='summary-val'>{task.replace("_", " ").title()}</span></div>
+              <div class='summary-row'><span class='summary-key'>🤖 Models</span><span class='summary-val'>{sel_mods_disp}</span></div>
+              <div class='summary-row'><span class='summary-key'>⚡ Optimization</span><span class='summary-val'>{opt_labels.get(cfg.get('optimization_mode','bayesian'), 'Bayesian')}</span></div>
+              <div class='summary-row'><span class='summary-key'>🏃 Preset</span><span class='summary-val'>{cfg.get('training_preset','medium').capitalize()}</span></div>
+              <div class='summary-row'><span class='summary-key'>🛡️ Validation</span><span class='summary-val'>{cfg.get('val_strategy_ui', 'Automatic (Recommended)')}</span></div>
+              <div class='summary-row'><span class='summary-key'>📈 Metric</span><span class='summary-val'>{cfg.get('optimization_metric','accuracy').upper()}</span></div>
+            </div>""", unsafe_allow_html=True)
+
+            st.markdown("### 📥 Load & Prepare Data")
+            sel_cfgs = cfg.get('selected_configs', [])
+            if not sel_cfgs:
+                st.error("No datasets configured. Go back to Step 1.")
+            else:
+                if 'train_df' not in st.session_state or st.session_state.get('current_task') != task:
+                    if st.button("📥 Load and Prepare Data", key="wiz_load_btn"):
+                        with st.spinner("Loading & preparing data..."):
+                            t_df, te_df = prepare_multi_dataset(
+                                sel_cfgs,
+                                global_split=None,
+                                task_type=task,
+                                date_col=cfg.get('date_col'),
+                                target_col=cfg.get('target')
+                            )
+                            st.session_state['train_df'] = t_df
+                            st.session_state['test_df'] = te_df
+                            st.session_state['current_task'] = task
+                            st.session_state['target_active'] = cfg.get('target')
+                        st.success(f"✅ Data loaded — {t_df.shape[0]:,} train rows × {t_df.shape[1]} cols")
+                        st.rerun()
+                else:
+                    t_df = st.session_state['train_df']
+                    st.success(f"✅ Data ready — {t_df.shape[0]:,} rows × {t_df.shape[1]} cols")
+
+            target = None
+            if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
+                train_df = st.session_state['train_df']
+                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
+                    act_target = st.session_state.get('target_active')
+                    if act_target and act_target in train_df.columns:
+                        target = act_target
+                    else:
+                        target = st.selectbox("🎯 Select Target", train_df.columns, key="wiz_final_target")
+
+                st.divider()
+                exp_name_default = f"{sel_cfgs[0]['name'] if sel_cfgs else 'AutoML'}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
+                exp_name = st.text_input("Experiment Name", value=exp_name_default, key="wiz_exp_name")
+                clean_exp_name = "".join(c for c in exp_name if ord(c) < 128) or "AutoML_Experiment"
+
+                col_back2, col_sub, _ = st.columns([1, 2, 4])
+                with col_back2:
+                    if st.button("← Back", key="step6_back"):
+                        st.session_state['automl_step'] = 5
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
+                with col_sub:
+                    if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
+                        job_config = {
+                            'train_df': st.session_state.get('train_df'),
+                            'test_df': st.session_state.get('test_df'),
+                            'target': target,
+                            'task': task,
+                            'date_col': cfg.get('date_col'),
+                            'selected_nlp_cols': cfg.get('selected_nlp_cols', []),
+                            'nlp_config': cfg.get('nlp_config', {}),
+                            'preset': cfg.get('training_preset', 'medium'),
+                            'n_trials': cfg.get('n_trials'),
+                            'timeout': cfg.get('timeout'),
+                            'time_budget': cfg.get('time_budget'),
+                            'selected_models': cfg.get('selected_models'),
+                            'manual_params': cfg.get('manual_params'),
+                            'experiment_name': clean_exp_name,
+                            'random_state': cfg.get('random_state', 42),
+                            'validation_strategy': cfg.get('validation_strategy', 'auto'),
+                            'validation_params': cfg.get('validation_params', {}),
+                            'ensemble_config': cfg.get('ensemble_config', {}),
+                            'optimization_mode': cfg.get('optimization_mode', 'bayesian'),
+                            'optimization_metric': cfg.get('optimization_metric', 'accuracy'),
+                            'target_metric_name': cfg.get('optimization_metric', 'accuracy').upper(),
+                            'early_stopping': cfg.get('early_stopping', 10),
+                            'stability_config': {'tests': cfg.get('stability_tests', []), 'n_iterations': 3} if cfg.get('enable_stability') else None,
+                            'mlflow_tracking_uri': mlflow.get_tracking_uri(),
+                            'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
+                            'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
+                        }
+                        jm = st.session_state['job_manager']
+                        job_id = jm.submit_job(job_config, name=clean_exp_name)
+                        st.success(f"✅ Experiment **{clean_exp_name}** submitted! (ID: `{job_id}`)")
+                        st.info("📊 View live progress in the **Experiments** tab.")
+                        st.balloons()
+                        st.session_state['automl_step'] = 0
+                        st.session_state['automl_config'] = {}
+            else:
+                col_back3, _ = st.columns([1, 6])
+                with col_back3:
+                    if st.button("← Back", key="step6_back_nodata"):
+                        st.session_state['automl_step'] = 5
+                        st.session_state['automl_config'] = cfg
+                        st.rerun()
     
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
@@ -2569,7 +3244,7 @@ with tabs[1]:
             st.info(f"🧠 **Model Insight:** {insight}")
 
 # --- TAB 3: EXPERIMENTS ---
-with tabs[2]:
+if current_main_section == "🧪 Experiments":
     jm: TrainingJobManager = st.session_state['job_manager']
 
     @st.fragment(run_every=5.0)
@@ -3180,7 +3855,7 @@ with tabs[2]:
             st.warning(f"Could not load historic runs: {e}")
 
 # --- TAB 3: MODEL REGISTRY & DEPLOY ---
-with tabs[3]:
+if current_main_section == "📦 Registry & Deploy":
     st.markdown(f"""
     <div class='hero-header'>
       <div class='hero-title'>📦 Model Registry & Deployment</div>
