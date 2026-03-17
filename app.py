@@ -1,3 +1,12 @@
+import sys
+import os
+
+# Ensure repository root is on sys.path so `src` package imports work
+# when Streamlit/other runners change the current working directory.
+ROOT_DIR = os.path.abspath(os.path.dirname(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
 from src.core.processor import AutoMLDataProcessor
 from src.engines.classical import AutoMLTrainer
 from dotenv import load_dotenv
