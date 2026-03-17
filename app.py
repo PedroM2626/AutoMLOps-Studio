@@ -39,17 +39,29 @@ import logging
 # StreamlitLogHandler is replaced by TrainingJobManager queue-based logging.
 
 # Caching heavy data fetch operations
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=300)
 def get_cached_all_runs():
     return get_all_runs()
 
-@st.cache_resource(ttl=10)
+@st.cache_data(ttl=300)
 def get_cached_registered_models():
     return get_registered_models()
 
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=60)
 def get_cached_datasets():
     return DataLake("./data_lake").list_datasets()
+
+@st.cache_data(ttl=60)
+def get_cached_versions(dataset_name):
+    return DataLake("./data_lake").list_versions(dataset_name)
+
+@st.cache_data(ttl=300)
+def get_cached_dataframe(dataset_name, version, nrows=None):
+    return DataLake("./data_lake").load_version(dataset_name, version, nrows=nrows)
+
+@st.cache_data(ttl=60)
+def get_cached_run_details(run_id):
+    return get_run_details(run_id)
 
 # 🎨 Page config & full dark design system
 try:
@@ -563,46 +575,35 @@ p, span, li { color: var(--text-primary) !important; }
 
 datalake = DataLake()
 
-@st.cache_data(ttl=60)
-def get_cached_all_runs():
-    return get_all_runs()
-
-@st.cache_data(ttl=60)
-def get_cached_registered_models():
-    return get_registered_models()
-
 # 📋 Sidebar — Premium control panel
 with st.sidebar:
     if os.environ.get('IS_ELECTRON_APP') == 'true':
         st.markdown('<span class="badge badge-queued">🖥️ Desktop</span>', unsafe_allow_html=True)
-
     st.markdown("""
-    <div style='padding: 12px 0 8px;'>
-      <div style='font-size:1.3rem;font-weight:800;background:linear-gradient(90deg,#2f80ed,#8b5cf6);
-           -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;'>
-        🚀 AutoMLOps Studio
-      </div>
-      <div style='display:flex;align-items:center;gap:8px;margin-top:4px;'>
-        <span style='font-size:0.7rem;color:#8b949e;'>Open-Source ML Studio</span>
-        <span class='version-badge'>v4.3.0</span>
-      </div>
+    <div style='text-align:center; padding:10px 0;'>
+        <h1 style='font-size:1.5rem; margin-bottom:0;'>🚀 AutoMLOps</h1>
+        <p style='color:#8b949e; font-size:0.8rem;'>Studio v4.8.0</p>
     </div>
     """, unsafe_allow_html=True)
-    st.divider()
-
-    # Quick Stats
-    all_runs_df = get_cached_all_runs()
+    
+    # Pre-fetch sidebar data with cache
+    all_runs_sidebar = get_cached_all_runs()
     reg_models_sidebar = get_cached_registered_models()
-    jm_sidebar = st.session_state.get('job_manager')
-    active_jobs = len([j for j in (jm_sidebar.jobs.values() if jm_sidebar else []) if getattr(j, 'status', None) and j.status.value == 'running'])
+    
+    # Correctly access job manager from session state if available, or create transient one
+    if 'job_manager' in st.session_state:
+        jm_sidebar = st.session_state['job_manager']
+        active_jobs_count = len(jm_sidebar.list_jobs(status=JobStatus.RUNNING))
+    else:
+        active_jobs_count = 0
 
     st.markdown("<p style='font-size:0.7rem;text-transform:uppercase;letter-spacing:1px;color:#8b949e;margin-bottom:8px;'>SYSTEM OVERVIEW</p>", unsafe_allow_html=True)
     m1, m2 = st.columns(2)
     with m1:
         st.markdown(f"""
-        <div class='ui-metric'>
-          <div class='metric-value'>{len(all_runs_df) if not all_runs_df.empty else 0}</div>
-          <div class='metric-label'>🧪 Runs</div>
+        <div class='ui-metric' style='border-left-color:#2f80ed;'>
+          <div class='metric-value'>{len(all_runs_sidebar)}</div>
+          <div class='metric-label'>🧪 Experiments</div>
         </div>""", unsafe_allow_html=True)
     with m2:
         st.markdown(f"""
@@ -614,18 +615,18 @@ with st.sidebar:
     st.markdown('<br>', unsafe_allow_html=True)
     m3, m4 = st.columns(2)
     with m3:
-        datasets_count = len(datalake.list_datasets())
+        datasets_count = len(get_cached_datasets())
         st.markdown(f"""
         <div class='ui-metric' style='border-left-color:#8b5cf6;'>
           <div class='metric-value'>{datasets_count}</div>
           <div class='metric-label'>🗄️ Datasets</div>
         </div>""", unsafe_allow_html=True)
     with m4:
-        active_badge = f"<span class='badge badge-{'running' if active_jobs else 'done'}'>{active_jobs} active</span>" if active_jobs else "<span class='badge badge-done'>idle</span>"
+        active_badge = f"<span class='badge badge-{'running' if active_jobs_count > 0 else 'done'}'>{active_jobs_count} active</span>" if active_jobs_count > 0 else "<span class='badge badge-done'>idle</span>"
         st.markdown(f"""
         <div class='ui-metric' style='border-left-color:#f59e0b;'>
           <div class='metric-value' style='font-size:1.2rem;'>{active_badge}</div>
-          <div class='metric-label'>⚡ Jobs</div>
+          <div class='metric-label'>⚙️ Engine</div>
         </div>""", unsafe_allow_html=True)
 
     st.divider()
@@ -930,7 +931,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
     test_dfs = []
     
     for config in selected_configs:
-        df_ds = datalake.load_version(config['name'], config['version'])
+        df_ds = get_cached_dataframe(config['name'], config['version'])
         
         # Apply schema overrides if provided
         if 'schema_overrides' in config:
@@ -1084,6 +1085,15 @@ with tabs[0]:
                             st.info("Non-tabular format or error processing.")
                     
                     dataset_name = st.text_input(f"Name as (slug)", uploaded_file.name.replace(ext, ""), key=f"name_{uploaded_file.name}")
+                    
+                    if df_preview is not None and actual_header is None:
+                        new_cols = st.text_input(f"Rename Columns (comma separated)", value=",".join([f"col_{i}" for i in range(len(df_preview.columns))]), key=f"cols_{uploaded_file.name}")
+                        if new_cols:
+                            try:
+                                df_preview.columns = [c.strip() for c in new_cols.split(",")]
+                            except:
+                                st.error("Column count mismatch.")
+
                     if st.button(f"📥 Save {uploaded_file.name}", key=f"save_{uploaded_file.name}", type="primary"):
                         if df_preview is not None:
                             # Use Datake storage - saves as CSV by default locally
@@ -1107,23 +1117,18 @@ with tabs[0]:
                 selected_ver = st.selectbox("Version", versions, key="data_ver_sel")
                 
                 # Info card
-                st.markdown(f"""
-                <div style='background:#0d1117; padding:10px; border-radius:6px; margin:10px 0; border:1px solid #30363d;'>
-                  <div style='font-size:0.75rem; color:#8b949e;'>Dataset</div>
-                  <div style='font-weight:600;'>{selected_ds}</div>
-                  <div style='padding-top:4px; font-size:0.75rem; color:#8b949e;'>Version: {selected_ver}</div>
-                </div>""", unsafe_allow_html=True)
-
-                c1, c2 = st.columns(2)
-                with c1:
-                    if st.button("🗑 Delete Version", key="del_ds_ver"):
-                        if datalake.delete_version(selected_ds, selected_ver):
-                            st.success("Deleted!")
+                with st.container():
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        if st.button("🗑 Delete Version", key="del_ds_ver", use_container_width=True):
+                            datalake.delete_version(selected_ds, selected_ver)
+                            st.cache_data.clear() # Clear cache on delete
+                            st.success(f"Deleted {selected_ver}")
                             st.rerun()
-                with c2:
-                    if st.button("👁 Load Preview", key="load_ds_ver", type="primary"):
-                        df_preview = datalake.load_version(selected_ds, selected_ver)
-                        st.session_state['data_preview_df'] = df_preview
+                    with c2:
+                        if st.button("👁 Load Preview", key="load_ds_ver", type="primary"):
+                            df_preview = get_cached_dataframe(selected_ds, selected_ver)
+                            st.session_state['data_preview_df'] = df_preview
             st.markdown("</div>", unsafe_allow_html=True)
             
         if 'data_preview_df' in st.session_state:
@@ -1148,12 +1153,12 @@ with tabs[4]:
         st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
         st.subheader("📋 Configuration")
         st.info("The Baseline is usually the training dataset stored in your Data Lake.")
-        mon_datasets = datalake.list_datasets()
+        mon_datasets = get_cached_datasets()
         mon_ref_ds = st.selectbox("Select Baseline Dataset", [""] + mon_datasets, key="mon_ref_ds")
         df_baseline = None
         if mon_ref_ds:
-            mon_ref_ver = st.selectbox("Baseline Version", datalake.list_versions(mon_ref_ds), key="mon_ref_ver")
-            df_baseline = datalake.load_version(mon_ref_ds, mon_ref_ver)
+            mon_ref_ver = st.selectbox("Baseline Version", get_cached_versions(mon_ref_ds), key="mon_ref_ver")
+            df_baseline = get_cached_dataframe(mon_ref_ds, mon_ref_ver)
             st.success(f"Loaded Baseline: {df_baseline.shape[0]} rows")
 
         st.divider()
@@ -1329,13 +1334,13 @@ with tabs[4]:
                         except Exception as e:
                             st.error(f"Failed to load model from file: {e}")
                 
-                stab_datasets = datalake.list_datasets()
+                stab_datasets = get_cached_datasets()
                 stab_ref_ds = st.selectbox("Test Dataset (Data Lake)", [""] + stab_datasets, key="stab_ref_ds")
                 df_stab_ref = None
                 target_col = None
                 if stab_ref_ds:
-                    stab_ref_ver = st.selectbox("Dataset Version", datalake.list_versions(stab_ref_ds), key="stab_ref_ver")
-                    df_stab_ref = datalake.load_version(stab_ref_ds, stab_ref_ver)
+                    stab_ref_ver = st.selectbox("Dataset Version", get_cached_versions(stab_ref_ds), key="stab_ref_ver")
+                    df_stab_ref = get_cached_dataframe(stab_ref_ds, stab_ref_ver)
                     st.success(f"Dataset Loaded: {df_stab_ref.shape[0]} rows")
                     
                     # Dynamic Target Column Selection
@@ -1584,22 +1589,22 @@ with tabs[4]:
         with col_dr1:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.markdown("##### 1. Reference Data (Baseline)")
-            ref_ds = st.selectbox("Reference Dataset", [""] + datasets, key="drift_ref_ds")
+            ref_ds = st.selectbox("Reference Dataset", [""] + get_cached_datasets(), key="drift_ref_ds")
             df_ref = None
             if ref_ds:
-                ref_ver = st.selectbox("Reference Version", datalake.list_versions(ref_ds), key="drift_ref_ver")
-                df_ref = datalake.load_version(ref_ds, ref_ver)
+                ref_ver = st.selectbox("Reference Version", get_cached_versions(ref_ds), key="drift_ref_ver")
+                df_ref = get_cached_dataframe(ref_ds, ref_ver)
                 st.write(f"Reference Loaded: {df_ref.shape}")
             st.markdown("</div>", unsafe_allow_html=True)
 
         with col_dr2:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.markdown("##### 2. Current Data (Target)")
-            curr_ds = st.selectbox("Current Dataset", [""] + datasets, key="drift_curr_ds")
+            curr_ds = st.selectbox("Current Dataset", [""] + get_cached_datasets(), key="drift_curr_ds")
             df_curr = None
             if curr_ds:
-                curr_ver = st.selectbox("Current Version", datalake.list_versions(curr_ds), key="drift_curr_ver")
-                df_curr = datalake.load_version(curr_ds, curr_ver)
+                curr_ver = st.selectbox("Current Version", get_cached_versions(curr_ds), key="drift_curr_ver")
+                df_curr = get_cached_dataframe(curr_ds, curr_ver)
                 st.write(f"Current Loaded: {df_curr.shape}")
             st.markdown("</div>", unsafe_allow_html=True)
             
@@ -1708,20 +1713,17 @@ with tabs[1]:
                   ["Use 70-80% for training", "Preview data before selecting target", "Multiple datasets are concatenated"]
               )
 
-              available_datasets = datalake.list_datasets()
+              available_datasets = get_cached_datasets()
               if not available_datasets:
                   st.markdown("""
                   <div class='ui-card' style='text-align:center;padding:32px;'>
-                    <div style='font-size:2rem;'>🗄️</div>
-                    <div style='font-weight:600;margin:8px 0;'>No datasets available</div>
-                    <div style='color:#8b949e;font-size:0.85rem;'>Go to the <strong>Data</strong> tab to upload your first dataset.</div>
+                      <h2 style='color:#8b949e;margin-bottom:12px;'>🗄️ Your Data Lake is empty</h2>
+                      <p style='color:#8b949e;font-size:0.95rem;margin-bottom:24px;'>Please upload or connect a dataset in the <b>Data Ingestion</b> tab first.</p>
                   </div>""", unsafe_allow_html=True)
               else:
                   sel_ds_list = st.multiselect(
-                      "Choose Datasets from Data Lake",
-                      available_datasets,
-                      default=cfg.get('ds_list', []),
-                      key="wizard_ds_multi"
+                      "📚 Select Dataset(s)", available_datasets, 
+                      default=cfg.get('ds_list', []), key="wiz_ds_multi"
                   )
                   cfg['ds_list'] = sel_ds_list
 
@@ -1732,8 +1734,8 @@ with tabs[1]:
                       # Sample preview from first dataset
                       try:
                           first_ds  = sel_ds_list[0]
-                          first_ver = datalake.list_versions(first_ds)[0]
-                          sample_df = datalake.load_version(first_ds, first_ver, nrows=200)
+                          first_ver = get_cached_versions(first_ds)[0]
+                          sample_df = get_cached_dataframe(first_ds, first_ver, nrows=200)
 
                           with st.expander("👁️ Data Preview", expanded=True):
                               st.dataframe(sample_df.head(5), use_container_width=True)
@@ -1837,7 +1839,7 @@ with tabs[1]:
                       ds_cols = st.columns(min(len(sel_ds_list), 3))
                       for i, ds_name in enumerate(sel_ds_list):
                           with ds_cols[i % 3]:
-                              versions = datalake.list_versions(ds_name)
+                              versions = get_cached_versions(ds_name)
                               ver = st.selectbox(f"📌 Version — {ds_name}", versions, key=f"wiz_ver_{ds_name}")
                               
                               # Render split progress bar logic based on images
@@ -2252,7 +2254,7 @@ with tabs[1]:
                         cfg["custom_ensembles"] = []
 
             elif model_source == "Model Registry (Registered)":
-                reg_models_list = get_registered_models()
+                reg_models_list = get_cached_registered_models()
                 if reg_models_list:
                     base_name = st.selectbox("Registered Model", [m.name for m in reg_models_list], key="wiz_reg_model")
                     cfg['selected_models'] = [base_name]
@@ -2268,558 +2270,19 @@ with tabs[1]:
                 else:
                     cfg['selected_models'] = None
 
+            # ── Parallelism (n_jobs) ──────────────────────────────────
+            with st.expander("⚙️ Parallelism & Compute"):
+                n_jobs_mode = st.radio("CPU Usage (n_jobs)", ["Automatic (All cores)", "Manual"], index=0, key="wiz_njobs_mode")
+                if n_jobs_mode == "Manual":
+                    n_jobs = st.number_input("Threads / Jobs", -1, 128, -1, key="wiz_njobs_val", help="-1 = all cores, 1 = sequential")
+                else:
+                    n_jobs = -1
+                cfg['n_jobs'] = n_jobs
+
             # ── Manual Hyperparameter Inputs ──────────────────────────────
             if cfg.get('training_strategy') == 'Manual':
-                st.markdown("<br>#### ⚙️ Manual Hyperparameter Configuration", unsafe_allow_html=True)
-                
-                # If no models selected yet, or using Automatic (Preset), use available models as candidates
-                current_models = cfg.get('selected_models')
-                if not current_models:
-                    current_models = available_models[:3] # Show first few as preview or explain
-                    st.info("💡 You are in **Manual Mode**. Configure the parameters for your chosen models. Showing top candidates below:")
-                else:
-                    st.info("💡 You are in **Manual Mode**. Define the exact parameters for each selected model below.")
-                
-                manual_params = cfg.get('manual_params', {})
-                for model_id in current_models:
-                    if model_id in ['custom_voting', 'custom_stacking']: continue
-                        
-                    with st.expander(f"Parameters: {model_id}", expanded=True):
-                        if model_id == 'random_forest':
-                            n_est = st.number_input("n_estimators", 10, 2000, manual_params.get('rf_n_estimators', 100), key=f"p_rf_n_{model_id}")
-                            max_d = st.number_input("max_depth", 1, 200, manual_params.get('rf_max_depth', 20), key=f"p_rf_d_{model_id}")
-                            manual_params['rf_n_estimators'] = n_est
-                            manual_params['rf_max_depth'] = max_d
-                        elif model_id == 'xgboost':
-                            n_est = st.number_input("n_estimators", 10, 2000, manual_params.get('xgb_n_estimators', 100), key=f"p_xgb_n_{model_id}")
-                            lr = st.number_input("learning_rate", 0.0001, 1.0, manual_params.get('xgb_lr', 0.1), format="%.4f", key=f"p_xgb_l_{model_id}")
-                            manual_params['xgb_n_estimators'] = n_est
-                            manual_params['xgb_lr'] = lr
-                        else:
-                            st.write("Using default parameters. (More models coming in v4.1)")
-                
-                cfg['manual_params'] = manual_params
-
-            st.markdown('<br>', unsafe_allow_html=True)
-            col_back, col_fwd, _ = st.columns([1, 1, 5])
-            with col_back:
-                if st.button("← Back", key="step2_back"):
-                    st.session_state['automl_step'] = 1
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-            with col_fwd:
-                if st.button("Next: Optimization →", type="primary", key="step2_next"):
-                    st.session_state['automl_step'] = 3
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-
-        # ════════════════════════════════════════════════════════════════
-        # STEP 3 — Optimization Strategy
-        # ════════════════════════════════════════════════════════════════
-        elif cur_step == 3:
-            task = cfg.get('task', 'classification')
-            _col_main, _col_track = st.columns([3, 1])
-            with _col_track:
-                render_pipeline_overview(PIPELINE_STEPS, cur_step)
-            with _col_main:
-                st.markdown("<h3 style='margin-bottom:4px;'>⚡ Step 4 — Optimization Strategy</h3>", unsafe_allow_html=True)
-                render_step_info_panel(
-                    "Optimization Strategy",
-                    "Choose how AutoML explores the hyperparameter space. Bayesian optimization is smart and efficient. Random search is fast for exploration. Grid search is exhaustive but slow. Hyperband adds early-stopping to speed up large searches.",
-                    ["Bayesian = best quality/speed balance", "Random = great for quick exploration", "Grid = small search spaces only"]
-                )
-
-            # Optimization mode as icon cards
-            OPT_MODES = [
-                ("bayesian",  "🧠", "Bayesian (Default)", "Efficient surrogate model-based search. Best for most use cases."),
-                ("random",    "🎲", "Random Search",      "Randomly sample configurations. Fast and exploratory."),
-                ("grid",      "📐", "Grid Search",        "Exhaustive search over all combinations. Slow but thorough."),
-                ("hyperband", "⚡", "Hyperband",          "Early stopping of unpromising trials. Great for large datasets."),
-            ]
-            opt_mode_map = {"bayesian": "Bayesian Optimization (Default)", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
-            
-            # Instance Control
-            st.markdown("<p style='font-weight:600;margin-top:16px;margin-bottom:6px;'>🏢 Infrastructure & Instance Control</p>", unsafe_allow_html=True)
-            instance_mode = st.radio("Instance Allocation", ["Automatic (Optimal)", "Manual (Fixed)"], horizontal=True, key="wiz_inst_mode")
-            if instance_mode == "Manual (Fixed)":
-                num_instances = st.slider("Number of Parallel Instances", 1, 16, cfg.get('n_instances', 1), key="wiz_n_inst")
-                cfg['n_instances'] = num_instances
-            else:
-                cfg['n_instances'] = None # Auto
-            current_opt = cfg.get('optimization_mode', 'bayesian')
-
-            cols_opt = st.columns(4)
-            for i, (oid, oicon, oname, odesc) in enumerate(OPT_MODES):
-                with cols_opt[i]:
-                    is_sel = (oid == current_opt)
-                    border_style = "border: 2px solid #2f80ed; background: linear-gradient(135deg,rgba(47,128,237,0.08),rgba(139,92,246,0.08));" if is_sel else ""
-                    st.markdown(f"""
-                    <div class='task-card' style='min-height:130px;{border_style}'>
-                      <div class='task-icon'>{oicon}</div>
-                      <div class='task-name'>{oname}</div>
-                      <div class='task-desc'>{odesc}</div>
-                    </div>""", unsafe_allow_html=True)
-                    if st.button(f"{'✓' if is_sel else 'Select'}", key=f"opt_{oid}"):
-                        cfg['optimization_mode'] = oid
-                        st.session_state['automl_config'] = cfg
-                        st.rerun()
-
-            cfg['optimization_mode'] = current_opt if cfg.get('optimization_mode') == current_opt else cfg.get('optimization_mode', 'bayesian')
-
-            st.markdown('<br>', unsafe_allow_html=True)
-
-            # Training preset (slider)
-            preset_labels = ["test", "fast", "medium", "high", "custom"]
-            preset_descs  = {"test": "⚡ 1 trial for quick pipeline validation", "fast": "🚀 Fast search (~15 trials)",
-                             "medium": "⚖️ Balanced speed/quality (default)", "high": "🎯 Exhaustive search",
-                             "custom": "🔧 Manual trial/timeout configuration"}
-            col_preset, col_metric = st.columns(2)
-            with col_preset:
-                training_preset = st.select_slider(
-                    "Training Mode",
-                    options=preset_labels,
-                    value=cfg.get('training_preset', 'medium'),
-                    key="wiz_preset"
-                )
-                cfg['training_preset'] = training_preset
-                st.caption(preset_descs.get(training_preset, ""))
-
-                if training_preset == "custom":
-                    cfg['n_trials']       = st.number_input("Trials per model", 1, 1000, 20, key="wiz_trials")
-                    
-                    use_timeout = st.checkbox("Set Timeout per model", value=True, key="wiz_use_timeout", help="Disable to let each model train until trials finish.")
-                    if use_timeout:
-                        cfg['timeout']    = st.number_input("Timeout per model (s)", 10, 7200, 600, key="wiz_timeout")
-                    else:
-                        cfg['timeout']    = 0
-                        
-                    use_total_time = st.checkbox("Set Total time budget", value=True, key="wiz_use_time_budget", help="Disable to let the entire pipeline run indefinitely.")
-                    if use_total_time:
-                        cfg['time_budget'] = st.number_input("Total time budget (s)", 60, 86400, 3600, key="wiz_total_time")
-                    else:
-                        cfg['time_budget'] = 0
-                        
-                    cfg['early_stopping'] = st.number_input("Early Stopping (rounds)", 0, 50, 7, key="wiz_es")
-                    cfg['manual_params']  = {'max_iter': st.number_input("Max Iterations (max_iter)", 100, 100000, 1000, key="wiz_maxiter")}
-                elif training_preset == "test":
-                    st.warning("⚠️ TEST MODE: 1 trial, short timeout.")
-                    cfg['n_trials'] = 1; cfg['timeout'] = 30; cfg['time_budget'] = 60; cfg['early_stopping'] = 1; cfg['manual_params'] = {}
-                else:
-                    cfg['n_trials'] = None; cfg['timeout'] = None; cfg['time_budget'] = None; cfg['early_stopping'] = 10; cfg['manual_params'] = {}
-
-            with col_metric:
-                metric_options = {
-                    'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
-                    'regression': ['r2', 'rmse', 'mae'],
-                    'clustering': ['silhouette'],
-                    'time_series': ['rmse', 'mae', 'mape'],
-                    'anomaly_detection': ['f1'],
-                    'dimensionality_reduction': ['explained_variance']
-                }
-                metric_list = metric_options.get(task, ['accuracy'])
-                cur_metric  = cfg.get('optimization_metric', metric_list[0])
-                if cur_metric not in metric_list: cur_metric = metric_list[0]
-                optimization_metric = st.selectbox(
-                    "Optimization Metric",
-                    metric_list,
-                    index=metric_list.index(cur_metric),
-                    key="wiz_metric"
-                )
-                cfg['optimization_metric'] = optimization_metric
-
-
-            st.markdown('<br>', unsafe_allow_html=True)
-            col_back, col_fwd, _ = st.columns([1, 1, 5])
-            with col_back:
-                if st.button("← Back", key="step3_back"):
-                    st.session_state['automl_step'] = 2
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-            with col_fwd:
-                if st.button("Next: Validation →", type="primary", key="step3_next"):
-                    st.session_state['automl_step'] = 4
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-
-        # ════════════════════════════════════════════════════════════════
-        # STEP 4 — Validation Strategy
-        # ════════════════════════════════════════════════════════════════
-        elif cur_step == 4:
-            task = cfg.get('task', 'classification')
-            _col_main, _col_track = st.columns([3, 1])
-            with _col_track:
-                render_pipeline_overview(PIPELINE_STEPS, cur_step)
-            with _col_main:
-                st.markdown("<h3 style='margin-bottom:4px;'>🛡️ Step 5 — Internal Training Validation (CV)</h3>", unsafe_allow_html=True)
-                render_step_info_panel(
-                    "Validation Strategy vs Data Lake Split",
-                    "The Data Lake split (Step 1) is used to create a final, completely unseen 'Test Set'. This step configures the *internal cross-validation* used by the AutoML engine during hyperparameter tuning.",
-                    ["K-Fold is slower but rotates the validation set", "Holdout just splits a fraction of the training data", "Always use Time Series Split for temporal data"]
-                )
-
-            validation_options = ["Automatic (Recommended)", "K-Fold Cross Validation", "Stratified K-Fold",
-                                  "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"]
-
-            if task == "time_series":
-                val_strategy_ui = "Time Series Split"
-                st.info("⏳ Time series must use temporal splitting.")
-            elif task == "classification":
-                val_strategy_ui = st.selectbox("Validation Method", validation_options,
-                    index=max(0, validation_options.index(cfg.get('val_strategy_ui', 'Automatic (Recommended)'))
-                              if cfg.get('val_strategy_ui') in validation_options else 0),
-                    key="wiz_val_method")
-            else:
-                opts = [o for o in validation_options if o != "Stratified K-Fold"]
-                v_default = cfg.get('val_strategy_ui', 'Automatic (Recommended)')
-                if v_default not in opts: v_default = 'Automatic (Recommended)'
-                val_strategy_ui = st.selectbox("Validation Method", opts,
-                    index=opts.index(v_default), key="wiz_val_method_ns")
-
-            cfg['val_strategy_ui'] = val_strategy_ui
-
-            # Visual diagram
-            if val_strategy_ui in ["K-Fold Cross Validation", "Stratified K-Fold"]:
-                n_folds = st.slider("Number of Folds", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_folds")
-                cfg['validation_params'] = {'folds': n_folds}
-                cfg['validation_strategy'] = 'cv' if val_strategy_ui == "K-Fold Cross Validation" else 'stratified_cv'
-                fold_pct = round(100 / n_folds)
-                fold_bars = "".join([f"<div style='background:{'#2f80ed' if i==0 else '#1c2128'};border:1px solid #30363d;border-radius:4px;flex:1;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.65rem;color:white;'>{('Val' if i==0 else 'Train')}</div>" for i in range(n_folds)])
-                st.markdown(f"""
-                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
-                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>{n_folds}-Fold Cross Validation — each fold acts as validation once</div>
-                  <div style='display:flex;gap:3px;'>{fold_bars}</div>
-                </div>""", unsafe_allow_html=True)
-            elif val_strategy_ui == "Holdout (Train/Test)":
-                test_size_pct = st.slider("Test Split (%)", 10, 50, int(cfg.get('validation_params', {}).get('test_size', 0.2) * 100), key="wiz_holdout")
-                cfg['validation_params'] = {'test_size': test_size_pct / 100.0}
-                cfg['validation_strategy'] = 'holdout'
-                train_w = 100 - test_size_pct
-                st.markdown(f"""
-                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
-                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>Holdout Split: {train_w}% Train / {test_size_pct}% Test</div>
-                  <div style='display:flex;border-radius:6px;overflow:hidden;height:24px;'>
-                    <div style='flex:{train_w};background:#27ae60;display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:white;font-weight:600;'>Train {train_w}%</div>
-                    <div style='flex:{test_size_pct};background:#2f80ed;display:flex;align-items:center;justify-content:center;font-size:0.7rem;color:white;font-weight:600;'>Test {test_size_pct}%</div>
-                  </div>
-                </div>""", unsafe_allow_html=True)
-            elif val_strategy_ui == "Time Series Split":
-                n_splits = st.number_input("Temporal Splits", 2, 20, cfg.get('validation_params', {}).get('folds', 5), key="wiz_ts_splits")
-                cfg['validation_params'] = {'folds': n_splits}
-                cfg['validation_strategy'] = 'time_series_cv'
-                ts_bars = "".join([f"<div style='background:{'#27ae60' if i<n_splits-1 else '#2f80ed'};border:1px solid #30363d;border-radius:3px;flex:1;height:20px;display:flex;align-items:center;justify-content:center;font-size:0.6rem;color:white;'>{'T' if i<n_splits-1 else 'V'}</div>" for i in range(n_splits)])
-                st.markdown(f"""
-                <div style='background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px;margin:8px 0;'>
-                  <div style='font-size:0.75rem;color:#8b949e;margin-bottom:6px;'>Time Series Split — expanding window ({n_splits} splits)</div>
-                  <div style='display:flex;gap:3px;'>{ts_bars}</div>
-                </div>""", unsafe_allow_html=True)
-            else:
-                cfg['validation_strategy'] = 'auto' if val_strategy_ui == "Automatic (Recommended)" else 'auto_split'
-                cfg['validation_params'] = {}
-                st.info("✨ The system will automatically select the best validation strategy based on your dataset size and task type.")
-
-            # NLP Configuration — render here if text columns exist
-            st.markdown('<br>', unsafe_allow_html=True)
-            ds_list_cur = cfg.get('ds_list', [])
-            potential_nlp_cols = []
-            if ds_list_cur:
-                try:
-                    fd = datalake.list_versions(ds_list_cur[0])[0]
-                    sdf = datalake.load_version(ds_list_cur[0], fd, nrows=5)
-                    potential_nlp_cols = sdf.select_dtypes(include=['object']).columns.tolist()
-                except:
-                    pass
-
-            if potential_nlp_cols:
-                with st.expander("🔤 NLP Configuration (Optional)"):
-                    sel_nlp = st.multiselect("Text Columns", potential_nlp_cols,
-                        default=cfg.get('selected_nlp_cols', []), key="wiz_nlp_cols")
-                    cfg['selected_nlp_cols'] = sel_nlp
-                    if sel_nlp:
-                        col_n1, col_n2, col_n3 = st.columns([1,1,1])
-                        with col_n1:
-                            vect = st.selectbox("Vectorizer", ["tfidf", "count", "embeddings"], key="wiz_vect")
-                            if vect == "embeddings":
-                                emb_model = st.selectbox("Embedding Model", ["all-MiniLM-L6-v2", "paraphrase-multilingual-MiniLM-L12-v2"], key="wiz_emb")
-                            else:
-                                ng_min, ng_max = st.slider("N-Gram Range", 1, 3, (1, 2), key="wiz_ngram")
-                        with col_n2:
-                            if vect != "embeddings":
-                                rm_stop = st.checkbox("Remove Stopwords", value=True, key="wiz_stop")
-                                if rm_stop:
-                                    lang_opts = ["english", "portuguese", "spanish", "french", "german"]
-                                    lang_def = cfg.get('nlp_config', {}).get('language', 'english')
-                                    lang = st.selectbox("Language", lang_opts, index=lang_opts.index(lang_def) if lang_def in lang_opts else 0, key="wiz_lang")
-                                else:
-                                    lang = "english"
-                                lemma   = st.checkbox("Lemmatization", value=False, key="wiz_lemma")
-                            else:
-                                lang = "english"
-                                st.info("Embeddings: dense fixed-length vectors.")
-                        with col_n3:
-                            if vect != "embeddings":
-                                max_feat= st.number_input("Max Features", 100, 50000, 5000, 500, key="wiz_maxfeat")
-                        
-                        cfg['nlp_config'] = {
-                            "vectorizer": vect,
-                            "embedding_model": emb_model if vect == "embeddings" else None,
-                            "ngram_range": (ng_min, ng_max) if vect != "embeddings" else (1, 1),
-                            "stop_words": rm_stop if vect != "embeddings" else False,
-                            "language": lang,
-                            "max_features": max_feat if vect != "embeddings" else 5000,
-                            "lemmatization": lemma if vect != "embeddings" else False,
-                        }
-
-            st.markdown('<br>', unsafe_allow_html=True)
-            col_back, col_fwd, _ = st.columns([1, 1, 5])
-            with col_back:
-                if st.button("← Back", key="step4_back"):
-                    st.session_state['automl_step'] = 3
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-            with col_fwd:
-                if st.button("Next: Advanced →", type="primary", key="step4_next"):
-                    st.session_state['automl_step'] = 5
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-
-        # ════════════════════════════════════════════════════════════════
-        # STEP 5 — Advanced Settings (Seed, Stability)
-        # ════════════════════════════════════════════════════════════════
-        elif cur_step == 5:
-            task = cfg.get('task', 'classification')
-            _col_main, _col_track = st.columns([3, 1])
-            with _col_track:
-                render_pipeline_overview(PIPELINE_STEPS, cur_step)
-            with _col_main:
-                st.markdown("<h3 style='margin-bottom:4px;'>🔧 Step 6 — Advanced Settings</h3>", unsafe_allow_html=True)
-                render_step_info_panel(
-                    "Advanced Settings",
-                    "Configure reproducibility via random seeds and optionally enable post-training stability analysis. Stability tests add extra runs to assess how robust your model is to small changes in data or initialization.",
-                    ["Fix seed = reproducible results", "Stability tests add insight but take longer"]
-                )
-
-            with st.expander("🌱 Reproducibility (Seed)", expanded=True):
-                eff_models = cfg.get('selected_models') or (AutoMLTrainer(task_type=task).get_available_models())
-                seed_mode = st.radio("Seed Mode",
-                    ["Automatic (Different per model)", "Automatic (Same for all)", "Manual (Same for all)", "Manual (Different per model)"],
-                    index=0, horizontal=True, key="wiz_seed_mode")
-                rseed = 42
-                if seed_mode == "Automatic (Different per model)":
-                    rseed = {m: np.random.randint(0, 999999) for m in eff_models}
-                    st.info(f"🎲 Random seeds generated per model.")
-                elif seed_mode == "Automatic (Same for all)":
-                    rseed = np.random.randint(0, 999999)
-                    st.info(f"🎲 Same random seed for all: {rseed}")
-                elif seed_mode == "Manual (Same for all)":
-                    rseed = st.number_input("Global Seed", 0, 999999, cfg.get('random_state', 42) if isinstance(cfg.get('random_state'), int) else 42, key="wiz_seed_val")
-                elif seed_mode == "Manual (Different per model)":
-                    rseed = {}
-                    sc = st.columns(min(len(eff_models), 3))
-                    for si, sm in enumerate(eff_models):
-                        with sc[si % 3]:
-                            rseed[sm] = st.number_input(f"Seed: {sm}", 0, 999999, 42, key=f"wiz_seed_{sm}")
-                cfg['random_state'] = rseed
-
-            with st.expander("⚖️ Post-Training Stability Analysis (Optional)", expanded=False):
-                enable_stab = st.checkbox("Run Stability Analysis after training",
-                    value=cfg.get('enable_stability', False), key="wiz_enable_stab")
-                cfg['enable_stability'] = enable_stab
-                if enable_stab:
-                    stab_opts = ["Data Variation Robustness", "Initialization Robustness", "Hyperparameter Sensitivity", "General Analysis"]
-                    sel_stab = st.multiselect("Tests to Run", stab_opts,
-                        default=cfg.get('stability_tests', ["General Analysis"]), key="wiz_stab_tests")
-                    cfg['stability_tests'] = sel_stab
-                    st.info("📊 Results will be saved to MLflow automatically.")
-
-            st.markdown('<br>', unsafe_allow_html=True)
-            col_back, col_fwd, _ = st.columns([1, 1, 5])
-            with col_back:
-                if st.button("← Back", key="step5_back"):
-                    st.session_state['automl_step'] = 4
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-            with col_fwd:
-                if st.button("Next: Review & Submit →", type="primary", key="step5_next"):
-                    st.session_state['automl_step'] = 6
-                    st.session_state['automl_config'] = cfg
-                    st.rerun()
-
-        # ════════════════════════════════════════════════════════════════
-        # STEP 6 — Summary & Data Load & Submit
-        # ════════════════════════════════════════════════════════════════
-        elif cur_step == 6:
-            task = cfg.get('task', 'classification')
-            _col_main6, _col_track6 = st.columns([3, 1])
-            with _col_track6:
-                render_pipeline_overview(PIPELINE_STEPS, cur_step)
-            with _col_main6:
-                st.markdown("<h3 style='margin-bottom:4px;'>🚀 Step 7 — Review &amp; Submit</h3>", unsafe_allow_html=True)
-                render_step_info_panel(
-                    "Review & Submit",
-                    "Review the full configuration of your experiment before launching. Once submitted, the training job runs in the background and you can monitor its progress in the Experiments tab. You can also download this config as YAML for reproducibility.",
-                    ["Check target column before submitting", "Training runs in the background", "Download YAML to replay this config"]
-                )
-
-            # Config summary card
-            opt_labels = {"bayesian": "Bayesian Optimization", "random": "Random Search", "grid": "Grid Search", "hyperband": "Hyperband"}
-            sel_mods_disp = ", ".join(cfg.get('selected_models') or ["All (Automatic)"])
-            st.markdown(f"""
-            <div class='summary-card'>
-              <div class='summary-row'><span class='summary-key'>📊 Dataset(s)</span><span class='summary-val'>{", ".join(cfg.get('ds_list', ["-"]))}</span></div>
-              <div class='summary-row'><span class='summary-key'>🎯 Task</span><span class='summary-val'>{task.replace("_", " ").title()}</span></div>
-              <div class='summary-row'><span class='summary-key'>🤖 Models</span><span class='summary-val'>{sel_mods_disp}</span></div>
-              <div class='summary-row'><span class='summary-key'>⚡ Optimization</span><span class='summary-val'>{opt_labels.get(cfg.get('optimization_mode','bayesian'), 'Bayesian')}</span></div>
-              <div class='summary-row'><span class='summary-key'>🏃 Preset</span><span class='summary-val'>{cfg.get('training_preset','medium').capitalize()}</span></div>
-              <div class='summary-row'><span class='summary-key'>🛡️ Validation</span><span class='summary-val'>{cfg.get('val_strategy_ui', 'Automatic (Recommended)')}</span></div>
-              <div class='summary-row'><span class='summary-key'>📈 Metric</span><span class='summary-val'>{cfg.get('optimization_metric','accuracy').upper()}</span></div>
-              <div class='summary-row'><span class='summary-key'>⚖️ Stability</span><span class='summary-val'>{'✅ Enabled' if cfg.get('enable_stability') else '⬜ Disabled'}</span></div>
-            </div>""", unsafe_allow_html=True)
-
-            # YAML Download button
-            try:
-                import yaml
-                _yaml_cfg = {k: v for k, v in cfg.items() if isinstance(v, (str, int, float, bool, list, dict, type(None)))}
-                _yaml_bytes = yaml.dump(_yaml_cfg, default_flow_style=False, allow_unicode=True).encode('utf-8')
-                _dl_col, _rest = st.columns([1, 4])
-                with _dl_col:
-                    st.download_button(
-                        label="⬇️ Download Config (YAML)",
-                        data=_yaml_bytes,
-                        file_name=f"mline_config_{task}_{cfg.get('optimization_mode','auto')}.yaml",
-                        mime="text/yaml",
-                        key="step6_yaml_dl"
-                    )
-            except Exception as _e:
-                pass  # yaml not yet imported — will be loaded at runtime
-
-            # --- Load Data ---
-            st.markdown("### 📥 Load & Prepare Data")
-            sel_cfgs = cfg.get('selected_configs', [])
-            if not sel_cfgs:
-                st.error("No datasets configured. Go back to Step 1.")
-            else:
-                if 'train_df' not in st.session_state or st.session_state.get('current_task') != task:
-                    if st.button("📥 Load and Prepare Data", key="wiz_load_btn"):
-                        with st.spinner("Loading & preparing data..."):
-                            t_df, te_df = prepare_multi_dataset(
-                                sel_cfgs, global_split=None,
-                                task_type=task,
-                                date_col=cfg.get('date_col'),
-                                target_col=cfg.get('target')
-                            )
-                            st.session_state['train_df'] = t_df
-                            st.session_state['test_df']  = te_df
-                            st.session_state['current_task']        = task
-                            st.session_state['date_col_active']     = cfg.get('date_col')
-                            st.session_state['target_active']       = cfg.get('target')
-                            st.session_state['n_trials_active']     = cfg.get('n_trials')
-                            st.session_state['early_stopping_active'] = cfg.get('early_stopping', 10)
-                        st.success(f"✅ Data loaded — {t_df.shape[0]:,} train rows × {t_df.shape[1]} cols")
-                        st.rerun()
-                else:
-                    t_df = st.session_state['train_df']
-                    st.success(f"✅ Data ready — {t_df.shape[0]:,} rows × {t_df.shape[1]} cols")
-
-            # Final target / time-series config (only if data is loaded)
-            target = None
-            forecast_horizon, freq = 1, "D"
-
-            if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
-                train_df = st.session_state['train_df']
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                        act_target = st.session_state.get('target_active')
-                        if act_target and act_target in train_df.columns:
-                            target = act_target
-                            st.info(f"🎯 Target: **{target}**")
-                        else:
-                            target = st.selectbox("🎯 Select Target", train_df.columns, key="wiz_final_target")
-                with col_f2:
-                    if task == "time_series":
-                        freq = st.selectbox("⏱️ Frequency", ["Minutes","Hours","Days","Weeks","Months","Years"], key="wiz_freq")
-                        forecast_horizon = st.number_input("🔮 Horizon", 1, 100, 7, key="wiz_horizon")
-
-                # --- Submit ---
-                st.divider()
-                exp_name_default = f"{sel_cfgs[0]['name'] if sel_cfgs else 'AutoML'}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
-                exp_name = st.text_input("Experiment Name", value=exp_name_default, key="wiz_exp_name")
-                clean_exp_name = "".join(c for c in exp_name if ord(c) < 128) or "AutoML_Experiment"
-
-                col_back2, col_sub, _ = st.columns([1, 2, 4])
-                with col_back2:
-                    if st.button("← Back", key="step6_back"):
-                        st.session_state['automl_step'] = 5
-                        st.session_state['automl_config'] = cfg
-                        st.rerun()
-                with col_sub:
-                    if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
-                        real_sel_models = cfg.get('selected_models')
-                        real_ens_cfg    = cfg.get('ensemble_config', {})
-                        real_opt_mode   = cfg.get('optimization_mode', 'bayesian')
-                        real_preset     = cfg.get('training_preset', 'medium')
-                        real_n_trials   = cfg.get('n_trials')
-                        real_timeout    = cfg.get('timeout')
-                        real_time_bud   = cfg.get('time_budget')
-                        real_es         = cfg.get('early_stopping', 10)
-                        real_mp         = cfg.get('manual_params')
-                        real_val_strat  = cfg.get('validation_strategy', 'auto')
-                        real_val_params = cfg.get('validation_params', {})
-                        real_seed       = cfg.get('random_state', 42)
-                        real_nlp_cols   = cfg.get('selected_nlp_cols', [])
-                        real_nlp_cfg    = cfg.get('nlp_config', {})
-                        real_stab       = cfg.get('enable_stability', False)
-                        real_stab_tests = cfg.get('stability_tests', [])
-
-                        job_config = {
-                            'train_df': st.session_state.get('train_df'),
-                            'test_df':  st.session_state.get('test_df'),
-                            'target': target,
-                            'task': task,
-                            'date_col': cfg.get('date_col'),
-                            'forecast_horizon': forecast_horizon,
-                            'selected_nlp_cols': real_nlp_cols,
-                            'nlp_config': real_nlp_cfg,
-                            'preset': real_preset,
-                            'n_trials': real_n_trials,
-                            'timeout': real_timeout,
-                            'time_budget': real_time_bud,
-                            'selected_models': real_sel_models,
-                            'use_ensemble': cfg.get('use_ensemble', True),
-                            'ensemble_mode': cfg.get('ensemble_mode', 'both'),
-                            'use_deep_learning': cfg.get('use_deep_learning', True),
-                            'manual_params': real_mp,
-                            'experiment_name': clean_exp_name,
-                            'random_state': real_seed,
-                            'validation_strategy': real_val_strat,
-                            'validation_params': real_val_params,
-                            'ensemble_config': real_ens_cfg,
-                            'optimization_mode': real_opt_mode,
-                            'optimization_metric': cfg.get('optimization_metric', 'accuracy'),
-                            'target_metric_name': cfg.get('optimization_metric', 'accuracy').upper(),
-                            'early_stopping': real_es,
-                            'stability_config': {'tests': real_stab_tests, 'n_iterations': 3} if real_stab else None,
-                            'mlflow_tracking_uri': mlflow.get_tracking_uri(),
-                            'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
-                            'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
-                        }
-                        jm = st.session_state['job_manager']
-                        job_id = jm.submit_job(job_config, name=clean_exp_name)
-                        st.success(f"✅ Experiment **{clean_exp_name}** submitted! (ID: `{job_id}`)")
-                        st.info("📊 View live progress in the **Experiments** tab.")
-                        st.balloons()
-                        # Reset wizard for next experiment
-                        st.session_state['automl_step'] = 0
-                        st.session_state['automl_config'] = {}
-            else:
-                col_back3, _ = st.columns([1, 6])
-                with col_back3:
-                    if st.button("← Back", key="step6_back_nodata"):
-                        st.session_state['automl_step'] = 5
-                        st.session_state['automl_config'] = cfg
-                        st.rerun()
-
-    # --- SUB-TAB 1.2: COMPUTER VISION ---
+                st.info("Manual tuning selected.") 
+    
     # --- SUB-TAB 1.2: COMPUTER VISION ---
     with automl_tabs[1]:
         st.markdown("""
@@ -2869,14 +2332,14 @@ with tabs[1]:
             
             # --- Data Selection from DataLake ---
             st.markdown("##### Dataset Selection")
-            datasets = datalake.list_datasets()
+            datasets = get_cached_datasets()
             
             # Select Image Archive (ZIP)
             cv_ds_sel = st.selectbox("Select Image Archive (ZIP dataset)", [""] + datasets, key="cv_ds_sel",
                 help="Classification: zip of class-named folders. Multi-label: zip of images. Seg: zip of images + masks.")
             cv_upload_path = None
             if cv_ds_sel:
-                versions = datalake.list_versions(cv_ds_sel)
+                versions = get_cached_versions(cv_ds_sel)
                 cv_ver_sel = st.selectbox("Version (ZIP)", versions, key="cv_ver_sel")
                 if cv_ver_sel:
                     cv_upload_path = os.path.join(datalake.base_path, cv_ds_sel, cv_ver_sel)
@@ -2886,7 +2349,7 @@ with tabs[1]:
                 st.info("For multi-label, select the CSV dataset containing: filename, label1, label2...")
                 csv_ds_sel = st.selectbox("Select Multi-label CSV", [""] + datasets, key="cv_csv_ds_sel")
                 if csv_ds_sel:
-                    versions_csv = datalake.list_versions(csv_ds_sel)
+                    versions_csv = get_cached_versions(csv_ds_sel)
                     csv_ver_sel = st.selectbox("Version (CSV)", versions_csv, key="cv_csv_ver_sel")
                     if csv_ver_sel:
                         label_csv_path = os.path.join(datalake.base_path, csv_ds_sel, csv_ver_sel)
@@ -3541,7 +3004,7 @@ with tabs[2]:
                             cache = st.session_state.get('mlflow_cache', {})
                             if job.mlflow_run_id not in cache:
                                 with st.spinner("Fetching MLflow data..."):
-                                    cache[job.mlflow_run_id] = get_run_details(job.mlflow_run_id)
+                                    cache[job.mlflow_run_id] = get_cached_run_details(job.mlflow_run_id)
                                     st.session_state['mlflow_cache'] = cache
                             
                             rd = cache.get(job.mlflow_run_id, {"error": "No details found."})

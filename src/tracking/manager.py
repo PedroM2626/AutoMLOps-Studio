@@ -250,6 +250,7 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             use_ensemble=use_ensemble,
             use_deep_learning=use_deep_learning,
             ensemble_mode=ensemble_mode,
+            n_jobs=config.get('n_jobs', -1)
         )
         clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
 
@@ -341,6 +342,10 @@ class TrainingJobManager:
         if not name:
             ds = config.get('experiment_name', 'job')
             name = f"{ds}_{job_id}"
+
+        # Ensure n_jobs is in config for the worker
+        if 'n_jobs' not in config:
+            config['n_jobs'] = -1
 
         ctx = multiprocessing.get_context("spawn")
         log_queue    = ctx.Queue()
@@ -486,8 +491,11 @@ class TrainingJobManager:
     def get_job(self, job_id: str) -> Optional[TrainingJob]:
         return self.jobs.get(job_id)
 
-    def list_jobs(self) -> List[TrainingJob]:
-        return sorted(self.jobs.values(), key=lambda j: j.start_time, reverse=True)
+    def list_jobs(self, status: Optional[JobStatus] = None) -> List[TrainingJob]:
+        jobs = list(self.jobs.values())
+        if status:
+            jobs = [j for j in jobs if j.status == status]
+        return sorted(jobs, key=lambda j: j.start_time, reverse=True)
 
     def has_running_jobs(self) -> bool:
         return any(j.status == JobStatus.RUNNING for j in self.jobs.values())

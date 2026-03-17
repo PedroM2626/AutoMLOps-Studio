@@ -92,14 +92,14 @@ logger = logging.getLogger(__name__)
 
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
-                 use_ensemble=True, use_deep_learning=True, ensemble_mode='both'):
+                 use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1):
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
         self.use_ensemble = use_ensemble
         self.use_deep_learning = use_deep_learning
-        # ensemble_mode: 'single' (no ensembles), 'ensemble_only' (only custom ensembles), 'both'
         self.ensemble_mode = ensemble_mode
+        self.n_jobs = n_jobs
         self.best_model = None
         self.best_params = None
         self.results = []
@@ -183,7 +183,7 @@ class AutoMLTrainer:
             if name == 'adaboost': return AdaBoostRegressor(random_state=random_state)
             if name == 'bagging': return BaggingRegressor(random_state=random_state)
             if name == 'hist_gradient_boosting': return HistGradientBoostingRegressor(random_state=random_state)
-            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=-1, random_seed=random_state)
+            if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=self.n_jobs, random_seed=random_state)
         elif self.task_type == 'dimensionality_reduction':
             if name == 'pca': return PCA(random_state=random_state)
             if name == 'truncated_svd': return TruncatedSVD(random_state=random_state)
@@ -224,11 +224,11 @@ class AutoMLTrainer:
                 'voting_ensemble': lambda t: VotingClassifier(
                     estimators=[
                         ('pa', PassiveAggressiveClassifier(max_iter=1000, random_state=random_state, C=0.5)),
-                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=-1, random_state=random_state)),
-                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=-1, random_state=random_state))
+                        ('lr', LogisticRegression(max_iter=2000, C=10, solver='saga', n_jobs=self.n_jobs, random_state=random_state)),
+                        ('sgd', SGDClassifier(loss='modified_huber', max_iter=2000, n_jobs=self.n_jobs, random_state=random_state))
                     ],
                     voting='hard',
-                    n_jobs=-1 # Changed to 1 to avoid Windows multiprocessing issues
+                    n_jobs=self.n_jobs
                 ),
                 'custom_voting': lambda t: VotingClassifier(
                     estimators=self._resolve_estimators(
@@ -240,7 +240,7 @@ class AutoMLTrainer:
                     ),
                     voting=self.ensemble_config.get('voting_type', 'soft'),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'custom_stacking': lambda t: StackingClassifier(
                     estimators=self._resolve_estimators(
@@ -253,7 +253,7 @@ class AutoMLTrainer:
                     final_estimator=self._get_default_model(self.ensemble_config.get('stacking_final_estimator'), random_state) 
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str) 
                                     else self.ensemble_config.get('stacking_final_estimator', LogisticRegression(random_state=random_state)),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'custom_bagging': lambda t: BaggingClassifier(
                     estimator=self._get_default_model(
@@ -264,20 +264,20 @@ class AutoMLTrainer:
                     max_samples=t.suggest_float('custom_bag_max_samples', 0.5, 1.0),
                     max_features=t.suggest_float('custom_bag_max_features', 0.5, 1.0),
                     random_state=random_state,
-                    n_jobs=1
+                    n_jobs=self.n_jobs
                 ),
                 'logistic_regression': lambda t: LogisticRegression(
                     C=t.suggest_float('lr_C', 0.001, 100.0, log=True),
                     solver=t.suggest_categorical('lr_solver', ['lbfgs', 'liblinear', 'saga']),
                     max_iter=1000,
-                    n_jobs=-1,
+                    n_jobs=self.n_jobs,
                     random_state=random_state
                 ),
                 'random_forest': lambda t: RandomForestClassifier(
                     n_estimators=t.suggest_int('rf_n_estimators', 100, 1000),
                     max_depth=t.suggest_int('rf_max_depth', 5, 100),
                     min_samples_split=t.suggest_int('rf_min_samples_split', 2, 20),
-                    n_jobs=-1,
+                    n_jobs=self.n_jobs,
                     random_state=random_state
                 ),
                 'xgboost': lambda t: xgb.XGBClassifier(
@@ -288,7 +288,7 @@ class AutoMLTrainer:
                     colsample_bytree=t.suggest_float('xgb_colsample', 0.4, 1.0),
                     use_label_encoder=False,
                     eval_metric='logloss',
-                    n_jobs=-1,
+                    n_jobs=self.n_jobs,
                     random_state=random_state
                 ),
                 'lightgbm': lambda t: lgb.LGBMClassifier(
@@ -299,13 +299,13 @@ class AutoMLTrainer:
                     bagging_fraction=t.suggest_float('lgb_bagging_frac', 0.4, 1.0),
                     bagging_freq=t.suggest_int('lgb_bagging_freq', 1, 7),
                     verbosity=-1,
-                    n_jobs=-1,
+                    n_jobs=self.n_jobs,
                     random_state=random_state
                 ),
                 'extra_trees': lambda t: ExtraTreesClassifier(
                     n_estimators=t.suggest_int('et_n_estimators', 100, 1000),
                     max_depth=t.suggest_int('et_max_depth', 5, 100),
-                    n_jobs=-1,
+                    n_jobs=self.n_jobs,
                     random_state=random_state
                 ),
                 'adaboost': lambda t: AdaBoostClassifier(
@@ -337,7 +337,7 @@ class AutoMLTrainer:
                     n_neighbors=t.suggest_int('knn_neighbors', 1, 31),
                     weights=t.suggest_categorical('knn_weights', ['uniform', 'distance']),
                     metric=t.suggest_categorical('knn_metric', ['euclidean', 'manhattan', 'minkowski']),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'naive_bayes': lambda t: GaussianNB(
                     var_smoothing=t.suggest_float('nb_smoothing', 1e-10, 1e-8, log=True)
@@ -352,14 +352,14 @@ class AutoMLTrainer:
                     alpha=t.suggest_float('sgd_alpha', 1e-4, 1e-2, log=True),
                     max_iter=2000, 
                     random_state=random_state,
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'passive_aggressive': lambda t: PassiveAggressiveClassifier(
                     C=t.suggest_float('pa_C', 0.001, 10.0, log=True),
                     fit_intercept=t.suggest_categorical('pa_fit_intercept', [True, False]),
                     max_iter=1000,
                     random_state=random_state,
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'mlp': lambda t: MLPClassifier(
                     hidden_layer_sizes=t.suggest_categorical('mlp_layers', [(50,), (100,), (100, 50), (100, 100), (50, 50, 50), (256, 128, 64)]),
@@ -378,7 +378,7 @@ class AutoMLTrainer:
                     depth=t.suggest_int('cb_depth', 4, 10) if self.preset == 'best_quality' else t.suggest_int('cb_depth', 4, 6),
                     l2_leaf_reg=t.suggest_float('cb_l2', 1, 10),
                     verbose=0,
-                    thread_count=-1,
+                    thread_count=self.n_jobs,
                     random_seed=random_state
                 ) if CATBOOST_AVAILABLE else None,
                 'bagging': lambda t: BaggingClassifier(
@@ -386,7 +386,7 @@ class AutoMLTrainer:
                     max_samples=t.suggest_float('bagging_max_samples', 0.5, 1.0),
                     max_features=t.suggest_float('bagging_max_features', 0.5, 1.0),
                     random_state=random_state,
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'hist_gradient_boosting': lambda t: HistGradientBoostingClassifier(
                     max_iter=t.suggest_int('hgb_max_iter', 100, 1000),

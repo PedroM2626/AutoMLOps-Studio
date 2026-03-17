@@ -16,7 +16,22 @@
 
 ---
 
-## 🌟 What's New in v4.6.0
+## 🌟 What's New in v4.8.0
+
+### 🤖 Unified AutoML Studio
+- **Computer Vision Integration**: CV tasks now integrated within the main AutoML workflow
+- **Conditional Options**: Dynamic interface that adapts based on selected task type
+- **Three Workflow Modes**: Classical ML, Computer Vision, and Unified AutoML approaches
+
+### 🖼️ Enhanced Computer Vision
+- **Task-Specific Configuration**: Different options for classification, segmentation, and detection
+- **Dynamic UI**: Options appear/hide based on selected CV task type
+- **Integrated Pipeline**: CV models now follow the same MLOps pipeline as tabular models
+
+### 🎯 Smart Task Selection
+- **Unified Task Types**: All ML tasks (tabular and vision) in one interface
+- **Context-Aware Options**: Parameters change dynamically based on data and task type
+- **Mixed Data Support**: Handle both tabular and image data in unified workflows
 
 ### 🛠️ Enhanced Training Presets
 - **Fast Preset Fix**: Resolved premature trial termination issue, ensuring consistent behavior across all presets.
@@ -48,6 +63,7 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 - **Job Manager**: Comprehensive dashboard for background job control.
 - **MLflow Tracking**: Integrated logging of params, metrics, and architecture diagrams.
 - **Reports**: Automated performance reports (ROC, PR, Residuals, SHAP) saved as artifacts.
+- **Optimized Performance**: Streamlit caching system for fast data loading and real-time updates.
 
 ### 4. 🚀 Serving & Deployment
 - **FastAPI Serving**: Production-ready API for real-time inference with API Key security.
@@ -58,7 +74,7 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 
 ## 📂 Project Structure
 
-- `app.py`: Main Streamlit UI with state-of-the-art design and fragment support.
+- `app.py`: Main Streamlit UI with state-of-the-art design and optimized caching.
 - `src/core/`: Data processor, Drift detection, and Trainer constants.
 - `src/engines/`: Classical (Scikit-Learn/XGB), Vision (Torch), and Stability engines.
 - `src/tracking/`: Subprocess Job Manager and MLflow wrappers.
@@ -81,12 +97,22 @@ pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-### Reflex Interface
-```bash
-pip install -r requirements.txt
-reflex run
-```
-The Reflex app adds a modular native control plane in dark mode, covering data operations, AutoML jobs, experiments, registry/deploy flows, DagsHub tracking integration, monitoring, and computer vision workflows without depending on the Streamlit interface.
+---
+
+## ❗ Discontinued: Reflex Interface
+
+The Reflex-based interface was **discontinued and completely removed** from the project in version v4.8.0. 
+
+### 📋 Reasons for Discontinuation:
+1. **Performance & Complexity**: The Streamlit interface, after implementing comprehensive caching strategies (`st.cache_data`), achieved superior performance and responsiveness.
+2. **Development Velocity**: Streamlit's data-first approach allows for faster iteration and implementation of MLOps features compared to the overhead of managing state in Reflex.
+3. **Redundancy**: Maintaining two separate UIs (Streamlit + Reflex) created unnecessary complexity without significant user benefits.
+4. **Ecosystem Maturity**: Streamlit's mature ecosystem for data visualization (Plotly, Matplotlib, SHAP) and MLflow integration proved more reliable for MLOps workflows.
+
+### ✅ Current State:
+- **Streamlit Only**: The project now focuses exclusively on a single, highly-optimized Streamlit interface.
+- **Enhanced Performance**: Implemented intelligent caching for Data Lake operations, MLflow queries, and DataFrame loading.
+- **Unified Experience**: All Computer Vision and AutoML features are now fully integrated into the Streamlit workflow.
 
 ---
 
