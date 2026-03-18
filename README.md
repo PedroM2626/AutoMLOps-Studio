@@ -12,7 +12,7 @@
 
 **AutoMLOps Studio** is an "end-to-end" educational platform designed to simplify the Machine Learning lifecycle. Developed **by a student, for students**, the project provides an intuitive interface to explore everything from data ingestion to production model monitoring.
 
-**🔗 Access the live Demo:** [Hugging Face Spaces - AutoMLOps Studio](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
+**🔗 Access the live Demo:** [Streamlit Cloud - AutoMLOps Studio](https://automlops-studio.streamlit.app/)
 
 ---
 
