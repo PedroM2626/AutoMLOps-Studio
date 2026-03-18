@@ -364,8 +364,17 @@ class TrainingJobManager:
             target_metric=config.get('target_metric_name', 'ACCURACY'),
         )
 
+        # Use a thin runtime-import entrypoint to avoid Windows spawn pickling
+        # mismatches when modules are imported under different names.
+        try:
+            from src.tracking.worker import training_worker_entry
+            target_fn = training_worker_entry
+        except Exception:
+            # Fallback to the original function if import fails
+            target_fn = _training_worker
+
         process = ctx.Process(
-            target=_training_worker,
+            target=target_fn,
             args=(config, log_queue, status_queue, pause_event),
             daemon=True,
         )

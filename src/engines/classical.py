@@ -827,15 +827,15 @@ class AutoMLTrainer:
             logger.warning(f"MLFlowTracker init failed: {e}. Proceeding without MLflow logging.")
             tracker = DummyTracker()
 
-        # Early Stopping & Summary Logic
-        best_score_so_far = -np.inf
-        trials_without_improvement = 0
+        # Early Stopping & Summary Logic (per model)
+        model_best_score_so_far = {}
+        model_trials_without_improvement = {}
         model_trial_counts = {} # Fix chart index: real counter per model
         self.model_summaries = {} # Store best metric per model
         self.detailed_model_reports = {} # Store detailed reports for display
 
         def objective(trial, forced_model=None):
-            nonlocal best_score_so_far, trials_without_improvement, model_trial_counts
+            nonlocal model_best_score_so_far, model_trials_without_improvement, model_trial_counts
             
             # Global Time Budget Check
             if time_budget is not None:
@@ -883,11 +883,17 @@ class AutoMLTrainer:
             
             logger.info(f"Trial {trial.number} mapped to {full_trial_name} (Seed: {current_seed})")
 
+            # Initialize per-model early-stopping trackers
+            if model_name not in model_best_score_so_far:
+                model_best_score_so_far[model_name] = -np.inf
+            if model_name not in model_trials_without_improvement:
+                model_trials_without_improvement[model_name] = 0
+
             run_id = None
 
             # Global Early Stopping
             min_improvement = 0.0001
-            if early_stopping_rounds and trials_without_improvement >= early_stopping_rounds:
+            if early_stopping_rounds and model_trials_without_improvement.get(model_name, 0) >= early_stopping_rounds:
                 trial.study.stop()
                 return 0
 
@@ -975,8 +981,10 @@ class AutoMLTrainer:
                         logger.info(f"DEBUG: fit() called. X_tr type: {type(X_tr)}, shape: {X_tr.shape if hasattr(X_tr, 'shape') else len(X_tr)}")
                         logger.info(f"DEBUG: y_tr type: {type(y_tr)}, shape: {y_tr.shape if hasattr(y_tr, 'shape') else len(y_tr)}")
                         logger.info(f"DEBUG: Model: {model}")
+                        t_fit_start = time.time()
                         model.fit(X_tr, y_tr)
-                        logger.info("DEBUG: fit() completed.")
+                        t_fit_duration = time.time() - t_fit_start
+                        logger.info(f"DEBUG: fit() completed. duration={t_fit_duration:.2f}s")
                         y_pred_val = model.predict(X_val)
                         if self.task_type == 'classification':
                             if optimization_metric == 'accuracy':
@@ -1071,8 +1079,10 @@ class AutoMLTrainer:
                         # To save the model and artifacts, we need to fit on the full trial training set
                         # Note: Final fit on trial_set without CV for logging
                         logger.info(f"Finalizing training for model {full_trial_name}...")
+                        t_final_fit_start = time.time()
                         model.fit(X_tr, y_tr)
-                        logger.info(f"Training finalized for {full_trial_name}")
+                        t_final_fit_duration = time.time() - t_final_fit_start
+                        logger.info(f"Training finalized for {full_trial_name} (final_fit_duration={t_final_fit_duration:.2f}s)")
 
                         # ADDED: Log multiple metrics for every trial (not just the optimization one)
                         if self.task_type == 'classification' and hasattr(model, 'predict'):
@@ -1173,11 +1183,11 @@ class AutoMLTrainer:
                 except Exception as cb_err:
                     logger.error(f"Error in training callback: {cb_err}")
                 
-            if score > (best_score_so_far + min_improvement):
-                best_score_so_far = score
-                trials_without_improvement = 0
+            if score > (model_best_score_so_far[model_name] + min_improvement):
+                model_best_score_so_far[model_name] = score
+                model_trials_without_improvement[model_name] = 0
             else:
-                trials_without_improvement += 1
+                model_trials_without_improvement[model_name] += 1
 
             return score
 
@@ -1396,7 +1406,10 @@ class AutoMLTrainer:
                              if orig_estimators > 100:
                                   best_model_instance.set_params(n_estimators=100)
                         
+                        t_report_fit_start = time.time()
                         best_model_instance.fit(X_r_tr, y_r_tr)
+                        t_report_fit_dur = time.time() - t_report_fit_start
+                        logger.info(f"Report-fit completed for {m_name} (duration={t_report_fit_dur:.2f}s)")
                         y_pred_plot = best_model_instance.predict(X_r_val)
                         y_true_plot = y_r_val
                         
@@ -1459,11 +1472,11 @@ class AutoMLTrainer:
                         cm = confusion_matrix(y_true_plot, y_pred_plot)
                         fig_cm, ax_cm = plt.subplots(figsize=(6, 5))
                         
-                        # Use class names for labels if available
-                        labels = self.class_names if self.class_names else None
-                        
+                        # Use class names for labels if available; ensure iterable for seaborn
+                        labels = list(self.class_names) if self.class_names else []
+
                         sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm,
-                                    xticklabels=labels, yticklabels=labels)
+                                    xticklabels=labels if labels else False, yticklabels=labels if labels else False)
                         ax_cm.set_title(f'Confusion Matrix - {m_name}')
                         ax_cm.set_ylabel('True Label')
                         ax_cm.set_xlabel('Predicted Label')
@@ -1583,10 +1596,12 @@ class AutoMLTrainer:
                                         X_shap = effective_X_plot[idx]
                                     except: pass
     
+                            t_shap_start = time.time()
                             fig_shap = explainer.plot_importance(X_shap)
+                            t_shap_dur = time.time() - t_shap_start
                             if fig_shap:
                                 plots[f"shap_summary_{m_name}"] = fig_shap
-                                logger.info(f"SHAP summary successfully generated for {m_name}")
+                                logger.info(f"SHAP summary successfully generated for {m_name} (duration={t_shap_dur:.2f}s)")
                         except Exception as shap_err:
                             logger.warning(f"Failed to generate SHAP summary for {m_name}: {shap_err}")
                     else:

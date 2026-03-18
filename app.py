@@ -836,7 +836,9 @@ st.markdown("""
 # Session state initialization
 if 'trials_data' not in st.session_state: st.session_state['trials_data'] = []
 if 'best_model' not in st.session_state: st.session_state['best_model'] = None
-if 'job_manager' not in st.session_state:
+if 'job_manager' not in st.session_state or not isinstance(st.session_state.get('job_manager'), TrainingJobManager):
+    # Streamlit hot-reload can keep stale instances from an older class object,
+    # which breaks multiprocessing pickling on Windows spawn.
     st.session_state['job_manager'] = TrainingJobManager()
 if 'mlflow_cache' not in st.session_state:
     st.session_state['mlflow_cache'] = {}
