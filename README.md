@@ -16,7 +16,7 @@
 
 ---
 
-## 🌟 What's New in v4.8.0
+## 🌟 What's New in v4.8.1
 
 ### 🤖 Unified AutoML Studio
 - **Computer Vision Integration**: CV tasks now integrated within the main AutoML workflow
