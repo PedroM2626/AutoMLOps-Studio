@@ -1,24 +1,28 @@
 from fastapi import FastAPI, Header, HTTPException, Depends
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel
+from typing import Any
 import pandas as pd
-import joblib
 import os
 from dotenv import load_dotenv
 from automl_engine import load_pipeline
+from src.tracking.telemetry import TelemetryStore
 
 load_dotenv()
 
 app = FastAPI(title="AutoML Model Serving API")
 
-API_SECRET_KEY = os.getenv("API_SECRET_KEY", "supersecretkey123")
+API_SECRET_KEY = os.getenv("API_SECRET_KEY")
+telemetry_store = TelemetryStore()
 
 def verify_api_key(x_api_key: str = Header(...)):
+    if not API_SECRET_KEY:
+        raise HTTPException(status_code=503, detail="API is not ready: missing API_SECRET_KEY")
     if x_api_key != API_SECRET_KEY:
         raise HTTPException(status_code=403, detail="Invalid API Key")
     return x_api_key
 
 # Global storage for the loaded pipeline
-model_assets = {"processor": None, "model": None}
+model_assets = {"processor": None, "model": None, "model_name": None}
 
 def load_latest_model():
     model_dir = "models"
@@ -31,19 +35,42 @@ def load_latest_model():
             processor, model = load_pipeline(path)
             model_assets["processor"] = processor
             model_assets["model"] = model
+            model_assets["model_name"] = latest_file
             return True
     return False
 
 @app.on_event("startup")
 async def startup_event():
+    if not API_SECRET_KEY:
+        raise RuntimeError("Missing required environment variable API_SECRET_KEY")
     load_latest_model()
 
 @app.get("/")
 def read_root():
     return {"status": "online", "model_loaded": model_assets["model"] is not None}
 
+
+@app.get("/health/live")
+def health_live():
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+def health_ready():
+    ready = bool(API_SECRET_KEY) and model_assets["model"] is not None
+    if not ready:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "not_ready",
+                "has_api_key": bool(API_SECRET_KEY),
+                "model_loaded": model_assets["model"] is not None,
+            },
+        )
+    return {"status": "ready", "model": model_assets.get("model_name")}
+
 class PredictionRequest(BaseModel):
-    data: list # List of dicts for rows
+    data: list[dict[str, Any]]
 
 @app.post("/predict", dependencies=[Depends(verify_api_key)])
 def predict(request: PredictionRequest):
@@ -63,24 +90,13 @@ def predict(request: PredictionRequest):
         else:
             result = predictions.tolist()
             
-        # --- Telemetry Logging for ML Monitoring (Drift) ---
+        # Telemetry logging in SQLite for safe concurrent writes.
         try:
-            import datetime
-            import json
-            
-            mon_dir = os.path.join("data_lake", "monitoring")
-            os.makedirs(mon_dir, exist_ok=True)
-            log_file = os.path.join(mon_dir, "api_telemetry.csv")
-            
-            # Add metadata columns
-            df_log = df.copy()
-            df_log["__timestamp"] = datetime.datetime.now().isoformat()
-            df_log["__model_version"] = "latest" # Idealmente pegaríamos o nome exato
-            df_log["__prediction"] = result
-            
-            # Se for a primeira vez, salva com header, se não faz append
-            write_header = not os.path.exists(log_file)
-            df_log.to_csv(log_file, mode='a', header=write_header, index=False)
+            telemetry_store.log_inference(
+                payload_rows=request.data,
+                predictions=result,
+                model_version=model_assets.get("model_name") or "unknown",
+            )
         except Exception as tel_err:
             import logging
             logging.error(f"Failed to log telemetry: {tel_err}")

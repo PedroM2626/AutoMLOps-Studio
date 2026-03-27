@@ -43,6 +43,7 @@ class MLFlowTracker:
             
             # Log model
             safe_artifact_path = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
+            mlflow.set_tag("logged_model_artifact_path", safe_artifact_path)
             mlflow.sklearn.log_model(
                 model, 
                 safe_artifact_path, 
@@ -107,10 +108,31 @@ def get_model_registry():
         print(f"Error fetching model registry: {e}")
         return pd.DataFrame()
 
-def register_model_from_run(run_id, model_name):
+def _resolve_logged_model_artifact_path(run_id: str) -> str:
+    """Resolve model artifact path from tags or run artifacts."""
+    from mlflow.tracking import MlflowClient
+
+    client = MlflowClient()
+    run = client.get_run(run_id)
+    from_tag = run.data.tags.get("logged_model_artifact_path")
+    if from_tag:
+        return from_tag
+
+    # Fallback: search for a folder containing MLmodel at first level.
+    for artifact in client.list_artifacts(run_id):
+        if artifact.is_dir:
+            nested = client.list_artifacts(run_id, artifact.path)
+            if any(item.path.endswith("MLmodel") for item in nested):
+                return artifact.path
+
+    return "model"
+
+
+def register_model_from_run(run_id, model_name, artifact_path=None):
     """Register a model that was previously logged in a run."""
     try:
-        model_uri = f"runs:/{run_id}/model"
+        resolved_artifact = artifact_path or _resolve_logged_model_artifact_path(run_id)
+        model_uri = f"runs:/{run_id}/{resolved_artifact}"
         mlflow.register_model(model_uri, model_name)
         return True
     except Exception as e:
@@ -134,10 +156,10 @@ def get_model_details(model_name, version=None):
         client = MlflowClient()
         
         if version is None:
-            versions = client.get_latest_versions(model_name, stages=["Production", "Staging", "None"])
+            versions = client.search_model_versions(f"name='{model_name}'")
             if not versions:
                 return None
-            model_version = versions[0]
+            model_version = sorted(versions, key=lambda item: int(item.version), reverse=True)[0]
         else:
             model_version = client.get_model_version(model_name, version)
             

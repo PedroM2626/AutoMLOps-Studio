@@ -1,35 +1,16 @@
-import pandas as pd
-from sklearn.datasets import make_classification
-from automl_engine import AutoMLDataProcessor, AutoMLTrainer
-import logging
-import sys
+from src.utils.helpers import generate_model_card
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
-try:
-    print("Generating data...")
-    X, y = make_classification(n_samples=200, n_features=10, random_state=42)
-    X = pd.DataFrame(X, columns=[f'f_{i}' for i in range(10)])
-    y = pd.Series(y, name='target')
-    
-    print("Processing...")
-    processor = AutoMLDataProcessor()
-    X_proc, y_proc = processor.fit_transform(X, y)
-    
-    print("Training...")
-    trainer = AutoMLTrainer(task_type='classification', preset='fast')
-    trainer.train(X_proc, y_proc, feature_names=processor.get_feature_names())
-    
-    print('\n--- RESULTS ---')
-    best_m = trainer.best_params.get('model_name')
-    print('Best Model:', best_m)
-    
-    if hasattr(trainer, 'model_summaries'):
-        metrics = trainer.model_summaries[best_m].get('metrics', {})
-        print('Model Card Gen:', 'model_card' in metrics)
-        if 'model_card' in metrics:
-            print("\n----- CARD PREVIEW -----")
-            print(metrics['model_card'][:300])
-except Exception as e:
-    import traceback
-    traceback.print_exc()
+def test_model_card_generation_path():
+    card = generate_model_card(
+        model_name="logistic_regression",
+        params={"C": 1.0, "solver": "lbfgs"},
+        metrics={"accuracy": 0.91, "f1": 0.90},
+        feature_names=["age", "income", "balance"],
+        task_type="classification",
+        duration=12.5,
+    )
+
+    assert "Model Card: logistic_regression" in card
+    assert "accuracy" in card
+    assert "age" in card

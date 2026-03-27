@@ -32,7 +32,7 @@ class DataLake:
         return sorted(datasets)
 
     def list_versions(self, dataset_name: str) -> list[str]:
-        dataset_dir = self.base_path / dataset_name
+        dataset_dir = self._resolve_dataset_dir(dataset_name)
         if not dataset_dir.exists():
             return []
         versions = [path.name for path in dataset_dir.iterdir() if path.is_file()]
@@ -104,10 +104,25 @@ class DataLake:
         return self.save_raw_file(buffer.getvalue().encode("utf-8"), dataset_name, file_name)
 
     def _resolve_version_path(self, dataset_name: str, version: str) -> Path:
-        version_path = self.base_path / dataset_name / version
+        if any(token in version for token in ("..", "/", "\\")):
+            raise ValueError("Invalid dataset version path")
+        dataset_dir = self._resolve_dataset_dir(dataset_name)
+        version_path = dataset_dir / version
+        resolved = version_path.resolve()
+        if not str(resolved).startswith(str(self.base_path.resolve())):
+            raise ValueError("Version path escapes data lake base path")
         if not version_path.exists():
             raise FileNotFoundError(f"Dataset version not found: {dataset_name}/{version}")
         return version_path
+
+    def _resolve_dataset_dir(self, dataset_name: str) -> Path:
+        if any(token in dataset_name for token in ("..", "/", "\\")):
+            raise ValueError("Invalid dataset name")
+        dataset_dir = self.base_path / dataset_name
+        resolved = dataset_dir.resolve()
+        if not str(resolved).startswith(str(self.base_path.resolve())):
+            raise ValueError("Dataset path escapes data lake base path")
+        return dataset_dir
 
     @staticmethod
     def _slugify(value: str) -> str:

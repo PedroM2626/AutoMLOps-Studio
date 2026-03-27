@@ -23,8 +23,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar o restante do código do projeto
 COPY . .
 
-# Criar diretórios para persistência e ajustar permissões para o usuário do Hugging Face (1000)
-RUN mkdir -p mlruns data_lake models && chmod -R 777 mlruns data_lake models
+# Criar usuário não-root e diretórios com permissões mínimas necessárias
+RUN groupadd --gid 1000 appgroup \
+    && useradd --uid 1000 --gid appgroup --create-home appuser \
+    && mkdir -p mlruns data_lake models \
+    && chown -R appuser:appgroup /app
+
+USER appuser
 
 # Hugging Face Spaces usa a porta 7860 por padrão
 EXPOSE 7860

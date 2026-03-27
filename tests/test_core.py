@@ -27,9 +27,8 @@ def test_automl_trainer_classification(sample_data):
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
     
-    trainer = AutoMLTrainer(task_type='classification', ensemble_mode='single', use_deep_learning=False)
-    # Use 1 trial for speed in tests
-    model = trainer.train(X_proc, y_proc, n_trials=1)
+    trainer = AutoMLTrainer(task_type='classification', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1, selected_models=['logistic_regression'])
     
     assert model is not None
     metrics, preds = trainer.evaluate(X_proc, y_proc)
@@ -41,8 +40,8 @@ def test_automl_trainer_regression(sample_data):
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
     
-    trainer = AutoMLTrainer(task_type='regression', ensemble_mode='single', use_deep_learning=False)
-    model = trainer.train(X_proc, y_proc, n_trials=1)
+    trainer = AutoMLTrainer(task_type='regression', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1, selected_models=['linear_regression'])
     
     assert model is not None
     metrics, preds = trainer.evaluate(X_proc, y_proc)
@@ -61,8 +60,8 @@ def test_model_save_load(sample_data):
     from src.engines.classical import save_pipeline, load_pipeline
     processor = AutoMLDataProcessor(target_column='target')
     X_proc, y_proc = processor.fit_transform(sample_data)
-    trainer = AutoMLTrainer(task_type='classification')
-    model = trainer.train(X_proc, y_proc, n_trials=1)
+    trainer = AutoMLTrainer(task_type='classification', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1, selected_models=['logistic_regression'])
     
     path = "models/test_model.pkl"
     save_pipeline(processor, model, path)

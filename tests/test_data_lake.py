@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from src.core.data_lake import DataLake
 
@@ -22,3 +23,10 @@ def test_data_lake_save_load_and_delete(tmp_path: Path):
 
     assert lake.delete_version("demo_dataset", versions[0]) is True
     assert lake.list_datasets() == []
+
+
+def test_data_lake_rejects_path_traversal(tmp_path: Path):
+    lake = DataLake(tmp_path / "lake")
+
+    with pytest.raises(ValueError):
+        lake.list_versions("../escape")

@@ -6,7 +6,7 @@ class MockRunInfo:
         self.run_uuid = run_uuid
         self.run_id = run_id
         self.experiment_id = experiment_id
-        print(f"MockRunInfo initialized with run_uuid={run_uuid}, run_id={run_id}")
+        self.initialized = True
 
 # The Patch Logic
 def apply_patch(cls):
@@ -15,28 +15,23 @@ def apply_patch(cls):
     
     # We want to patch if run_uuid is mandatory (no default)
     if "run_uuid" in _sig.parameters and _sig.parameters["run_uuid"].default is inspect.Parameter.empty:
-        print("Patching...")
         def _patched_init(self, *args, **kwargs):
             if "run_uuid" not in kwargs and len(args) == 0:
-                print("Patch: run_uuid missing, using run_id")
                 kwargs["run_uuid"] = kwargs.get("run_id")
             return _orig_init(self, *args, **kwargs)
         cls.__init__ = _patched_init
 
-# Verify the issue before patch
-print("Before patch:")
-try:
-    MockRunInfo(run_id="test_id", experiment_id="0")
-except TypeError as e:
-    print(f"Expected failure: {e}")
 
-# Apply patch
-apply_patch(MockRunInfo)
+def test_run_info_patch_fills_run_uuid_from_run_id():
+    # Precondition: original signature requires run_uuid
+    try:
+        MockRunInfo(run_id="test_id", experiment_id="0")
+        assert False, "Expected TypeError before patch"
+    except TypeError:
+        pass
 
-# Verify the fix
-print("\nAfter patch:")
-try:
+    apply_patch(MockRunInfo)
     obj = MockRunInfo(run_id="test_id", experiment_id="0")
-    print("Success after patch!")
-except Exception as e:
-    print(f"Failed after patch: {e}")
+    assert obj.run_uuid == "test_id"
+    assert obj.run_id == "test_id"
+    assert obj.experiment_id == "0"
