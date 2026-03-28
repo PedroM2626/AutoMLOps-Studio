@@ -1833,6 +1833,7 @@ if current_main_section == "📉 Monitoring":
                     st.error(f"Target column '{target_col}' not found in the selected dataset.")
                 else:
                     st.info("Wait for dataset selection to enable analysis.")
+if current_main_section == "🗄️ Data":
     with data_tabs[1]:
         st.markdown(f"""
         <div class='ui-card'>
@@ -1862,13 +1863,13 @@ if current_main_section == "📉 Monitoring":
                 df_curr = get_cached_dataframe(curr_ds, curr_ver)
                 st.write(f"Current Loaded: {df_curr.shape}")
             st.markdown("</div>", unsafe_allow_html=True)
-            
+
         if df_ref is not None and df_curr is not None:
             if st.button("🚀 Run Drift Detection", key="drift_run_btn", type="primary"):
                 with st.spinner("Calculating Drift Metrics (KS Test)..."):
                     drift_report = []
                     numeric_cols = df_ref.select_dtypes(include=np.number).columns.intersection(df_curr.columns)
-                    
+
                     st.divider()
                     st.markdown("### 📊 Distribution Comparison")
                     for col in numeric_cols:
@@ -1876,20 +1877,20 @@ if current_main_section == "📉 Monitoring":
                         stat, p_value = ks_2samp(df_ref[col].dropna(), df_curr[col].dropna())
                         drift_detected = p_value < 0.05
                         status_chip = "<span class='badge badge-failed'>🔴 Drift Detected</span>" if drift_detected else "<span class='badge badge-done'>🟢 Stable</span>"
-                        
+
                         drift_report.append({
                             "Feature": col,
                             "KS Stat": f"{stat:.4f}",
                             "P-Value": f"{p_value:.4f}",
                             "Status": "Drift" if drift_detected else "Stable"
                         })
-                        
+
                         with st.expander(f"Feature: {col} - {'🔴' if drift_detected else '🟢'}", expanded=False):
                             fig = px.histogram(df_ref, x=col, color_discrete_sequence=['#2f80ed'], opacity=0.5, nbins=30, title=f"Distribution Shift: {col}")
                             fig.add_histogram(x=df_curr[col], name='Current', marker_color='#ef4444', opacity=0.5)
                             fig.update_layout(barmode='overlay')
                             st.plotly_chart(fig, use_container_width=True)
-                    
+
                     st.markdown("### 📋 Drift Summary Table")
                     st.dataframe(pd.DataFrame(drift_report), use_container_width=True)
 
