@@ -83,6 +83,8 @@ def get_all_runs():
         for exp in experiments:
             runs = mlflow.search_runs(experiment_ids=[exp.experiment_id])
             if not runs.empty:
+                # Normalize dtypes to avoid pandas concat issues with extension arrays.
+                runs = runs.astype(object)
                 runs['experiment_name'] = exp.name
                 all_runs.append(runs)
         
