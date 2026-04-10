@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v5.0.0-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v5.0.1-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -39,6 +39,30 @@
 - **Tabular Multi-Label End-to-End**: Multi-target column selection and processing now supported in the training pipeline
 - **Association Rules Engine**: Built-in rule-mining flow with support, confidence, and lift-based scoring
 - **Ranking Metrics**: Ranking workflows now include ranking-aware optimization metrics (for example, NDCG)
+
+## 📋 Supported Task Types (Tabular vs CV)
+
+| Modality | Task Type | Brief Description | Main Metrics |
+|---|---|---|---|
+| Tabular | `classification` | Predict a discrete class label. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
+| Tabular | `regression` | Predict a continuous numeric target. | `r2`, `rmse`, `mae` |
+| Tabular | `time_series` | Forecast future values from temporal data. | `rmse`, `mae`, `mape` |
+| Tabular | `clustering` | Group samples by similarity without labels. | `silhouette` |
+| Tabular | `anomaly_detection` | Detect outliers or rare abnormal patterns. | `f1` (when labels exist), anomaly ratio/count |
+| Tabular | `dimensionality_reduction` | Reduce feature space while preserving signal. | `explained_variance` |
+| Tabular | `ranking` | Score items for ordered relevance. | `ndcg`, `rmse`, `mae` |
+| Tabular | `multi_label` | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy`, `precision_micro`, `recall_micro`, `hamming_loss` |
+| Tabular | `association_rules` | Discover co-occurrence rules in tabular/binary patterns. | `rule_score`, `rule_count`, `avg_lift` |
+| Computer Vision | `image_classification` | Assign one class to each image. | `val_acc`, `val_loss` |
+| Computer Vision | `image_multi_label` | Assign multiple labels to each image. | `val_acc` (exact match), `val_loss` |
+| Computer Vision | `image_segmentation` | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
+| Computer Vision | `object_detection` | Detect objects and bounding boxes. | Baseline loop enabled; custom detector metrics can be added per dataset |
+| Computer Vision | `image_anomaly_detection` | Classify images as normal vs anomalous patterns. | `val_acc`, `val_loss` |
+| Computer Vision | `pose_estimation` | Estimate keypoints/body joints from images. | Baseline loop enabled; keypoint metrics depend on annotation format |
+
+> Notes:
+> - Tabular metrics are configurable in the AutoML optimization step.
+> - Some CV tasks (detection/pose) are scaffolded and ready in pipeline/UI; task-specific benchmark metrics (for example mAP/OKS) can be plugged in according to annotation standards.
 
 ### 🛠️ Enhanced Training Presets
 - **Fast Preset Fix**: Resolved premature trial termination issue, ensuring consistent behavior across all presets.

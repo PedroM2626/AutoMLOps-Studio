@@ -38,6 +38,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import io
 from PIL import Image
 import uuid
+import datetime
 import yaml
 import json
 import time
@@ -1712,7 +1713,7 @@ if current_main_section == "📉 Monitoring":
                                     if y_stab is None:
                                         y_stab = y_raw
                                         
-                                    from stability_engine import StabilityAnalyzer
+                                    from src.engines.stability import StabilityAnalyzer
                                     analyzer = StabilityAnalyzer(base_model=actual_model, X=X_stab, y=y_stab, task_type=task_type_sel)
                                     
                                     # Execute Tests Sequentially
