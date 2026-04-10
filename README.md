@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v4.9.1-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v5.0.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -16,22 +16,29 @@
 
 ---
 
-## 🌟 What's New in v4.9.1
+## 🌟 What's New in v5.0.0
 
 ### 🤖 Unified AutoML Studio
-- **Computer Vision Integration**: CV tasks now integrated within the main AutoML workflow
-- **Conditional Options**: Dynamic interface that adapts based on selected task type
-- **Three Workflow Modes**: Classical ML, Computer Vision, and Unified AutoML approaches
+- **Single Unified Entry Point**: AutoML now starts in one workspace with a modality selector (**Tabular** or **Computer Vision**)
+- **Conditional Options**: Dynamic interface adapts to selected modality and task type
+- **Simplified Navigation**: No duplicated training flows between separate tabs
 
 ### 🖼️ Enhanced Computer Vision
-- **Task-Specific Configuration**: Different options for classification, segmentation, and detection
+- **New Vision Tasks**: Added **Anomaly Detection** and **Pose Estimation**
+- **Task-Specific Configuration**: Different options for classification, multi-label, segmentation, detection, anomaly detection, and pose estimation
 - **Dynamic UI**: Options appear/hide based on selected CV task type
 - **Integrated Pipeline**: CV models now follow the same MLOps pipeline as tabular models
 
 ### 🎯 Smart Task Selection
-- **Unified Task Types**: All ML tasks (tabular and vision) in one interface
+- **New Tabular Tasks**: Added **Association Rules**, **Ranking**, and **Multi-Label** for tabular datasets
+- **Unified Task Types**: Tabular and vision tasks are available from the same AutoML entry point
 - **Context-Aware Options**: Parameters change dynamically based on data and task type
 - **Mixed Data Support**: Handle both tabular and image data in unified workflows
+
+### ✅ Pipeline Coverage Improvements
+- **Tabular Multi-Label End-to-End**: Multi-target column selection and processing now supported in the training pipeline
+- **Association Rules Engine**: Built-in rule-mining flow with support, confidence, and lift-based scoring
+- **Ranking Metrics**: Ranking workflows now include ranking-aware optimization metrics (for example, NDCG)
 
 ### 🛠️ Enhanced Training Presets
 - **Fast Preset Fix**: Resolved premature trial termination issue, ensuring consistent behavior across all presets.
@@ -74,9 +81,9 @@ Learning MLOps often requires dealing with complex infrastructures before even u
 
 ## 📂 Project Structure
 
-- `app.py`: Main Streamlit UI with state-of-the-art design and optimized caching.
+- `app.py`: Main Streamlit UI with unified AutoML mode switching (Tabular/CV) and optimized caching.
 - `src/core/`: Data processor, Drift detection, and Trainer constants.
-- `src/engines/`: Classical (Scikit-Learn/XGB), Vision (Torch), and Stability engines.
+- `src/engines/`: Classical (Scikit-Learn/XGB), Vision (Torch), and Stability engines with extended task-type support.
 - `src/tracking/`: Subprocess Job Manager and MLflow wrappers.
 - `src/ui/`: Design system and custom CSS components.
 - `api.py`: FastAPI implementation for model serving.
@@ -112,7 +119,8 @@ The Reflex-based interface was **discontinued and completely removed** from the 
 ### ✅ Current State:
 - **Streamlit Only**: The project now focuses exclusively on a single, highly-optimized Streamlit interface.
 - **Enhanced Performance**: Implemented intelligent caching for Data Lake operations, MLflow queries, and DataFrame loading.
-- **Unified Experience**: All Computer Vision and AutoML features are now fully integrated into the Streamlit workflow.
+- **Unified Experience**: AutoML now uses one workflow entry point with modality-based dynamic options.
+- **Broader Task Coverage**: New task types for both tabular and vision are integrated into the same MLOps pipeline.
 
 ---
 

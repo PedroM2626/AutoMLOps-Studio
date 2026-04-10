@@ -1,4 +1,4 @@
-import sys
+﻿import sys
 import os
 
 # Ensure repository root is on sys.path so `src` package imports work
@@ -1204,7 +1204,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
             else:
                 # Stratified split if target is present and task is classification
                 stratify_col = None
-                if task_type == 'classification' and target_col and target_col in df_ds.columns:
+                if task_type == 'classification' and isinstance(target_col, str) and target_col in df_ds.columns:
                     # Check if stratification is possible (enough samples per class)
                     if df_ds[target_col].value_counts().min() > 1:
                         stratify_col = df_ds[target_col]
@@ -1903,11 +1903,16 @@ if current_main_section == "⚙️ AutoML":
       <div class='hero-subtitle'>Automated machine learning pipeline — from raw data to a production-ready model.</div>
     </div>""", unsafe_allow_html=True)
     
-    # Sub-tabs within AutoML
-    automl_tabs = st.tabs(["📊 Classical ML (Tabular)", "🖼️ Computer Vision"])
-    
-    # --- SUB-TAB 1.1: CLASSICAL ML (WatsonX-Style Pipeline) ---
-    with automl_tabs[0]:
+    automl_data_mode = st.radio(
+        "Data Modality",
+        ["Tabular", "Computer Vision"],
+        horizontal=True,
+        key="automl_data_mode",
+        help="Use one unified AutoML workspace and switch modes based on your data type.",
+    )
+
+    # --- UNIFIED MODE: TABULAR ---
+    if automl_data_mode == "Tabular":
         # ── Step definitions ──────────────────────────────────────────
         PIPELINE_STEPS = [
             ("📂", "Data"),
@@ -2093,15 +2098,26 @@ if current_main_section == "⚙️ AutoML":
                           col_ta, col_dc = st.columns(2)
                           with col_ta:
                               task_tmp = cfg.get('task', 'classification')
-                              if task_tmp not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
-                                  default_target_idx = max(0, len(sample_df.columns) - 1)
-                                  target_pre_w = st.selectbox(
-                                      "🎯 Target Column",
-                                      sample_df.columns.tolist(),
-                                      index=default_target_idx,
-                                      key="wizard_target"
-                                  )
-                                  cfg['target'] = target_pre_w
+                              unsup_targetless_tasks = ["clustering", "anomaly_detection", "dimensionality_reduction", "association_rules"]
+                              if task_tmp not in unsup_targetless_tasks:
+                                  if task_tmp == "multi_label":
+                                      default_targets = [c for c in sample_df.columns[-2:] if c in sample_df.columns]
+                                      target_pre_w = st.multiselect(
+                                          "🎯 Target Columns (Multi-Label)",
+                                          sample_df.columns.tolist(),
+                                          default=cfg.get('target', default_targets if default_targets else []),
+                                          key="wizard_target_multi"
+                                      )
+                                      cfg['target'] = target_pre_w
+                                  else:
+                                      default_target_idx = max(0, len(sample_df.columns) - 1)
+                                      target_pre_w = st.selectbox(
+                                          "🎯 Target Column",
+                                          sample_df.columns.tolist(),
+                                          index=default_target_idx,
+                                          key="wizard_target"
+                                      )
+                                      cfg['target'] = target_pre_w
                           with col_dc:
                               if task_tmp == 'time_series':
                                   date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
@@ -2194,18 +2210,21 @@ if current_main_section == "⚙️ AutoML":
               render_step_info_panel(
                   "Task Type",
                   "Choose the type of ML problem you want to solve. The task type determines which models, metrics, and optimization strategies are available in the next steps.",
-                  ["Classification for label prediction", "Regression for continuous output", "Time Series for temporal forecasting"]
+                                    ["Classification for label prediction", "Ranking for ordered relevance", "Multi-Label for multiple targets per row"]
               )
 
             SUPERVISED_TASKS = [
                 ("classification", "🎯", "Classification", "Predict a category or label"),
                 ("regression",     "📈", "Regression",     "Predict a continuous value"),
                 ("time_series",    "⏳", "Time Series",    "Forecast future values from historical sequences"),
+                                ("ranking",        "🥇", "Ranking",        "Score items to optimize ordering relevance"),
+                                ("multi_label",    "🏷️", "Multi-Label",    "Predict multiple target labels per row"),
             ]
             UNSUP_TASKS = [
                 ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
                 ("anomaly_detection",        "🚨", "Anomaly Detection",        "Identify unusual data points"),
                 ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently"),
+                                ("association_rules",        "🧩", "Association Rules",        "Discover co-occurrence patterns and rules"),
             ]
 
             learn_type = st.radio(
@@ -2363,14 +2382,25 @@ if current_main_section == "⚙️ AutoML":
                 # ── Training Focus selector (shown for both modes) ────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                FOCUS_OPTIONS = [
-                    ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
-                    ("ensemble_only", "🏗️", "Custom Ensembles","Only train Custom Voting/Stacking/Bagging. Good if base models are already tuned."),
-                    ("both",          "🏆", "Both (Full)",     "Train all models including ensembles. Maximum accuracy but takes longer."),
-                ]
-                cur_focus = cfg.get("ensemble_mode", "both")
+                task_supports_ensembles = task not in ["ranking", "multi_label", "association_rules"]
+                if task_supports_ensembles:
+                    FOCUS_OPTIONS = [
+                        ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
+                        ("ensemble_only", "🏗️", "Custom Ensembles","Only train Custom Voting/Stacking/Bagging. Good if base models are already tuned."),
+                        ("both",          "🏆", "Both (Full)",     "Train all models including ensembles. Maximum accuracy but takes longer."),
+                    ]
+                else:
+                    st.info("This task currently runs in single-model mode (ensemble search is disabled).")
+                    FOCUS_OPTIONS = [
+                        ("single", "🎯", "Single Models", "Recommended and fully supported for this task type."),
+                    ]
+                    cfg["custom_ensembles"] = []
 
-                focus_cols = st.columns(3)
+                cur_focus = cfg.get("ensemble_mode", "both" if task_supports_ensembles else "single")
+                if not task_supports_ensembles:
+                    cur_focus = "single"
+
+                focus_cols = st.columns(len(FOCUS_OPTIONS))
                 for i, (fid, ficon, fname, fdesc) in enumerate(FOCUS_OPTIONS):
                     with focus_cols[i]:
                         is_sel = (fid == cur_focus)
@@ -2387,7 +2417,7 @@ if current_main_section == "⚙️ AutoML":
                             st.session_state["automl_config"] = cfg
                             st.rerun()
                 cfg["ensemble_mode"] = cur_focus
-                cfg["use_ensemble"] = (cur_focus != "single")
+                cfg["use_ensemble"] = task_supports_ensembles and (cur_focus != "single")
 
                 # ── Deep Learning selector ────────────────────────────────────
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -2688,10 +2718,13 @@ if current_main_section == "⚙️ AutoML":
                 metric_options = {
                     'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
                     'regression': ['r2', 'rmse', 'mae'],
+                    'ranking': ['ndcg', 'rmse', 'mae'],
+                    'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
                     'clustering': ['silhouette'],
                     'time_series': ['rmse', 'mae', 'mape'],
                     'anomaly_detection': ['f1'],
-                    'dimensionality_reduction': ['explained_variance']
+                    'dimensionality_reduction': ['explained_variance'],
+                    'association_rules': ['rule_score', 'rule_count', 'avg_lift']
                 }
                 metric_list = metric_options.get(task, ['accuracy'])
                 cur_metric = cfg.get('optimization_metric', metric_list[0])
@@ -2907,12 +2940,23 @@ if current_main_section == "⚙️ AutoML":
             target = None
             if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
                 train_df = st.session_state['train_df']
-                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction"]:
+                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction", "association_rules"]:
                     act_target = st.session_state.get('target_active')
-                    if act_target and act_target in train_df.columns:
-                        target = act_target
+                    if task == "multi_label":
+                        if isinstance(act_target, list) and all(c in train_df.columns for c in act_target) and len(act_target) >= 2:
+                            target = act_target
+                        else:
+                            target = st.multiselect(
+                                "🎯 Select Target Columns",
+                                train_df.columns.tolist(),
+                                default=cfg.get('target', []) if isinstance(cfg.get('target'), list) else [],
+                                key="wiz_final_target_multi"
+                            )
                     else:
-                        target = st.selectbox("🎯 Select Target", train_df.columns, key="wiz_final_target")
+                        if isinstance(act_target, str) and act_target in train_df.columns:
+                            target = act_target
+                        else:
+                            target = st.selectbox("🎯 Select Target", train_df.columns, key="wiz_final_target")
 
                 st.divider()
                 exp_name_default = f"{sel_cfgs[0]['name'] if sel_cfgs else 'AutoML'}_{task}_{time.strftime('%Y%m%d_%H%M%S')}"
@@ -2927,6 +2971,10 @@ if current_main_section == "⚙️ AutoML":
                         st.rerun()
                 with col_sub:
                     if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
+                        if task == "multi_label" and (not isinstance(target, list) or len(target) < 2):
+                            st.error("Please select at least two target columns for Multi-Label tasks.")
+                            st.stop()
+
                         job_config = {
                             'train_df': st.session_state.get('train_df'),
                             'test_df': st.session_state.get('test_df'),
@@ -2970,12 +3018,12 @@ if current_main_section == "⚙️ AutoML":
                         st.session_state['automl_config'] = cfg
                         st.rerun()
     
-    # --- SUB-TAB 1.2: COMPUTER VISION ---
-    with automl_tabs[1]:
+    # --- UNIFIED MODE: COMPUTER VISION ---
+    if automl_data_mode == "Computer Vision":
         st.markdown("""
         <div class='hero-header' style='background:linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(31, 41, 55, 0.4) 100%);'>
           <div class='hero-title'>👁️ Vision Studio</div>
-          <div class='hero-subtitle'>Train deep learning vision models for classification, detection, and segmentation.</div>
+                    <div class='hero-subtitle'>Train deep learning vision models for classification, multi-label, segmentation, detection, anomaly detection, and pose estimation.</div>
         </div>""", unsafe_allow_html=True)
 
         CV_TASKS = [
@@ -2983,11 +3031,13 @@ if current_main_section == "⚙️ AutoML":
             ("image_multi_label", "🏷️", "Multi-Label", "Assign multiple labels to an image simultaneously."),
             ("image_segmentation", "🧩", "Segmentation", "Pixel-level classification (masks)."),
             ("object_detection", "🎯", "Detection", "Find and bound objects in an image."),
+                        ("image_anomaly_detection", "🚨", "Anomaly Detection", "Detect whether an image is anomalous or normal."),
+                        ("pose_estimation", "🕺", "Pose Estimation", "Estimate keypoints / body joints in images."),
         ]
         
         st.markdown("<h4 style='margin-bottom:12px;'>1. Select Vision Task</h4>", unsafe_allow_html=True)
         cur_cv_task = st.session_state.get('wiz_cv_task', 'image_classification')
-        cols_cv = st.columns(4)
+        cols_cv = st.columns(len(CV_TASKS))
         for i, (tid, ticon, tname, tdesc) in enumerate(CV_TASKS):
             with cols_cv[i]:
                 is_sel = (tid == cur_cv_task)
@@ -3010,7 +3060,7 @@ if current_main_section == "⚙️ AutoML":
             st.markdown("#### 2. Model & Data Configuration")
             # --- Backbone Selection ---
             backbones = ['resnet18', 'resnet50', 'mobilenet_v2', 'efficientnet_b0', 'densenet121', 'vgg16']
-            if cv_task in ['image_classification', 'image_multi_label']:
+            if cv_task in ['image_classification', 'image_multi_label', 'image_anomaly_detection']:
                 selected_backbone = st.selectbox("Network Backbone", backbones, index=0, key="cv_backbone",
                     help="Choose the CNN architecture to act as the feature extractor.")
             else:
@@ -3023,7 +3073,7 @@ if current_main_section == "⚙️ AutoML":
             
             # Select Image Archive (ZIP)
             cv_ds_sel = st.selectbox("Select Image Archive (ZIP dataset)", [""] + datasets, key="cv_ds_sel",
-                help="Classification: zip of class-named folders. Multi-label: zip of images. Seg: zip of images + masks.")
+                help="Classification/Anomaly: zip of class-named folders. Multi-label: zip of images + CSV labels. Segmentation: zip of images + masks. Pose/Detection: zip of images with compatible annotations.")
             cv_upload_path = None
             if cv_ds_sel:
                 versions = get_cached_versions(cv_ds_sel)
@@ -3105,7 +3155,7 @@ if current_main_section == "⚙️ AutoML":
             elif cv_task == 'image_multi_label' and not label_csv_path:
                 st.error("Please upload the label CSV for multi-label tasks.")
             else:
-                from cv_engine import CVAutoMLTrainer
+                from src.engines.vision import CVAutoMLTrainer
                 trainer = CVAutoMLTrainer(task_type=cv_task, backbone=selected_backbone)
                 
                 st.divider()
@@ -3124,7 +3174,10 @@ if current_main_section == "⚙️ AutoML":
                     m_epoch.metric("Epoch", f"{epoch+1}/{epochs}")
                     m_train_loss.metric("Train Loss", f"{loss:.4f}")
                     m_val_loss.metric("Val Loss", f"{val_loss:.4f}" if val_loss else "N/A")
-                    m_val_acc.metric("Val Acc" if cv_task != "image_segmentation" else "Val Score", f"{val_acc:.4f}" if val_acc else "N/A")
+                    m_val_acc.metric(
+                        "Val Acc" if cv_task not in ["image_segmentation", "object_detection", "pose_estimation"] else "Val Score",
+                        f"{val_acc:.4f}" if val_acc else "N/A"
+                    )
                     
                     hist_data['epoch'].append(epoch+1)
                     hist_data['loss'].append(loss)
@@ -3189,7 +3242,7 @@ if current_main_section == "⚙️ AutoML":
                             st.session_state['cv_run_id'] = run.info.run_id
                             st.divider()
                             st.markdown("### 🧩 Model Consumption Code")
-                            code = get_cv_consumption_code(selected_backbone, run.info.run_id, cv_task, selected_backbone)
+                            code = get_cv_consumption_code("model", run.info.run_id, cv_task, selected_backbone)
                             st.code(code, language='python')
                             
                     except Exception as e:
@@ -3231,7 +3284,7 @@ if current_main_section == "⚙️ AutoML":
                         fig.add_vline(x=0.5, line_dash="dash", line_color="red", annotation_text="Threshold")
                         st.plotly_chart(fig, use_container_width=True)
                     
-                    elif trainer.task_type == 'image_classification':
+                    elif trainer.task_type in ['image_classification', 'image_anomaly_detection']:
                         probs = prediction['probabilities']
                         names = prediction.get('class_names', [str(i) for i in range(len(probs))])
                         df_p = pd.DataFrame({'Class': names, 'Probability': probs})
@@ -3244,13 +3297,18 @@ if current_main_section == "⚙️ AutoML":
                     elif trainer.task_type == 'image_segmentation':
                         mask_img = Image.fromarray((prediction * (255 // (prediction.max() if prediction.max() > 0 else 1))).astype(np.uint8))
                         st.image(mask_img, caption="Predicted Mask", use_container_width=True)
+                    elif trainer.task_type in ['object_detection', 'pose_estimation']:
+                        if isinstance(prediction, dict):
+                            st.json({k: str(type(v)) for k, v in prediction.items()})
+                        else:
+                            st.write(prediction)
 
                     try:
                         os.remove(img_path)
                     except: pass
             
             st.markdown("#### Architect Insight")
-            from cv_engine import get_cv_explanation
+            from src.engines.vision import get_cv_explanation
             cfg_used = {'lr': st.session_state.get('cv_lr', 'N/A'), 'batch_size': st.session_state.get('cv_batch', 'N/A')}
             insight = get_cv_explanation(trainer.backbone, cfg_used)
             st.info(f"🧠 **Model Insight:** {insight}")
@@ -4043,18 +4101,32 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                                 
                                 loaded_model.eval()
                                 with torch.no_grad():
-                                    outputs = loaded_model(img_t)
+                                    if task_type in ['object_detection', 'pose_estimation']:
+                                        outputs = loaded_model([img_t.squeeze(0)])
+                                    else:
+                                        outputs = loaded_model(img_t)
                                 
-                                if task_type == 'image_classification':
+                                if task_type in ['image_classification', 'image_anomaly_detection']:
                                     probs = torch.nn.functional.softmax(outputs, dim=1)[0]
                                     top_prob, top_class = torch.max(probs, dim=0)
                                     st.success(f"**Prediction Class Index:** {top_class.item()} (Confidence: {top_prob.item():.2%})")
+                                    st.json({"probs": probs.tolist()})
+                                elif task_type == 'image_multi_label':
+                                    probs = torch.sigmoid(outputs)[0]
+                                    st.success("Multi-label probabilities generated.")
                                     st.json({"probs": probs.tolist()})
                                 elif task_type == 'image_segmentation':
                                     mask = outputs.argmax(dim=1).squeeze().numpy()
                                     st.success("Segmentation Mask Generated!")
                                     mask_img = Image.fromarray((mask * (255 // (mask.max() if mask.max() > 0 else 1))).astype('uint8'))
                                     st.image(mask_img, caption="Predicted Mask")
+                                elif task_type in ['object_detection', 'pose_estimation']:
+                                    pred_obj = outputs[0] if isinstance(outputs, list) else outputs
+                                    st.success("Structured detection/pose output generated.")
+                                    if isinstance(pred_obj, dict):
+                                        st.json({k: str(type(v)) for k, v in pred_obj.items()})
+                                    else:
+                                        st.write(pred_obj)
                                 else:
                                     st.success("Prediction Generated!")
                                     st.write(outputs.numpy())
@@ -4064,8 +4136,3 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
             st.markdown("</div>", unsafe_allow_html=True)
         else:
             st.info("Deploy a model above to enable the Live Inference Playground.")
-
-
-
-
-

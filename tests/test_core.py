@@ -103,6 +103,57 @@ def test_automl_trainer_filtering():
     models_no_dl = trainer_no_dl.get_available_models()
     assert not any(m in ['mlp', 'transformer'] for m in models_no_dl)
 
+
+def test_automl_trainer_multilabel():
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({
+        'feature1': rng.random(120),
+        'feature2': rng.random(120),
+        'target_a': np.array([0, 1] * 60),
+        'target_b': np.array([1 if i % 3 == 0 else 0 for i in range(120)]),
+    })
+    processor = AutoMLDataProcessor(target_column=['target_a', 'target_b'])
+    X_proc, y_proc = processor.fit_transform(df)
+
+    trainer = AutoMLTrainer(task_type='multi_label', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1, selected_models=['multilabel_logistic_regression'])
+
+    assert model is not None
+    metrics, _ = trainer.evaluate(X_proc, y_proc)
+    assert 'f1_micro' in metrics
+
+
+def test_automl_trainer_ranking(sample_data):
+    sample_data = sample_data.copy()
+    sample_data['target'] = np.random.rand(len(sample_data))
+    processor = AutoMLDataProcessor(target_column='target')
+    X_proc, y_proc = processor.fit_transform(sample_data)
+
+    trainer = AutoMLTrainer(task_type='ranking', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, y_proc, n_trials=1, selected_models=['ranking_linear_regression'])
+
+    assert model is not None
+    metrics, _ = trainer.evaluate(X_proc, y_proc)
+    assert 'ndcg' in metrics
+
+
+def test_automl_trainer_association_rules():
+    df = pd.DataFrame({
+        'milk': [1, 1, 0, 1, 0, 1],
+        'bread': [1, 1, 1, 0, 1, 1],
+        'eggs': [0, 1, 0, 0, 1, 1],
+        'butter': [1, 0, 1, 1, 0, 1],
+    })
+    processor = AutoMLDataProcessor(target_column=None)
+    X_proc, _ = processor.fit_transform(df)
+
+    trainer = AutoMLTrainer(task_type='association_rules', preset='test', ensemble_mode='single', use_deep_learning=False)
+    model = trainer.train(X_proc, None, n_trials=1, selected_models=['association_rules_miner'])
+
+    assert model is not None
+    metrics, _ = trainer.evaluate(X_proc)
+    assert 'rule_score' in metrics
+
 def test_mlflow_dummy_fallback(sample_data):
     """Test that MLflow gracefully falls back when tracking URI/DB is corrupted or unavailable."""
     from src.tracking.mlflow import get_run_details

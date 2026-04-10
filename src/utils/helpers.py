@@ -89,10 +89,12 @@ try:
         
     print("Raw Model Output (Logits/Outputs):", outputs)
     
-    # If classification/multilabel:
-    if '{task_type}' in ['image_classification', 'image_multi_label']:
+    # If classification/anomaly/multilabel:
+    if '{task_type}' in ['image_classification', 'image_anomaly_detection', 'image_multi_label']:
         probs = torch.sigmoid(outputs) if '{task_type}' == 'image_multi_label' else torch.softmax(outputs, dim=1)
         print("Positive Probabilities:", probs)
+    elif '{task_type}' in ['object_detection', 'pose_estimation']:
+        print("Detection/Pose structured output:", outputs)
 except Exception as e:
     print(f"Error inferring image: {{e}}")
 """

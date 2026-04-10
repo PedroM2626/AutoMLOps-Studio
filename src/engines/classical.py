@@ -30,14 +30,18 @@ from sklearn.ensemble import (
 )
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
-from sklearn.naive_bayes import GaussianNB
+from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
+from sklearn.multioutput import MultiOutputClassifier
+from sklearn.covariance import EllipticEnvelope
+from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
     mean_squared_error, mean_absolute_error, r2_score, confusion_matrix,
     balanced_accuracy_score, cohen_kappa_score, matthews_corrcoef, log_loss,
     median_absolute_error, explained_variance_score, mean_absolute_percentage_error,
-    mean_squared_log_error, silhouette_score, calinski_harabasz_score, davies_bouldin_score
+    mean_squared_log_error, silhouette_score, calinski_harabasz_score, davies_bouldin_score,
+    hamming_loss, ndcg_score
 )
 from sklearn.linear_model import (
     LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, 
@@ -89,6 +93,93 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 logger = logging.getLogger(__name__)
+
+
+class AssociationRuleMiner(BaseEstimator):
+    """Simple pairwise association-rule miner for binary tabular features."""
+
+    def __init__(self, min_support=0.05, min_confidence=0.2, min_lift=1.0, max_rules=200):
+        self.min_support = min_support
+        self.min_confidence = min_confidence
+        self.min_lift = min_lift
+        self.max_rules = max_rules
+
+    def _to_binary_df(self, X):
+        if hasattr(X, "toarray"):
+            X = X.toarray()
+        if isinstance(X, pd.DataFrame):
+            df = X.copy()
+        else:
+            df = pd.DataFrame(X)
+        return (df.fillna(0) > 0).astype(int)
+
+    def fit(self, X, y=None):
+        Xb = self._to_binary_df(X)
+        n_rows = len(Xb)
+        if n_rows == 0:
+            self.rules_ = pd.DataFrame(columns=["antecedent", "consequent", "support", "confidence", "lift"])
+            self.rule_count_ = 0
+            self.avg_confidence_ = 0.0
+            self.avg_lift_ = 0.0
+            self.rule_score_ = 0.0
+            return self
+
+        supports = Xb.mean(axis=0)
+        cols = list(Xb.columns)
+        rules = []
+        arr = Xb.values
+
+        for i, a in enumerate(cols):
+            a_vals = arr[:, i]
+            a_support = float(supports.iloc[i])
+            if a_support <= 0:
+                continue
+            for j, b in enumerate(cols):
+                if i == j:
+                    continue
+                b_support = float(supports.iloc[j])
+                if b_support <= 0:
+                    continue
+
+                both = np.logical_and(a_vals == 1, arr[:, j] == 1)
+                support_ab = float(np.mean(both))
+                if support_ab < self.min_support:
+                    continue
+
+                confidence = support_ab / max(a_support, 1e-12)
+                lift = confidence / max(b_support, 1e-12)
+                if confidence < self.min_confidence or lift < self.min_lift:
+                    continue
+
+                rules.append(
+                    {
+                        "antecedent": str(a),
+                        "consequent": str(b),
+                        "support": support_ab,
+                        "confidence": confidence,
+                        "lift": lift,
+                    }
+                )
+
+        if rules:
+            rules_df = pd.DataFrame(rules).sort_values(["lift", "confidence", "support"], ascending=False)
+            if len(rules_df) > self.max_rules:
+                rules_df = rules_df.head(self.max_rules)
+        else:
+            rules_df = pd.DataFrame(columns=["antecedent", "consequent", "support", "confidence", "lift"])
+
+        self.rules_ = rules_df
+        self.rule_count_ = int(len(rules_df))
+        self.avg_confidence_ = float(rules_df["confidence"].mean()) if self.rule_count_ else 0.0
+        self.avg_lift_ = float(rules_df["lift"].mean()) if self.rule_count_ else 0.0
+
+        # Compact optimization-friendly score.
+        self.rule_score_ = float(self.avg_confidence_ * self.avg_lift_ * np.log1p(self.rule_count_))
+        return self
+
+    def predict(self, X):
+        n = len(X) if hasattr(X, "__len__") else 1
+        return np.zeros(n, dtype=int)
 
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
@@ -184,6 +275,23 @@ class AutoMLTrainer:
             if name == 'bagging': return BaggingRegressor(random_state=random_state)
             if name == 'hist_gradient_boosting': return HistGradientBoostingRegressor(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=self.n_jobs, random_seed=random_state)
+        elif self.task_type == 'ranking':
+            if name == 'ranking_linear_regression': return LinearRegression()
+            if name == 'ranking_random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
+            if name == 'ranking_xgboost': return xgb.XGBRegressor(random_state=random_state)
+            if name == 'ranking_lightgbm': return lgb.LGBMRegressor(random_state=random_state)
+        elif self.task_type == 'multi_label':
+            if name == 'multilabel_logistic_regression':
+                return MultiOutputClassifier(LogisticRegression(max_iter=1000, random_state=random_state))
+            if name == 'multilabel_random_forest':
+                return MultiOutputClassifier(RandomForestClassifier(n_estimators=100, random_state=random_state))
+            if name == 'multilabel_extra_trees':
+                return MultiOutputClassifier(ExtraTreesClassifier(n_estimators=100, random_state=random_state))
+            if name == 'multilabel_knn':
+                return MultiOutputClassifier(KNeighborsClassifier())
+        elif self.task_type == 'association_rules':
+            if name == 'association_rules_miner':
+                return AssociationRuleMiner()
         elif self.task_type == 'dimensionality_reduction':
             if name == 'pca': return PCA(random_state=random_state)
             if name == 'truncated_svd': return TruncatedSVD(random_state=random_state)
@@ -577,6 +685,71 @@ class AutoMLTrainer:
                     n_jobs=-1
                 )
             }
+        elif self.task_type == 'ranking':
+            models_config = {
+                'ranking_linear_regression': lambda t: LinearRegression(),
+                'ranking_random_forest': lambda t: RandomForestRegressor(
+                    n_estimators=t.suggest_int('rank_rf_n_estimators', 50, 300),
+                    max_depth=t.suggest_int('rank_rf_max_depth', 3, 30),
+                    random_state=random_state,
+                ),
+                'ranking_xgboost': lambda t: xgb.XGBRegressor(
+                    n_estimators=t.suggest_int('rank_xgb_n_estimators', 50, 400),
+                    learning_rate=t.suggest_float('rank_xgb_lr', 0.01, 0.3, log=True),
+                    max_depth=t.suggest_int('rank_xgb_max_depth', 3, 12),
+                    random_state=random_state,
+                ),
+                'ranking_lightgbm': lambda t: lgb.LGBMRegressor(
+                    n_estimators=t.suggest_int('rank_lgb_n_estimators', 50, 400),
+                    learning_rate=t.suggest_float('rank_lgb_lr', 0.01, 0.3, log=True),
+                    num_leaves=t.suggest_int('rank_lgb_num_leaves', 15, 128),
+                    verbosity=-1,
+                    random_state=random_state,
+                ),
+            }
+        elif self.task_type == 'multi_label':
+            models_config = {
+                'multilabel_logistic_regression': lambda t: MultiOutputClassifier(
+                    LogisticRegression(
+                        C=t.suggest_float('ml_lr_C', 0.01, 20.0, log=True),
+                        solver=t.suggest_categorical('ml_lr_solver', ['lbfgs', 'liblinear', 'saga']),
+                        max_iter=1000,
+                        random_state=random_state,
+                    )
+                ),
+                'multilabel_random_forest': lambda t: MultiOutputClassifier(
+                    RandomForestClassifier(
+                        n_estimators=t.suggest_int('ml_rf_n_estimators', 50, 300),
+                        max_depth=t.suggest_int('ml_rf_max_depth', 3, 40),
+                        min_samples_split=t.suggest_int('ml_rf_min_samples_split', 2, 12),
+                        random_state=random_state,
+                        n_jobs=self.n_jobs,
+                    )
+                ),
+                'multilabel_extra_trees': lambda t: MultiOutputClassifier(
+                    ExtraTreesClassifier(
+                        n_estimators=t.suggest_int('ml_et_n_estimators', 50, 300),
+                        max_depth=t.suggest_int('ml_et_max_depth', 3, 40),
+                        random_state=random_state,
+                        n_jobs=self.n_jobs,
+                    )
+                ),
+                'multilabel_knn': lambda t: MultiOutputClassifier(
+                    KNeighborsClassifier(
+                        n_neighbors=t.suggest_int('ml_knn_neighbors', 2, 25),
+                        weights=t.suggest_categorical('ml_knn_weights', ['uniform', 'distance']),
+                    )
+                ),
+            }
+        elif self.task_type == 'association_rules':
+            models_config = {
+                'association_rules_miner': lambda t: AssociationRuleMiner(
+                    min_support=t.suggest_float('ar_min_support', 0.01, 0.3),
+                    min_confidence=t.suggest_float('ar_min_confidence', 0.05, 0.95),
+                    min_lift=t.suggest_float('ar_min_lift', 0.5, 5.0),
+                    max_rules=t.suggest_int('ar_max_rules', 50, 500),
+                )
+            }
         elif self.task_type == 'clustering':
             models_config = {
                 'kmeans': lambda t: KMeans(
@@ -769,12 +942,17 @@ class AutoMLTrainer:
         self.feature_names = feature_names
         self.class_names = class_names
         self._n_features = X_train.shape[1] if hasattr(X_train, 'shape') else (len(X_train[0]) if X_train is not None and len(X_train) > 0 else 2)
+        available_task_models = self._get_models()
         
         # If selected_models is not provided, use the preset list
         if selected_models is None:
-            selected_models_to_filter = preset_config['models']
+            selected_models_to_filter = [m for m in preset_config['models'] if m in available_task_models]
+            if not selected_models_to_filter:
+                selected_models_to_filter = available_task_models
         else:
-            selected_models_to_filter = selected_models
+            selected_models_to_filter = [m for m in selected_models if (m in available_task_models or m in self.custom_models)]
+            if not selected_models_to_filter:
+                selected_models_to_filter = available_task_models
             
         # Apply use_ensemble / use_deep_learning filter, but respect manual selection
         self.selected_models = self._filter_models(selected_models_to_filter, selected_models=selected_models)
@@ -916,8 +1094,11 @@ class AutoMLTrainer:
             
             # Only for methods using explicit holdout (auto_split or manual holdout)
             use_explicit_validation = validation_strategy in ['auto_split', 'holdout']
+            if self.task_type in ['ranking', 'multi_label', 'association_rules']:
+                # These task types currently use explicit validation for robust and simple scoring.
+                use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series', 'ranking', 'multi_label', 'association_rules']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -976,7 +1157,7 @@ class AutoMLTrainer:
             trial_params['task_type'] = self.task_type
             
             try:
-                if self.task_type in ['classification', 'regression', 'time_series']:
+                if self.task_type in ['classification', 'regression', 'time_series', 'ranking', 'multi_label']:
                     if use_explicit_validation:
                         logger.info(f"DEBUG: fit() called. X_tr type: {type(X_tr)}, shape: {X_tr.shape if hasattr(X_tr, 'shape') else len(X_tr)}")
                         logger.info(f"DEBUG: y_tr type: {type(y_tr)}, shape: {y_tr.shape if hasattr(y_tr, 'shape') else len(y_tr)}")
@@ -1012,6 +1193,39 @@ class AutoMLTrainer:
                                 y_prob_val = model.predict_proba(X_val)
                                 trial_metrics['roc_auc'] = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
                             except: pass
+                        elif self.task_type == 'multi_label':
+                            trial_metrics['subset_accuracy'] = accuracy_score(y_val, y_pred_val)
+                            trial_metrics['f1_micro'] = f1_score(y_val, y_pred_val, average='micro', zero_division=0)
+                            trial_metrics['precision_micro'] = precision_score(y_val, y_pred_val, average='micro', zero_division=0)
+                            trial_metrics['recall_micro'] = recall_score(y_val, y_pred_val, average='micro', zero_division=0)
+                            trial_metrics['hamming_loss'] = hamming_loss(y_val, y_pred_val)
+
+                            if optimization_metric == 'subset_accuracy':
+                                score = trial_metrics['subset_accuracy']
+                            elif optimization_metric == 'precision_micro':
+                                score = trial_metrics['precision_micro']
+                            elif optimization_metric == 'recall_micro':
+                                score = trial_metrics['recall_micro']
+                            elif optimization_metric == 'hamming_loss':
+                                score = -trial_metrics['hamming_loss']
+                            else:
+                                score = trial_metrics['f1_micro']
+                        elif self.task_type == 'ranking':
+                            y_true_rank = np.asarray(y_val).ravel()
+                            y_pred_rank = np.asarray(y_pred_val).ravel()
+                            trial_metrics['rmse'] = np.sqrt(mean_squared_error(y_true_rank, y_pred_rank))
+                            trial_metrics['mae'] = mean_absolute_error(y_true_rank, y_pred_rank)
+                            try:
+                                trial_metrics['ndcg'] = float(ndcg_score([y_true_rank], [y_pred_rank]))
+                            except Exception:
+                                trial_metrics['ndcg'] = 0.0
+
+                            if optimization_metric in ['rmse', 'mae']:
+                                score = -trial_metrics[optimization_metric]
+                            elif optimization_metric == 'ndcg':
+                                score = trial_metrics['ndcg']
+                            else:
+                                score = trial_metrics['ndcg']
                         else:
                             trial_metrics['r2'] = r2_score(y_val, y_pred_val)
                             trial_metrics['rmse'] = np.sqrt(mean_squared_error(y_val, y_pred_val))
@@ -1097,6 +1311,24 @@ class AutoMLTrainer:
                                 # Re-fit full for the final model artifact
                                 model.fit(X_tr, y_tr)
                             except: pass
+                        elif self.task_type == 'multi_label' and hasattr(model, 'predict'):
+                            try:
+                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
+                                model.fit(X_sub_train, y_sub_train)
+                                y_sub_pred = model.predict(X_sub_val)
+                                trial_metrics['val_subset_accuracy'] = accuracy_score(y_sub_val, y_sub_pred)
+                                trial_metrics['val_f1_micro'] = f1_score(y_sub_val, y_sub_pred, average='micro', zero_division=0)
+                                model.fit(X_tr, y_tr)
+                            except:
+                                pass
+
+                elif self.task_type == 'association_rules':
+                    model.fit(X_tr)
+                    trial_metrics['rule_count'] = int(getattr(model, 'rule_count_', 0))
+                    trial_metrics['avg_confidence'] = float(getattr(model, 'avg_confidence_', 0.0))
+                    trial_metrics['avg_lift'] = float(getattr(model, 'avg_lift_', 0.0))
+                    trial_metrics['rule_score'] = float(getattr(model, 'rule_score_', 0.0))
+                    score = trial_metrics['rule_score']
                         
                 elif self.task_type == 'anomaly_detection':
                     model.fit(X_tr)
@@ -1152,6 +1384,8 @@ class AutoMLTrainer:
             # Synchronize the final score with the chosen optimization metric to ensure correct display in the UI
             if optimization_metric in trial_metrics:
                 score = trial_metrics[optimization_metric]
+                if optimization_metric in {'rmse', 'mae', 'mape', 'msle', 'hamming_loss', 'log_loss'}:
+                    score = -score
             
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
@@ -2130,6 +2364,45 @@ class AutoMLTrainer:
                 return TweedieRegressor(**{k.replace('tweedie_', ''): v for k, v in params.items() if k.startswith('tweedie_')})
             if name == 'ransac': return RANSACRegressor()
             if name == 'theil_sen': return TheilSenRegressor()
+        elif self.task_type == 'ranking':
+            if name == 'ranking_linear_regression':
+                return LinearRegression()
+            if name == 'ranking_random_forest':
+                rank_params = {k.replace('rank_rf_', ''): v for k, v in params.items() if k.startswith('rank_rf_')}
+                return RandomForestRegressor(**rank_params)
+            if name == 'ranking_xgboost':
+                rank_params = {k.replace('rank_xgb_', ''): v for k, v in params.items() if k.startswith('rank_xgb_')}
+                return xgb.XGBRegressor(**rank_params)
+            if name == 'ranking_lightgbm':
+                rank_params = {k.replace('rank_lgb_', ''): v for k, v in params.items() if k.startswith('rank_lgb_')}
+                return lgb.LGBMRegressor(verbosity=-1, **rank_params)
+        elif self.task_type == 'multi_label':
+            if name == 'multilabel_logistic_regression':
+                ml_params = {k.replace('ml_lr_', ''): v for k, v in params.items() if k.startswith('ml_lr_')}
+                return MultiOutputClassifier(LogisticRegression(max_iter=1000, **ml_params))
+            if name == 'multilabel_random_forest':
+                ml_params = {k.replace('ml_rf_', ''): v for k, v in params.items() if k.startswith('ml_rf_')}
+                return MultiOutputClassifier(RandomForestClassifier(**ml_params))
+            if name == 'multilabel_extra_trees':
+                ml_params = {k.replace('ml_et_', ''): v for k, v in params.items() if k.startswith('ml_et_')}
+                return MultiOutputClassifier(ExtraTreesClassifier(**ml_params))
+            if name == 'multilabel_knn':
+                ml_params = {k.replace('ml_knn_', ''): v for k, v in params.items() if k.startswith('ml_knn_')}
+                if 'neighbors' in ml_params:
+                    ml_params['n_neighbors'] = ml_params.pop('neighbors')
+                return MultiOutputClassifier(KNeighborsClassifier(**ml_params))
+        elif self.task_type == 'association_rules':
+            if name == 'association_rules_miner':
+                ar_params = {}
+                if 'ar_min_support' in params:
+                    ar_params['min_support'] = params['ar_min_support']
+                if 'ar_min_confidence' in params:
+                    ar_params['min_confidence'] = params['ar_min_confidence']
+                if 'ar_min_lift' in params:
+                    ar_params['min_lift'] = params['ar_min_lift']
+                if 'ar_max_rules' in params:
+                    ar_params['max_rules'] = params['ar_max_rules']
+                return AssociationRuleMiner(**ar_params)
         elif self.task_type == 'clustering':
             if name == 'kmeans': 
                 return KMeans(n_clusters=params.get('km_n_clusters', 8), n_init=10)
@@ -2171,6 +2444,17 @@ class AutoMLTrainer:
 
     def evaluate(self, X_test, y_test=None):
         if y_test is not None:
+            if self.task_type == 'association_rules':
+                self.best_model.fit(X_test)
+                y_pred = self.best_model.predict(X_test)
+                metrics = {
+                    'rule_count': int(getattr(self.best_model, 'rule_count_', 0)),
+                    'avg_confidence': float(getattr(self.best_model, 'avg_confidence_', 0.0)),
+                    'avg_lift': float(getattr(self.best_model, 'avg_lift_', 0.0)),
+                    'rule_score': float(getattr(self.best_model, 'rule_score_', 0.0)),
+                }
+                return metrics, y_pred
+
             y_pred = self.best_model.predict(X_test)
             metrics = {}
             
@@ -2190,13 +2474,24 @@ class AutoMLTrainer:
                 except:
                     metrics['roc_auc'] = 0.5
                     metrics['log_loss'] = 0.0
-            elif self.task_type in ['regression', 'time_series']:
+            elif self.task_type == 'multi_label':
+                metrics['subset_accuracy'] = accuracy_score(y_test, y_pred)
+                metrics['f1_micro'] = f1_score(y_test, y_pred, average='micro', zero_division=0)
+                metrics['precision_micro'] = precision_score(y_test, y_pred, average='micro', zero_division=0)
+                metrics['recall_micro'] = recall_score(y_test, y_pred, average='micro', zero_division=0)
+                metrics['hamming_loss'] = hamming_loss(y_test, y_pred)
+            elif self.task_type in ['regression', 'time_series', 'ranking']:
                 metrics['rmse'] = np.sqrt(mean_squared_error(y_test, y_pred))
                 metrics['mae'] = mean_absolute_error(y_test, y_pred)
                 metrics['median_ae'] = median_absolute_error(y_test, y_pred)
                 metrics['r2'] = r2_score(y_test, y_pred)
                 metrics['explained_variance'] = explained_variance_score(y_test, y_pred)
                 metrics['mape'] = mean_absolute_percentage_error(y_test, y_pred)
+                if self.task_type == 'ranking':
+                    try:
+                        metrics['ndcg'] = float(ndcg_score([np.asarray(y_test).ravel()], [np.asarray(y_pred).ravel()]))
+                    except Exception:
+                        metrics['ndcg'] = 0.0
                 try:
                     metrics['msle'] = mean_squared_log_error(y_test, np.clip(y_pred, 0, None))
                 except:
@@ -2210,7 +2505,6 @@ class AutoMLTrainer:
                 metrics['accuracy'] = accuracy_score(y_test, y_pred_mapped)
                 metrics['f1'] = f1_score(y_test, y_pred_mapped)
                 metrics['n_anomalies'] = int(np.sum(y_pred == -1))
-                
             return metrics, y_pred
         else:
             # Clustering or Anomaly Detection without y_test
@@ -2228,6 +2522,16 @@ class AutoMLTrainer:
                 metrics = {
                     'n_anomalies': int(np.sum(y_pred == -1)),
                     'anomaly_ratio': float(np.sum(y_pred == -1) / len(y_pred))
+                }
+                return metrics, y_pred
+            elif self.task_type == 'association_rules':
+                self.best_model.fit(X_test)
+                y_pred = self.best_model.predict(X_test)
+                metrics = {
+                    'rule_count': int(getattr(self.best_model, 'rule_count_', 0)),
+                    'avg_confidence': float(getattr(self.best_model, 'avg_confidence_', 0.0)),
+                    'avg_lift': float(getattr(self.best_model, 'avg_lift_', 0.0)),
+                    'rule_score': float(getattr(self.best_model, 'rule_score_', 0.0)),
                 }
                 return metrics, y_pred
 
@@ -2449,6 +2753,44 @@ class AutoMLTrainer:
             },
             'stacking_ensemble': {
                 'stacking_cv': ('int', 2, 10, 5)
+            },
+            'ranking_linear_regression': {},
+            'ranking_random_forest': {
+                'rank_rf_n_estimators': ('int', 50, 400, 120),
+                'rank_rf_max_depth': ('int', 3, 40, 10)
+            },
+            'ranking_xgboost': {
+                'rank_xgb_n_estimators': ('int', 50, 500, 150),
+                'rank_xgb_lr': ('float', 0.01, 0.3, 0.1),
+                'rank_xgb_max_depth': ('int', 3, 12, 6)
+            },
+            'ranking_lightgbm': {
+                'rank_lgb_n_estimators': ('int', 50, 500, 150),
+                'rank_lgb_lr': ('float', 0.01, 0.3, 0.1),
+                'rank_lgb_num_leaves': ('int', 15, 128, 31)
+            },
+            'multilabel_logistic_regression': {
+                'ml_lr_C': ('float', 0.01, 20.0, 1.0),
+                'ml_lr_solver': ('list', ['lbfgs', 'liblinear', 'saga'], 'lbfgs')
+            },
+            'multilabel_random_forest': {
+                'ml_rf_n_estimators': ('int', 50, 400, 120),
+                'ml_rf_max_depth': ('int', 3, 40, 12),
+                'ml_rf_min_samples_split': ('int', 2, 12, 2)
+            },
+            'multilabel_extra_trees': {
+                'ml_et_n_estimators': ('int', 50, 400, 120),
+                'ml_et_max_depth': ('int', 3, 40, 12)
+            },
+            'multilabel_knn': {
+                'ml_knn_neighbors': ('int', 2, 30, 7),
+                'ml_knn_weights': ('list', ['uniform', 'distance'], 'uniform')
+            },
+            'association_rules_miner': {
+                'ar_min_support': ('float', 0.01, 0.3, 0.05),
+                'ar_min_confidence': ('float', 0.05, 0.95, 0.25),
+                'ar_min_lift': ('float', 0.5, 5.0, 1.0),
+                'ar_max_rules': ('int', 50, 500, 200)
             }
         }
 
@@ -2520,6 +2862,21 @@ def get_technical_explanation(model_name, params, task_type):
             'local_outlier_factor': "LOF compares the local density of a point with that of its neighbors to identify outliers.",
             'elliptic_envelope': "Assumes that normal data comes from a Gaussian distribution and detects what is outside the ellipsoid.",
             'one_class_svm': "Learns a boundary that encloses the majority of normal data, classifying what is outside as an anomaly."
+        },
+        'ranking': {
+            'ranking_linear_regression': "Linear baseline for ranking signals; useful for fast, interpretable ordering.",
+            'ranking_random_forest': "Random Forest ranking baseline that captures non-linear relevance patterns.",
+            'ranking_xgboost': "Gradient-boosted trees optimized for high-quality ranking through non-linear interactions.",
+            'ranking_lightgbm': "LightGBM regressor variant used to estimate relevance scores and compute ranking quality (NDCG)."
+        },
+        'multi_label': {
+            'multilabel_logistic_regression': "One-vs-rest logistic model per label for scalable multi-label prediction.",
+            'multilabel_random_forest': "MultiOutput Random Forest, one classifier per label with robust non-linear decision boundaries.",
+            'multilabel_extra_trees': "Extra Trees variant for multi-label data, emphasizing variance reduction with random splits.",
+            'multilabel_knn': "Neighbor-based multi-label classifier for local label co-occurrence patterns."
+        },
+        'association_rules': {
+            'association_rules_miner': "Pairwise market-basket style rule mining over binary features with support/confidence/lift constraints."
         }
     }
     

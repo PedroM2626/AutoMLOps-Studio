@@ -16,6 +16,9 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
     def setUp(self):
         self.trainer_cls = AutoMLTrainer(task_type='classification')
         self.trainer_reg = AutoMLTrainer(task_type='regression')
+        self.trainer_rank = AutoMLTrainer(task_type='ranking')
+        self.trainer_multilabel = AutoMLTrainer(task_type='multi_label')
+        self.trainer_assoc = AutoMLTrainer(task_type='association_rules')
 
     def test_supported_models_unified(self):
         """Test if get_supported_models returns the correct unified list."""
@@ -30,6 +33,16 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
         models_reg = self.trainer_reg.get_supported_models()
         self.assertIn('sgd_regressor', models_reg)
         self.assertIn('svm', models_reg) # SVR
+
+        models_rank = self.trainer_rank.get_supported_models()
+        self.assertIn('ranking_linear_regression', models_rank)
+        self.assertIn('ranking_random_forest', models_rank)
+
+        models_multilabel = self.trainer_multilabel.get_supported_models()
+        self.assertIn('multilabel_logistic_regression', models_multilabel)
+
+        models_assoc = self.trainer_assoc.get_supported_models()
+        self.assertIn('association_rules_miner', models_assoc)
 
     def test_linear_svc_params_interface(self):
         """Simulate manual parameter configuration for LinearSVC."""

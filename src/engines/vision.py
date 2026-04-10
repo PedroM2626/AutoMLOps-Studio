@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision import datasets, models, transforms
 from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
+from torchvision.models.detection import keypointrcnn_resnet50_fpn, KeypointRCNN_ResNet50_FPN_Weights
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,8 @@ class CVAutoMLTrainer:
         ----------
         task_type : str
             One of: 'image_classification', 'image_multi_label',
-                    'image_segmentation', 'object_detection'
+                'image_segmentation', 'object_detection',
+                'image_anomaly_detection', 'pose_estimation'
         num_classes : int
             Number of output classes / labels.
         backbone : str
@@ -172,6 +174,10 @@ class CVAutoMLTrainer:
             in_features = model.roi_heads.box_predictor.cls_score.in_features
             from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
             model.roi_heads.box_predictor = FastRCNNPredictor(in_features, self.num_classes)
+            return model.to(self.device)
+
+        elif self.task_type == 'pose_estimation':
+            model = keypointrcnn_resnet50_fpn(weights=KeypointRCNN_ResNet50_FPN_Weights.DEFAULT)
             return model.to(self.device)
 
         else:
@@ -257,7 +263,7 @@ class CVAutoMLTrainer:
                 n_epochs, batch_size, callback, segmentation=True)
 
         # ------ Object Detection (demo stub) ------
-        elif self.task_type == 'object_detection':
+        elif self.task_type in ['object_detection', 'pose_estimation']:
             model = self.get_model()
             optimizer = self._make_optimizer(model, optimizer_name, lr)
             for epoch in range(n_epochs):
@@ -298,7 +304,7 @@ class CVAutoMLTrainer:
             return self._run_multilabel_loop(
                 model, train_loader, val_loader, criterion, optimizer, n_epochs, callback)
 
-        # ------ Standard Classification ------
+        # ------ Standard Classification / Image Anomaly Detection ------
         else:
             try:
                 full_dataset = datasets.ImageFolder(data_dir, transform=train_tf)
@@ -500,12 +506,17 @@ class CVAutoMLTrainer:
         input_tensor = transform(img).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            outputs = self.best_model(input_tensor)
+            if self.task_type in ['object_detection', 'pose_estimation']:
+                outputs = self.best_model([input_tensor.squeeze(0)])
+            else:
+                outputs = self.best_model(input_tensor)
             if self.task_type == 'image_segmentation':
                 logits = outputs['out']
                 _, predicted = logits.max(1)
                 return predicted.squeeze(0).cpu().numpy()
             elif self.task_type == 'object_detection':
+                return outputs[0]
+            elif self.task_type == 'pose_estimation':
                 return outputs[0]
             elif self.task_type == 'image_multi_label':
                 probs = torch.sigmoid(outputs).squeeze(0).cpu().numpy()
@@ -540,6 +551,8 @@ def get_cv_explanation(model_name, params):
         'vgg16':          'VGG16 uses a simple and deep sequential architecture with 3x3 kernels, easy to understand but heavier in parameters.',
         'deeplabv3':      'DeepLabV3 uses Atrous Spatial Pyramid Pooling (ASPP) to capture objects at multiple scales in semantic segmentation.',
         'faster_rcnn':    'Faster R-CNN uses an integrated Region Proposal Network (RPN) to locate and classify objects simultaneously.',
+        'pose_estimation':'Pose estimation predicts keypoints (joints) for each detected person/object to describe spatial body structure.',
+        'image_anomaly_detection': 'Image anomaly detection learns visual normality patterns and flags samples that diverge from expected structure.',
         'lr':       f"The learning rate of {params.get('lr', 'N/A')} controls the weight adjustment speed. Too high causes divergence; too low makes training slow.",
         'batch_size': f"Batch size of {params.get('batch_size', 'N/A')} defines how many images the model sees before updating weights."
     }

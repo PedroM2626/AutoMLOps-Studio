@@ -23,6 +23,14 @@ class AutoMLDataProcessor:
         self.preprocessor = None
         self.nlp_cols = []
 
+    def _resolve_target_columns(self, df):
+        """Resolve target column(s) present in the given DataFrame."""
+        if isinstance(self.target_column, (list, tuple)):
+            return [c for c in self.target_column if c in df.columns]
+        if isinstance(self.target_column, str) and self.target_column in df.columns:
+            return [self.target_column]
+        return []
+
     def _clean_text_feature(self, df, col):
         """Applies text cleaning to a specific column in DataFrame."""
         if col in df.columns:
@@ -113,9 +121,10 @@ class AutoMLDataProcessor:
         if self.task_type == 'time_series':
             df = self._apply_ts_features(df)
 
-        if self.target_column and self.target_column in df.columns:
-            X = df.drop(columns=[self.target_column])
-            y = df[self.target_column]
+        target_cols = self._resolve_target_columns(df)
+        if target_cols:
+            X = df.drop(columns=target_cols)
+            y = df[target_cols[0]] if len(target_cols) == 1 else df[target_cols].copy()
         else:
             X = df
             y = None
@@ -239,7 +248,9 @@ class AutoMLDataProcessor:
             
         y_processed = None
         if y is not None:
-            if y.dtype == 'object' or y.dtype.name == 'category':
+            if isinstance(y, pd.DataFrame):
+                y_processed = y.to_numpy()
+            elif y.dtype == 'object' or y.dtype.name == 'category':
                 self.label_encoder = LabelEncoder()
                 y_processed = self.label_encoder.fit_transform(y)
             else:
@@ -260,12 +271,17 @@ class AutoMLDataProcessor:
         if df is None or (isinstance(df, pd.DataFrame) and df.empty):
             return None, None
 
-        if self.target_column and self.target_column in df.columns:
-            X = df.drop(columns=[self.target_column])
-            y = df[self.target_column]
-            if hasattr(self, 'label_encoder') and self.label_encoder:
-                try: y = self.label_encoder.transform(y)
-                except: pass 
+        target_cols = self._resolve_target_columns(df)
+        if target_cols:
+            X = df.drop(columns=target_cols)
+            y = df[target_cols[0]] if len(target_cols) == 1 else df[target_cols].copy()
+            if not isinstance(y, pd.DataFrame) and hasattr(self, 'label_encoder') and self.label_encoder:
+                try:
+                    y = self.label_encoder.transform(y)
+                except:
+                    pass
+            elif isinstance(y, pd.DataFrame):
+                y = y.to_numpy()
         else:
             X = df
             y = None
