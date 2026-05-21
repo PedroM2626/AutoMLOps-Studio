@@ -16,9 +16,23 @@
 
 ---
 
-## 🌟 What's New in v5.1.0
+## 🌟 What's New in v5.2.0
 
-### 🤖 Reinforcement Learning Module
+### 🤖 Enhanced Reinforcement Learning Module
+- **Real-Time Monitoring**: Live metrics display during training:
+  - Reward per episode
+  - Moving average (last 100 episodes)
+  - Timesteps completed
+  - Memory usage
+- **Custom Environment Support**: Upload your own Gymnasium-compatible environment files
+- **Common Wrappers**: Quick access to FrameStack, GrayScaleObservation, ResizeObservation, NormalizeObservation, NormalizeReward
+- **Optuna Integration**: Automated hyperparameter optimization with configurable trials
+- **Training History**: Track multiple training runs and compare them side by side
+- **Enhanced Evaluation**: Detailed evaluation metrics (mean, std, min, max) and visualizations
+- **Configuration Saving**: Save and load training configurations (JSON and YAML)
+- **Improved MLflow Integration**: Logging of all hyperparameters, metrics, and config files
+
+### 🤖 Reinforcement Learning Module (v5.1.0)
 - **New RL Page**: Complete interface for training and evaluating reinforcement learning agents
 - **Supported Algorithms**: PPO, DQN, A2C, SAC, TD3 (via Stable Baselines3)
 - **Gymnasium Integration**: Support for standard RL environments (CartPole, MountainCar, LunarLander, etc.)

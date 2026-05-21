@@ -5,8 +5,13 @@ import numpy as np
 import pandas as pd
 import mlflow
 import joblib
-from typing import Dict, Any, Optional, Tuple
+import yaml
+import json
+import psutil
+import gc
+from typing import Dict, Any, Optional, Tuple, List, Callable
 from sklearn.base import BaseEstimator
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -14,24 +19,42 @@ try:
     import gymnasium as gym
     from stable_baselines3 import PPO, DQN, A2C, SAC, TD3
     from stable_baselines3.common.env_util import make_vec_env
-    from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
+    from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv, SubprocVecEnv
     from stable_baselines3.common.monitor import Monitor
-    from stable_baselines3.common.callbacks import BaseCallback, EvalCallback
+    from stable_baselines3.common.callbacks import (
+        BaseCallback, EvalCallback, CheckpointCallback, 
+        StopTrainingOnRewardThreshold, CallbackList
+    )
+    from stable_baselines3.common.atari_wrappers import (
+        FrameStack, GrayScaleObservation, ResizeObservation
+    )
+    import optuna
     STABLE_BASELINES_AVAILABLE = True
 except ImportError:
     STABLE_BASELINES_AVAILABLE = False
 
 
-class MLflowRLCallback(BaseCallback):
-    """Callback for logging RL training metrics to MLflow."""
+class StreamlitRLCallback(BaseCallback):
+    """Callback for real‑time metrics logging for Streamlit UI."""
     
     def __init__(self, verbose=0):
         super().__init__(verbose)
         self.episode_rewards = []
         self.episode_lengths = []
+        self.timesteps_history = []
+        self.loss_history = []
+        self.metrics = {
+            'timesteps': [],
+            'episode_reward': [],
+            'episode_length': [],
+            'mean_reward_100': [],
+            'actor_loss': [],
+            'critic_loss': [],
+            'memory_usage': []
+        }
         
     def _on_training_start(self) -> None:
-        pass
+        self.start_time = datetime.now()
         
     def _on_step(self) -> bool:
         if len(self.model.ep_info_buffer) > 0:
@@ -41,15 +64,23 @@ class MLflowRLCallback(BaseCallback):
             self.episode_rewards.append(reward)
             self.episode_lengths.append(length)
             
+            self.metrics['timesteps'].append(self.num_timesteps)
+            self.metrics['episode_reward'].append(reward)
+            self.metrics['episode_length'].append(length)
+            self.metrics['mean_reward_100'].append(np.mean(self.episode_rewards[-100:]))
+            
+            process = psutil.Process(os.getpid())
+            self.metrics['memory_usage'].append(process.memory_info().rss / 1024 / 1024)
+            
             mlflow.log_metric("episode_reward", reward, step=self.num_timesteps)
             mlflow.log_metric("episode_length", length, step=self.num_timesteps)
-            mlflow.log_metric("mean_reward", np.mean(self.episode_rewards[-100:]), step=self.num_timesteps)
+            mlflow.log_metric("mean_reward_100", np.mean(self.episode_rewards[-100:]), step=self.num_timesteps)
         
         return True
 
 
 class RLTrainer:
-    """Reinforcement Learning trainer for AutoMLOps Studio."""
+    """Reinforcement Learning trainer for AutoMLOps Studio with enhanced features."""
     
     ALGORITHMS = {
         'ppo': PPO,
@@ -67,6 +98,58 @@ class RLTrainer:
         'td3': 'Twin Delayed DDPG (TD3)'
     }
     
+    DEFAULT_HYPERPARAMS = {
+        'ppo': {
+            'learning_rate': 3e-4,
+            'gamma': 0.99,
+            'gae_lambda': 0.95,
+            'n_steps': 2048,
+            'batch_size': 64,
+            'clip_range': 0.2
+        },
+        'dqn': {
+            'learning_rate': 1e-3,
+            'gamma': 0.99,
+            'buffer_size': 1_000_000,
+            'learning_starts': 50_000,
+            'target_update_interval': 10_000
+        },
+        'a2c': {
+            'learning_rate': 7e-4,
+            'gamma': 0.99,
+            'n_steps': 5
+        },
+        'sac': {
+            'learning_rate': 3e-4,
+            'gamma': 0.99,
+            'buffer_size': 1_000_000,
+            'tau': 0.005
+        },
+        'td3': {
+            'learning_rate': 1e-3,
+            'gamma': 0.99,
+            'buffer_size': 1_000_000,
+            'tau': 0.005
+        }
+    }
+    
+    HYPERPARAM_SPACES = {
+        'ppo': {
+            'learning_rate': ('float', 1e-5, 1e-2, True),
+            'gamma': ('float', 0.9, 0.999, False),
+            'n_steps': ('int', 64, 4096, False),
+            'batch_size': ('int', 8, 256, False),
+            'clip_range': ('float', 0.1, 0.4, False)
+        },
+        'dqn': {
+            'learning_rate': ('float', 1e-5, 1e-2, True),
+            'gamma': ('float', 0.9, 0.999, False),
+            'buffer_size': ('int', 10_000, 2_000_000, True),
+            'learning_starts': ('int', 1000, 100_000, False),
+            'target_update_interval': ('int', 1000, 50_000, False)
+        }
+    }
+    
     def __init__(
         self,
         env_id: str = 'CartPole-v1',
@@ -74,12 +157,14 @@ class RLTrainer:
         total_timesteps: int = 10000,
         policy: str = 'MlpPolicy',
         verbose: int = 1,
+        custom_env_path: Optional[str] = None,
+        wrappers: Optional[List[Dict]] = None,
         **kwargs
     ):
         if not STABLE_BASELINES_AVAILABLE:
             raise ImportError(
                 "Stable Baselines3 and Gymnasium are required for RL. "
-                "Install them with: pip install stable-baselines3[extra] gymnasium"
+                "Install them with: pip install stable-baselines3[extra] gymnasium optuna psutil pyyaml"
             )
             
         self.env_id = env_id
@@ -87,10 +172,14 @@ class RLTrainer:
         self.total_timesteps = total_timesteps
         self.policy = policy
         self.verbose = verbose
+        self.custom_env_path = custom_env_path
+        self.wrappers = wrappers or []
         self.kwargs = kwargs
         self.model = None
         self.env = None
         self.eval_env = None
+        self.callback = None
+        self.training_history = []
         
         if self.algorithm not in self.ALGORITHMS:
             raise ValueError(
@@ -98,24 +187,80 @@ class RLTrainer:
                 f"Available: {list(self.ALGORITHMS.keys())}"
             )
     
-    def _create_env(self, eval_mode: bool = False):
-        """Create and wrap the environment."""
+    def _create_env(self, eval_mode: bool = False, custom_env_class=None):
+        """Create and wrap the environment with optional wrappers."""
+        
         def make_env():
-            env = gym.make(self.env_id)
+            if custom_env_class:
+                env = custom_env_class()
+            else:
+                env = gym.make(self.env_id)
+            
+            for wrapper_config in self.wrappers:
+                wrapper_name = wrapper_config.get('name')
+                wrapper_params = wrapper_config.get('params', {})
+                
+                if wrapper_name == 'FrameStack':
+                    from stable_baselines3.common.atari_wrappers import FrameStack
+                    env = FrameStack(env, **wrapper_params)
+                elif wrapper_name == 'GrayScaleObservation':
+                    from stable_baselines3.common.atari_wrappers import GrayScaleObservation
+                    env = GrayScaleObservation(env, **wrapper_params)
+                elif wrapper_name == 'ResizeObservation':
+                    from stable_baselines3.common.atari_wrappers import ResizeObservation
+                    env = ResizeObservation(env, **wrapper_params)
+            
             env = Monitor(env)
             return env
             
         vec_env = DummyVecEnv([make_env])
+        
         if not eval_mode:
-            vec_env = VecNormalize(vec_env, norm_obs=True, norm_reward=True)
+            normalize_obs = any(w.get('name') == 'NormalizeObservation' for w in self.wrappers)
+            normalize_rew = any(w.get('name') == 'NormalizeReward' for w in self.wrappers)
+            
+            if normalize_obs or normalize_rew:
+                vec_env = VecNormalize(
+                    vec_env, 
+                    norm_obs=normalize_obs, 
+                    norm_reward=normalize_rew
+                )
+                
         return vec_env
     
-    def train(self, **kwargs):
-        """Train the RL agent."""
+    def _load_custom_env(self, env_path: str):
+        """Dynamically load a custom environment from a Python file."""
+        import importlib.util
+        
+        spec = importlib.util.spec_from_file_location("custom_env", env_path)
+        custom_env_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(custom_env_module)
+        
+        env_classes = [
+            cls for name, cls in custom_env_module.__dict__.items()
+            if isinstance(cls, type) and issubclass(cls, gym.Env) and cls != gym.Env
+        ]
+        
+        if len(env_classes) == 0:
+            raise ValueError(f"No gym.Env subclass found in {env_path}")
+        elif len(env_classes) > 1:
+            logger.warning(f"Multiple env classes found, using first one: {env_classes[0].__name__}")
+            
+        return env_classes[0]
+    
+    def train(self, use_optuna: bool = False, optuna_trials: int = 20, **kwargs):
+        """Train the RL agent with optional Optuna hyperparameter tuning."""
         logger.info(f"Starting RL training for {self.env_id} with {self.algorithm}")
         
-        self.env = self._create_env(eval_mode=False)
-        self.eval_env = self._create_env(eval_mode=True)
+        custom_env_class = None
+        if self.custom_env_path and os.path.exists(self.custom_env_path):
+            custom_env_class = self._load_custom_env(self.custom_env_path)
+        
+        self.env = self._create_env(eval_mode=False, custom_env_class=custom_env_class)
+        self.eval_env = self._create_env(eval_mode=True, custom_env_class=custom_env_class)
+        
+        if use_optuna:
+            return self._train_with_optuna(optuna_trials=optuna_trials, **kwargs)
         
         eval_callback = EvalCallback(
             self.eval_env,
@@ -123,28 +268,109 @@ class RLTrainer:
             log_path="./tmp/eval_logs",
             eval_freq=1000,
             deterministic=True,
-            render=False
+            render=False,
+            verbose=self.verbose
         )
         
-        mlflow_callback = MLflowRLCallback()
+        checkpoint_callback = CheckpointCallback(
+            save_freq=10000,
+            save_path="./tmp/checkpoints",
+            name_prefix=f"rl_model_{self.algorithm}",
+            verbose=self.verbose
+        )
+        
+        self.callback = StreamlitRLCallback(verbose=self.verbose)
+        
+        callback_list = CallbackList([eval_callback, checkpoint_callback, self.callback])
         
         algo_class = self.ALGORITHMS[self.algorithm]
+        all_hyperparams = {**self.DEFAULT_HYPERPARAMS.get(self.algorithm, {}), **self.kwargs}
         
         self.model = algo_class(
             self.policy,
             self.env,
             verbose=self.verbose,
-            **self.kwargs
+            **all_hyperparams
         )
+        
+        config_dict = {
+            'env_id': self.env_id,
+            'algorithm': self.algorithm,
+            'policy': self.policy,
+            'total_timesteps': self.total_timesteps,
+            'hyperparameters': all_hyperparams,
+            'wrappers': self.wrappers,
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        with open("tmp/rl_config.yaml", "w") as f:
+            yaml.dump(config_dict, f)
+        
+        with open("tmp/rl_config.json", "w") as f:
+            json.dump(config_dict, f, indent=2)
+            
+        mlflow.log_artifact("tmp/rl_config.yaml")
+        mlflow.log_artifact("tmp/rl_config.json")
+        
+        for key, value in all_hyperparams.items():
+            mlflow.log_param(key, value)
         
         self.model.learn(
             total_timesteps=self.total_timesteps,
-            callback=[eval_callback, mlflow_callback],
+            callback=callback_list,
             **kwargs
         )
         
         logger.info("RL training completed!")
         return self.model
+    
+    def _objective(self, trial: optuna.Trial):
+        """Optuna objective function for hyperparameter optimization."""
+        hp_space = self.HYPERPARAM_SPACES.get(self.algorithm, {})
+        params = {}
+        
+        for name, (hp_type, min_val, max_val, log_scale) in hp_space.items():
+            if hp_type == 'float':
+                params[name] = trial.suggest_float(name, min_val, max_val, log=log_scale)
+            elif hp_type == 'int':
+                params[name] = trial.suggest_int(name, min_val, max_val, log=log_scale)
+        
+        algo_class = self.ALGORITHMS[self.algorithm]
+        model = algo_class(self.policy, self.env, verbose=0, **params)
+        
+        eval_callback = EvalCallback(
+            self.eval_env,
+            n_eval_episodes=3,
+            eval_freq=5000,
+            deterministic=True,
+            render=False,
+            verbose=0
+        )
+        
+        model.learn(total_timesteps=min(50000, self.total_timesteps // 2), callback=eval_callback)
+        
+        mean_reward = np.mean(eval_callback.best_mean_reward) if eval_callback.best_mean_reward.size > 0 else -np.inf
+        
+        return mean_reward
+    
+    def _train_with_optuna(self, optuna_trials: int = 20, **kwargs):
+        """Train using Optuna for hyperparameter optimization."""
+        logger.info(f"Starting Optuna hyperparameter optimization with {optuna_trials} trials")
+        
+        study = optuna.create_study(direction='maximize', study_name=f"rl_{self.env_id}_{self.algorithm}")
+        study.optimize(self._objective, n_trials=optuna_trials, show_progress_bar=True)
+        
+        logger.info(f"Best trial: {study.best_trial.number}")
+        logger.info(f"Best reward: {study.best_value}")
+        logger.info(f"Best hyperparameters: {study.best_params}")
+        
+        for key, value in study.best_params.items():
+            mlflow.log_param(f"best_{key}", value)
+        mlflow.log_metric("best_reward", study.best_value)
+        
+        self.kwargs.update(study.best_params)
+        
+        return self.train(use_optuna=False, **kwargs)
     
     def predict(self, observation, deterministic: bool = True):
         """Make predictions using the trained model."""
@@ -154,15 +380,25 @@ class RLTrainer:
         return self.model.predict(observation, deterministic=deterministic)
     
     def save(self, path: str):
-        """Save the trained model."""
+        """Save the trained model and config."""
         if self.model is None:
             raise ValueError("No model to save. Train first.")
             
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.model.save(path)
         
-        if self.env is not None:
+        if self.env and hasattr(self.env, 'save'):
             self.env.save(f"{path}_vec_normalize.pkl")
+            
+        config_dict = {
+            'env_id': self.env_id,
+            'algorithm': self.algorithm,
+            'policy': self.policy,
+            'wrappers': self.wrappers
+        }
+        
+        with open(f"{path}_config.yaml", "w") as f:
+            yaml.dump(config_dict, f)
             
         logger.info(f"Model saved to {path}")
     
@@ -172,9 +408,19 @@ class RLTrainer:
         if not STABLE_BASELINES_AVAILABLE:
             raise ImportError("Stable Baselines3 is required.")
             
-        trainer = cls(env_id=env_id or 'CartPole-v1')
+        config_path = f"{path}_config.yaml"
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f)
+                
+        trainer = cls(
+            env_id=env_id or config.get('env_id', 'CartPole-v1'),
+            algorithm=config.get('algorithm', 'ppo'),
+            policy=config.get('policy', 'MlpPolicy'),
+            wrappers=config.get('wrappers', [])
+        )
         
-        # Try to load with each algorithm
         for algo_name, algo_class in cls.ALGORITHMS.items():
             try:
                 trainer.model = algo_class.load(path)
@@ -183,7 +429,6 @@ class RLTrainer:
             except:
                 continue
                 
-        # Try to load VecNormalize
         vec_norm_path = f"{path}_vec_normalize.pkl"
         if os.path.exists(vec_norm_path):
             trainer.env = VecNormalize.load(vec_norm_path, trainer._create_env(eval_mode=False))
@@ -191,14 +436,18 @@ class RLTrainer:
         return trainer
     
     def evaluate(self, n_eval_episodes: int = 10):
-        """Evaluate the trained agent."""
+        """Evaluate the trained agent and return detailed metrics."""
         if self.model is None:
             raise ValueError("Model not trained.")
             
         rewards = []
         episode_lengths = []
         
-        eval_env = self._create_env(eval_mode=True)
+        custom_env_class = None
+        if self.custom_env_path and os.path.exists(self.custom_env_path):
+            custom_env_class = self._load_custom_env(self.custom_env_path)
+            
+        eval_env = self._create_env(eval_mode=True, custom_env_class=custom_env_class)
         
         for _ in range(n_eval_episodes):
             obs = eval_env.reset()
@@ -219,6 +468,8 @@ class RLTrainer:
         return {
             'mean_reward': np.mean(rewards),
             'std_reward': np.std(rewards),
+            'min_reward': np.min(rewards),
+            'max_reward': np.max(rewards),
             'mean_episode_length': np.mean(episode_lengths),
             'rewards': rewards,
             'episode_lengths': episode_lengths
@@ -243,4 +494,36 @@ def get_available_rl_environments():
     ]
     
     return common_envs
+
+
+def compare_agents(agents: List[RLTrainer], env_id: str, n_eval_episodes: int = 10):
+    """Compare multiple agents on the same environment."""
+    from scipy import stats
+    
+    results = []
+    
+    for i, agent in enumerate(agents):
+        eval_results = agent.evaluate(n_eval_episodes=n_eval_episodes)
+        results.append({
+            'agent_index': i,
+            'algorithm': agent.algorithm,
+            **eval_results
+        })
+        
+    comparisons = []
+    for i in range(len(results)):
+        for j in range(i + 1, len(results)):
+            t_stat, p_value = stats.ttest_ind(
+                results[i]['rewards'],
+                results[j]['rewards']
+            )
+            comparisons.append({
+                'agent1': i,
+                'agent2': j,
+                't_statistic': t_stat,
+                'p_value': p_value,
+                'significant': p_value < 0.05
+            })
+            
+    return results, comparisons
 

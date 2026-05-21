@@ -3330,21 +3330,38 @@ if current_main_section == "🤖 Reinforcement Learning":
         
         Please install them with:
         ```
-        pip install stable-baselines3[extra] gymnasium
+        pip install stable-baselines3[extra] gymnasium optuna psutil pyyaml
         ```
         """)
     else:
+        if 'rl_training_history' not in st.session_state:
+            st.session_state['rl_training_history'] = []
+            
         col_config, col_visuals = st.columns([1, 1])
         
         with col_config:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.subheader("⚙️ Configuração do Agente")
             
+            use_custom_env = st.checkbox("Usar ambiente customizado", value=False)
+            custom_env_path = None
+            
+            if use_custom_env:
+                uploaded_file = st.file_uploader("Upload arquivo .py com classe gym.Env", type=['py'])
+                if uploaded_file:
+                    custom_env_dir = os.path.join(ROOT_DIR, "tmp")
+                    os.makedirs(custom_env_dir, exist_ok=True)
+                    custom_env_path = os.path.join(custom_env_dir, uploaded_file.name)
+                    with open(custom_env_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    st.success(f"✅ Arquivo salvo em: {custom_env_path}")
+            
             available_envs = get_available_rl_environments()
             env_id = st.selectbox(
                 "🌍 Ambiente",
                 available_envs,
-                index=0
+                index=0,
+                disabled=use_custom_env
             )
             
             algorithm = st.selectbox(
@@ -3366,6 +3383,42 @@ if current_main_section == "🤖 Reinforcement Learning":
                 ["MlpPolicy", "CnnPolicy"],
                 index=0
             )
+            
+            use_optuna = st.checkbox("Usar Optuna para otimização de hiperparâmetros", value=False)
+            if use_optuna:
+                optuna_trials = st.number_input(
+                    "Número de trials Optuna",
+                    min_value=5,
+                    max_value=100,
+                    value=20,
+                    step=5
+                )
+            
+            st.divider()
+            st.subheader("📦 Wrappers")
+            
+            wrappers = []
+            use_framestack = st.checkbox("FrameStack", value=False)
+            if use_framestack:
+                n_stack = st.number_input("Número de quadros", min_value=2, max_value=8, value=4, step=1)
+                wrappers.append({"name": "FrameStack", "params": {"n_stack": n_stack}})
+                
+            use_grayscale = st.checkbox("GrayScaleObservation", value=False)
+            if use_grayscale:
+                wrappers.append({"name": "GrayScaleObservation", "params": {}})
+                
+            use_resize = st.checkbox("ResizeObservation", value=False)
+            if use_resize:
+                resize_shape = st.number_input("Tamanho da imagem", min_value=32, max_value=256, value=84, step=4)
+                wrappers.append({"name": "ResizeObservation", "params": {"shape": resize_shape}})
+                
+            use_norm_obs = st.checkbox("NormalizeObservation", value=False)
+            if use_norm_obs:
+                wrappers.append({"name": "NormalizeObservation", "params": {}})
+                
+            use_norm_rew = st.checkbox("NormalizeReward", value=False)
+            if use_norm_rew:
+                wrappers.append({"name": "NormalizeReward", "params": {}})
             
             st.divider()
             st.subheader("📊 Hiperparâmetros")
@@ -3409,33 +3462,55 @@ if current_main_section == "🤖 Reinforcement Learning":
             col_train, col_eval, col_save = st.columns(3)
             with col_train:
                 if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
-                    with st.spinner("Treinando o agente... Isso pode levar alguns minutos!"):
-                        try:
-                            trainer = RLTrainer(
-                                env_id=env_id,
-                                algorithm=algorithm,
-                                total_timesteps=total_timesteps,
-                                policy=policy,
-                                verbose=1,
-                                **hyperparams
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+                    
+                    try:
+                        trainer = RLTrainer(
+                            env_id=env_id,
+                            algorithm=algorithm,
+                            total_timesteps=total_timesteps,
+                            policy=policy,
+                            custom_env_path=custom_env_path,
+                            wrappers=wrappers,
+                            verbose=1,
+                            **hyperparams
+                        )
+                        
+                        with mlflow.start_run(run_name=f"RL_{env_id}_{algorithm}"):
+                            mlflow.log_param("env_id", env_id)
+                            mlflow.log_param("algorithm", algorithm)
+                            mlflow.log_param("total_timesteps", total_timesteps)
+                            mlflow.log_param("policy", policy)
+                            mlflow.log_param("use_optuna", use_optuna)
+                            for key, value in hyperparams.items():
+                                mlflow.log_param(key, value)
+                            
+                            status_text.text("Treinando...")
+                            model = trainer.train(
+                                use_optuna=use_optuna,
+                                optuna_trials=optuna_trials if use_optuna else 20
                             )
                             
-                            with mlflow.start_run(run_name=f"RL_{env_id}_{algorithm}"):
-                                mlflow.log_param("env_id", env_id)
-                                mlflow.log_param("algorithm", algorithm)
-                                mlflow.log_param("total_timesteps", total_timesteps)
-                                mlflow.log_param("policy", policy)
-                                for key, value in hyperparams.items():
-                                    mlflow.log_param(key, value)
-                                
-                                model = trainer.train()
-                                
-                                st.session_state['rl_trainer'] = trainer
-                                st.success("✅ Treinamento concluído!")
-                        except Exception as e:
-                            st.error(f"Erro durante o treinamento: {str(e)}")
-                            import traceback
-                            traceback.print_exc()
+                            st.session_state['rl_trainer'] = trainer
+                            
+                            if trainer.callback:
+                                history_entry = {
+                                    'timestamp': datetime.now().isoformat(),
+                                    'env_id': env_id,
+                                    'algorithm': algorithm,
+                                    'total_timesteps': total_timesteps,
+                                    'metrics': trainer.callback.metrics
+                                }
+                                st.session_state['rl_training_history'].append(history_entry)
+                            
+                            progress_bar.progress(100)
+                            status_text.text("Treinamento concluído!")
+                            st.success("✅ Treinamento concluído!")
+                    except Exception as e:
+                        st.error(f"Erro durante o treinamento: {str(e)}")
+                        import traceback
+                        traceback.print_exc()
             
             with col_eval:
                 if 'rl_trainer' in st.session_state:
@@ -3458,59 +3533,165 @@ if current_main_section == "🤖 Reinforcement Learning":
                             st.error(f"Erro ao salvar: {str(e)}")
         
         with col_visuals:
-            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-            st.subheader("📈 Resultados")
+            tab1, tab2 = st.tabs(["📊 Monitoramento", "📜 Histórico"])
             
-            if 'rl_eval_results' in st.session_state:
-                results = st.session_state['rl_eval_results']
+            with tab1:
+                st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+                st.subheader("📈 Resultados em Tempo Real")
                 
-                m1, m2, m3 = st.columns(3)
-                with m1:
-                    st.markdown(f"""
-                    <div class='ui-metric' style='border-left-color:#27ae60;'>
-                        <div class='metric-value'>{results['mean_reward']:.2f}</div>
-                        <div class='metric-label'>Recompensa Média</div>
-                    </div>""", unsafe_allow_html=True)
-                with m2:
-                    st.markdown(f"""
-                    <div class='ui-metric' style='border-left-color:#f59e0b;'>
-                        <div class='metric-value'>{results['std_reward']:.2f}</div>
-                        <div class='metric-label'>Desvio Padrão</div>
-                    </div>""", unsafe_allow_html=True)
-                with m3:
-                    st.markdown(f"""
-                    <div class='ui-metric' style='border-left-color:#8b5cf6;'>
-                        <div class='metric-value'>{results['mean_episode_length']:.0f}</div>
-                        <div class='metric-label'>Passos Médios</div>
-                    </div>""", unsafe_allow_html=True)
+                if 'rl_trainer' in st.session_state and st.session_state['rl_trainer'].callback:
+                    callback = st.session_state['rl_trainer'].callback
+                    metrics = callback.metrics
+                    
+                    m1, m2, m3 = st.columns(3)
+                    with m1:
+                        if metrics['episode_reward']:
+                            val = metrics['mean_reward_100'][-1]
+                        else:
+                            val = 0
+                        st.markdown(f"""
+                        <div class='ui-metric' style='border-left-color:#27ae60;'>
+                            <div class='metric-value'>{val:.2f}</div>
+                            <div class='metric-label'>Recompensa Média (100)</div>
+                        </div>""", unsafe_allow_html=True)
+                    with m2:
+                        if metrics['timesteps']:
+                            val = metrics['timesteps'][-1]
+                        else:
+                            val = 0
+                        st.markdown(f"""
+                        <div class='ui-metric' style='border-left-color:#f59e0b;'>
+                            <div class='metric-value'>{val}</div>
+                            <div class='metric-label'>Timesteps</div>
+                        </div>""", unsafe_allow_html=True)
+                    with m3:
+                        if metrics['memory_usage']:
+                            val = metrics['memory_usage'][-1]
+                        else:
+                            val = 0
+                        st.markdown(f"""
+                        <div class='ui-metric' style='border-left-color:#8b5cf6;'>
+                            <div class='metric-value'>{val:.1f} MB</div>
+                            <div class='metric-label'>Memória Usada</div>
+                        </div>""", unsafe_allow_html=True)
+                    
+                    st.divider()
+                    
+                    if metrics['episode_reward']:
+                        df = pd.DataFrame({
+                            "Timestep": metrics['timesteps'],
+                            "Recompensa": metrics['episode_reward'],
+                            "Média Móvel (100)": metrics['mean_reward_100']
+                        })
+                        
+                        fig = px.line(
+                            df,
+                            x="Timestep",
+                            y=["Recompensa", "Média Móvel (100)"],
+                            title="Curva de Aprendizado",
+                            color_discrete_sequence=['#2f80ed', '#27ae60']
+                        )
+                        
+                        fig.update_layout(
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            font_color='#e6edf3',
+                            title_font_size=14,
+                            margin=dict(t=30, b=10, l=10, r=10)
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                    
+                    st.divider()
+                    
+                    if 'rl_eval_results' in st.session_state:
+                        st.subheader("📋 Resultados de Avaliação")
+                        results = st.session_state['rl_eval_results']
+                        
+                        eval_m1, eval_m2, eval_m3, eval_m4 = st.columns(4)
+                        with eval_m1:
+                            st.metric("Média", f"{results['mean_reward']:.2f}")
+                        with eval_m2:
+                            st.metric("Desvio Padrão", f"{results['std_reward']:.2f}")
+                        with eval_m3:
+                            st.metric("Mínima", f"{results['min_reward']:.2f}")
+                        with eval_m4:
+                            st.metric("Máxima", f"{results['max_reward']:.2f}")
+                        
+                        eval_df = pd.DataFrame({
+                            "Episódio": list(range(1, len(results['rewards']) + 1)),
+                            "Recompensa": results['rewards']
+                        })
+                        
+                        eval_fig = px.bar(
+                            eval_df,
+                            x="Episódio",
+                            y="Recompensa",
+                            title="Recompensa por Episódio de Avaliação",
+                            color_discrete_sequence=['#2f80ed']
+                        )
+                        
+                        eval_fig.update_layout(
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            font_color='#e6edf3',
+                            title_font_size=14,
+                            margin=dict(t=30, b=10, l=10, r=10)
+                        )
+                        
+                        st.plotly_chart(eval_fig, use_container_width=True)
+                else:
+                    st.info("Treine um agente para ver os resultados em tempo real!")
+                st.markdown("</div>", unsafe_allow_html=True)
+            
+            with tab2:
+                st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+                st.subheader("📜 Histórico de Treinamentos")
                 
-                st.divider()
-                
-                rewards_df = pd.DataFrame({
-                    "Episódio": list(range(1, len(results['rewards']) + 1)),
-                    "Recompensa": results['rewards']
-                })
-                
-                fig = px.bar(
-                    rewards_df,
-                    x="Episódio",
-                    y="Recompensa",
-                    title="Recompensa por Episódio de Avaliação",
-                    color_discrete_sequence=['#2f80ed']
-                )
-                
-                fig.update_layout(
-                    paper_bgcolor='rgba(0,0,0,0)',
-                    plot_bgcolor='rgba(0,0,0,0)',
-                    font_color='#e6edf3',
-                    title_font_size=14,
-                    margin=dict(t=30, b=10, l=10, r=10)
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("Treine e avalie um agente para ver os resultados aqui!")
-            st.markdown("</div>", unsafe_allow_html=True)
+                if st.session_state['rl_training_history']:
+                    history_df = pd.DataFrame(st.session_state['rl_training_history'])
+                    st.dataframe(history_df[['timestamp', 'env_id', 'algorithm', 'total_timesteps']])
+                    
+                    if len(st.session_state['rl_training_history']) > 1:
+                        st.divider()
+                        st.subheader("📊 Comparar Treinamentos")
+                        
+                        selected_indices = st.multiselect(
+                            "Selecione treinamentos para comparar",
+                            list(range(len(st.session_state['rl_training_history']))),
+                            default=[0, 1] if len(st.session_state['rl_training_history']) > 1 else [0]
+                        )
+                        
+                        if selected_indices:
+                            dfs = []
+                            for i in selected_indices:
+                                entry = st.session_state['rl_training_history'][i]
+                                metrics = entry['metrics']
+                                temp_df = pd.DataFrame({
+                                    "Timestep": metrics['timesteps'],
+                                    "Recompensa": metrics['episode_reward'],
+                                    "Treinamento": f"{entry['algorithm']} - {entry['env_id']} ({i+1})"
+                                })
+                                dfs.append(temp_df)
+                            
+                            comp_df = pd.concat(dfs, ignore_index=True)
+                            comp_fig = px.line(
+                                comp_df,
+                                x="Timestep",
+                                y="Recompensa",
+                                color="Treinamento",
+                                title="Comparação de Treinamentos"
+                            )
+                            comp_fig.update_layout(
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                font_color='#e6edf3',
+                                title_font_size=14
+                            )
+                            st.plotly_chart(comp_fig, use_container_width=True)
+                else:
+                    st.info("Nenhum treinamento registrado ainda!")
+                st.markdown("</div>", unsafe_allow_html=True)
 
 # --- TAB 3: EXPERIMENTS ---
 if current_main_section == "🧪 Experiments":
