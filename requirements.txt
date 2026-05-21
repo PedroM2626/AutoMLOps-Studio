@@ -34,3 +34,5 @@ onnxruntime==1.20.1
 sentence-transformers==3.4.1
 onnxmltools==1.12.0
 huggingface_hub==0.28.1
+stable-baselines3[extra]==2.0.0
+gymnasium==0.29.1

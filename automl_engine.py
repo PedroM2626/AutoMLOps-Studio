@@ -2,6 +2,7 @@ from src.core.processor import AutoMLDataProcessor
 from src.core.trainer import TransformersWrapper
 from src.engines import classical as _classical_engine
 from src.engines.classical import AutoMLTrainer as _BaseAutoMLTrainer, load_pipeline, save_pipeline
+from src.engines.reinforcement_learning import RLTrainer, get_available_rl_environments, STABLE_BASELINES_AVAILABLE
 
 TRANSFORMERS_AVAILABLE = _classical_engine.TRANSFORMERS_AVAILABLE
 
@@ -29,8 +30,11 @@ class AutoMLTrainer(_BaseAutoMLTrainer):
 __all__ = [
     "AutoMLDataProcessor",
     "AutoMLTrainer",
+    "RLTrainer",
     "TransformersWrapper",
     "TRANSFORMERS_AVAILABLE",
+    "STABLE_BASELINES_AVAILABLE",
+    "get_available_rl_environments",
     "load_pipeline",
     "save_pipeline",
 ]

@@ -16,7 +16,16 @@
 
 ---
 
-## 🌟 What's New in v5.0.0
+## 🌟 What's New in v5.1.0
+
+### 🤖 Reinforcement Learning Module
+- **New RL Page**: Complete interface for training and evaluating reinforcement learning agents
+- **Supported Algorithms**: PPO, DQN, A2C, SAC, TD3 (via Stable Baselines3)
+- **Gymnasium Integration**: Support for standard RL environments (CartPole, MountainCar, LunarLander, etc.)
+- **MLflow Tracking**: Full integration to track RL experiments (parameters, metrics, artifacts)
+- **Hyperparameter Tuning**: Dynamic UI for configuring algorithm-specific hyperparameters
+- **Visualization**: Real-time results display with metrics and reward plots
+- **Save/Load**: Save trained agents and load them for later use
 
 ### 🤖 Unified AutoML Studio
 - **Single Unified Entry Point**: AutoML now starts in one workspace with a modality selector (**Tabular** or **Computer Vision**)
@@ -40,7 +49,7 @@
 - **Association Rules Engine**: Built-in rule-mining flow with support, confidence, and lift-based scoring
 - **Ranking Metrics**: Ranking workflows now include ranking-aware optimization metrics (for example, NDCG)
 
-## 📋 Supported Task Types (Tabular vs CV)
+## 📋 Supported Task Types (Tabular vs CV vs RL)
 
 | Modality | Task Type | Brief Description | Main Metrics |
 |---|---|---|---|
@@ -59,6 +68,7 @@
 | Computer Vision | `object_detection` | Detect objects and bounding boxes. | Baseline loop enabled; custom detector metrics can be added per dataset |
 | Computer Vision | `image_anomaly_detection` | Classify images as normal vs anomalous patterns. | `val_acc`, `val_loss` |
 | Computer Vision | `pose_estimation` | Estimate keypoints/body joints from images. | Baseline loop enabled; keypoint metrics depend on annotation format |
+| Reinforcement Learning | `rl_agent` | Train an agent to maximize reward through interaction. | `episode_reward`, `mean_reward`, `episode_length` |
 
 > Notes:
 > - Tabular metrics are configurable in the AutoML optimization step.

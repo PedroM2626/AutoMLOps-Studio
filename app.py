@@ -1,4 +1,4 @@
-﻿import sys
+import sys
 import os
 
 # Ensure repository root is on sys.path so `src` package imports work
@@ -9,6 +9,7 @@ if ROOT_DIR not in sys.path:
 
 from src.core.processor import AutoMLDataProcessor
 from src.engines.classical import AutoMLTrainer
+from src.engines.reinforcement_learning import RLTrainer, get_available_rl_environments, STABLE_BASELINES_AVAILABLE
 from dotenv import load_dotenv
 import os
 
@@ -676,6 +677,7 @@ with st.sidebar:
         "🏠 Overview",
         "🗄️ Data",
         "⚙️ AutoML",
+        "🤖 Reinforcement Learning",
         "🧪 Experiments",
         "📦 Registry & Deploy",
         "📉 Monitoring",
@@ -3313,6 +3315,202 @@ if current_main_section == "⚙️ AutoML":
             cfg_used = {'lr': st.session_state.get('cv_lr', 'N/A'), 'batch_size': st.session_state.get('cv_batch', 'N/A')}
             insight = get_cv_explanation(trainer.backbone, cfg_used)
             st.info(f"🧠 **Model Insight:** {insight}")
+
+# --- TAB 2: REINFORCEMENT LEARNING ---
+if current_main_section == "🤖 Reinforcement Learning":
+    st.markdown("""
+    <div class='hero-header'>
+      <div class='hero-title'>🤖 Reinforcement Learning</div>
+      <div class='hero-subtitle'>Train intelligent agents that learn from interaction with environments.</div>
+    </div>""", unsafe_allow_html=True)
+
+    if not STABLE_BASELINES_AVAILABLE:
+        st.error("""
+        Stable Baselines3 and Gymnasium are not installed!
+        
+        Please install them with:
+        ```
+        pip install stable-baselines3[extra] gymnasium
+        ```
+        """)
+    else:
+        col_config, col_visuals = st.columns([1, 1])
+        
+        with col_config:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("⚙️ Configuração do Agente")
+            
+            available_envs = get_available_rl_environments()
+            env_id = st.selectbox(
+                "🌍 Ambiente",
+                available_envs,
+                index=0
+            )
+            
+            algorithm = st.selectbox(
+                "🤖 Algoritmo",
+                list(RLTrainer.ALGORITHM_DISPLAY_NAMES.keys()),
+                format_func=lambda x: RLTrainer.ALGORITHM_DISPLAY_NAMES[x]
+            )
+            
+            total_timesteps = st.number_input(
+                "⏱️ Timesteps Totais",
+                min_value=1000,
+                max_value=10_000_000,
+                value=10_000,
+                step=10_000
+            )
+            
+            policy = st.selectbox(
+                "🧠 Política (Rede Neural)",
+                ["MlpPolicy", "CnnPolicy"],
+                index=0
+            )
+            
+            st.divider()
+            st.subheader("📊 Hiperparâmetros")
+            
+            if algorithm == "ppo":
+                lr = st.number_input("Learning Rate", value=3e-4, format="%.6f")
+                gamma = st.number_input("Gamma", value=0.99, format="%.2f")
+                n_steps = st.number_input("N Steps", value=2048, min_value=32, step=256)
+                batch_size = st.number_input("Batch Size", value=64, min_value=8, step=8)
+                clip_range = st.number_input("Clip Range", value=0.2, format="%.2f")
+                hyperparams = {
+                    "learning_rate": lr,
+                    "gamma": gamma,
+                    "n_steps": n_steps,
+                    "batch_size": batch_size,
+                    "clip_range": clip_range
+                }
+            elif algorithm == "dqn":
+                lr = st.number_input("Learning Rate", value=1e-3, format="%.6f")
+                gamma = st.number_input("Gamma", value=0.99, format="%.2f")
+                buffer_size = st.number_input("Buffer Size", value=1_000_000, min_value=10_000, step=100_000)
+                learning_starts = st.number_input("Learning Starts", value=50_000, min_value=1000, step=10_000)
+                target_update_interval = st.number_input("Target Update Interval", value=10_000, min_value=1000, step=1000)
+                hyperparams = {
+                    "learning_rate": lr,
+                    "gamma": gamma,
+                    "buffer_size": buffer_size,
+                    "learning_starts": learning_starts,
+                    "target_update_interval": target_update_interval
+                }
+            else:
+                lr = st.number_input("Learning Rate", value=3e-4, format="%.6f")
+                gamma = st.number_input("Gamma", value=0.99, format="%.2f")
+                hyperparams = {
+                    "learning_rate": lr,
+                    "gamma": gamma
+                }
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+            
+            col_train, col_eval, col_save = st.columns(3)
+            with col_train:
+                if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
+                    with st.spinner("Treinando o agente... Isso pode levar alguns minutos!"):
+                        try:
+                            trainer = RLTrainer(
+                                env_id=env_id,
+                                algorithm=algorithm,
+                                total_timesteps=total_timesteps,
+                                policy=policy,
+                                verbose=1,
+                                **hyperparams
+                            )
+                            
+                            with mlflow.start_run(run_name=f"RL_{env_id}_{algorithm}"):
+                                mlflow.log_param("env_id", env_id)
+                                mlflow.log_param("algorithm", algorithm)
+                                mlflow.log_param("total_timesteps", total_timesteps)
+                                mlflow.log_param("policy", policy)
+                                for key, value in hyperparams.items():
+                                    mlflow.log_param(key, value)
+                                
+                                model = trainer.train()
+                                
+                                st.session_state['rl_trainer'] = trainer
+                                st.success("✅ Treinamento concluído!")
+                        except Exception as e:
+                            st.error(f"Erro durante o treinamento: {str(e)}")
+                            import traceback
+                            traceback.print_exc()
+            
+            with col_eval:
+                if 'rl_trainer' in st.session_state:
+                    if st.button("📊 Avaliar Agente", use_container_width=True):
+                        trainer = st.session_state['rl_trainer']
+                        with st.spinner("Avaliando o agente..."):
+                            results = trainer.evaluate(n_eval_episodes=5)
+                            st.session_state['rl_eval_results'] = results
+                            st.success("✅ Avaliação concluída!")
+            
+            with col_save:
+                if 'rl_trainer' in st.session_state:
+                    if st.button("💾 Salvar Agente", use_container_width=True):
+                        trainer = st.session_state['rl_trainer']
+                        save_path = os.path.join(ROOT_DIR, "models", f"rl_agent_{env_id}_{algorithm}")
+                        try:
+                            trainer.save(save_path)
+                            st.success(f"✅ Agente salvo em: {save_path}")
+                        except Exception as e:
+                            st.error(f"Erro ao salvar: {str(e)}")
+        
+        with col_visuals:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("📈 Resultados")
+            
+            if 'rl_eval_results' in st.session_state:
+                results = st.session_state['rl_eval_results']
+                
+                m1, m2, m3 = st.columns(3)
+                with m1:
+                    st.markdown(f"""
+                    <div class='ui-metric' style='border-left-color:#27ae60;'>
+                        <div class='metric-value'>{results['mean_reward']:.2f}</div>
+                        <div class='metric-label'>Recompensa Média</div>
+                    </div>""", unsafe_allow_html=True)
+                with m2:
+                    st.markdown(f"""
+                    <div class='ui-metric' style='border-left-color:#f59e0b;'>
+                        <div class='metric-value'>{results['std_reward']:.2f}</div>
+                        <div class='metric-label'>Desvio Padrão</div>
+                    </div>""", unsafe_allow_html=True)
+                with m3:
+                    st.markdown(f"""
+                    <div class='ui-metric' style='border-left-color:#8b5cf6;'>
+                        <div class='metric-value'>{results['mean_episode_length']:.0f}</div>
+                        <div class='metric-label'>Passos Médios</div>
+                    </div>""", unsafe_allow_html=True)
+                
+                st.divider()
+                
+                rewards_df = pd.DataFrame({
+                    "Episódio": list(range(1, len(results['rewards']) + 1)),
+                    "Recompensa": results['rewards']
+                })
+                
+                fig = px.bar(
+                    rewards_df,
+                    x="Episódio",
+                    y="Recompensa",
+                    title="Recompensa por Episódio de Avaliação",
+                    color_discrete_sequence=['#2f80ed']
+                )
+                
+                fig.update_layout(
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    font_color='#e6edf3',
+                    title_font_size=14,
+                    margin=dict(t=30, b=10, l=10, r=10)
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("Treine e avalie um agente para ver os resultados aqui!")
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # --- TAB 3: EXPERIMENTS ---
 if current_main_section == "🧪 Experiments":
