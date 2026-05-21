@@ -34,7 +34,8 @@ onnxruntime==1.20.1
 sentence-transformers==3.4.1
 onnxmltools==1.12.0
 huggingface_hub==0.28.1
-stable-baselines3[extra]==2.0.0
+stable-baselines3[extra]==2.3.2
 gymnasium==0.29.1
 psutil==5.9.8
 pyyaml==6.0.1
+d3rlpy==2.3.0

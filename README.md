@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v5.0.1-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v5.3.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -15,6 +15,26 @@
 **🔗 Access the live Demo:** [Streamlit Cloud - AutoMLOps Studio](https://automlops-studio.streamlit.app/)
 
 ---
+
+## 🌟 What's New in v5.3.0
+
+### 🤖 Complete Reinforcement Learning Module
+- **Online RL with Job Manager**: Submit RL training jobs to run in background via Job Manager
+- **Offline RL**: Train agents from existing trajectories using BCQ, CQL, TD3+BC, or IWBC (via d3rlpy)
+- **Trajectory Visualization**: Detailed visualization of saved trajectories from the Data Lake
+- **Trajectory Saving to Data Lake**: Save agent trajectories (state, action, reward, done) to the data lake
+- **Enhanced Evaluation**: Histograms of reward distribution, detailed stats, and visualizations
+- **Real-Time Monitoring**: Live metrics display during training:
+  - Reward per episode
+  - Moving average (last 100 episodes)
+  - Timesteps completed
+  - Memory usage
+- **Custom Environment Support**: Upload your own Gymnasium-compatible environment files
+- **Common Wrappers**: Quick access to FrameStack, GrayScaleObservation, ResizeObservation, NormalizeObservation, NormalizeReward
+- **Optuna Integration**: Automated hyperparameter optimization with configurable trials
+- **Training History**: Track multiple training runs and compare them side by side
+- **Configuration Saving**: Save and load training configurations (JSON and YAML)
+- **Improved MLflow Integration**: Logging of all hyperparameters, metrics, config files, and trajectories
 
 ## 🌟 What's New in v5.2.0
 

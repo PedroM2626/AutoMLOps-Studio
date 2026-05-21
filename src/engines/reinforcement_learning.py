@@ -33,11 +33,17 @@ try:
 except ImportError:
     STABLE_BASELINES_AVAILABLE = False
 
+try:
+    from src.core.data_lake import DataLake
+    DATA_LAKE_AVAILABLE = True
+except ImportError:
+    DATA_LAKE_AVAILABLE = False
+
 
 class StreamlitRLCallback(BaseCallback):
     """Callback for real‑time metrics logging for Streamlit UI."""
     
-    def __init__(self, verbose=0):
+    def __init__(self, verbose=0, save_trajectories: bool = False, data_lake: Optional[DataLake] = None, env_id: str = "unknown"):
         super().__init__(verbose)
         self.episode_rewards = []
         self.episode_lengths = []
@@ -52,9 +58,15 @@ class StreamlitRLCallback(BaseCallback):
             'critic_loss': [],
             'memory_usage': []
         }
+        self.save_trajectories = save_trajectories
+        self.data_lake = data_lake
+        self.env_id = env_id
+        self.trajectories = []
+        self.last_obs = None
         
     def _on_training_start(self) -> None:
         self.start_time = datetime.now()
+        self.last_obs = self.training_env.reset() if hasattr(self, 'training_env') else None
         
     def _on_step(self) -> bool:
         if len(self.model.ep_info_buffer) > 0:
@@ -76,7 +88,40 @@ class StreamlitRLCallback(BaseCallback):
             mlflow.log_metric("episode_length", length, step=self.num_timesteps)
             mlflow.log_metric("mean_reward_100", np.mean(self.episode_rewards[-100:]), step=self.num_timesteps)
         
+        if self.save_trajectories:
+            try:
+                if self.last_obs is not None:
+                    actions, _states = self.model.predict(self.last_obs, deterministic=False)
+                    new_obs, rewards, dones, infos = self.training_env.step(actions)
+                    
+                    for i in range(len(self.last_obs)):
+                        trajectory = {
+                            'timestep': self.num_timesteps,
+                            'observation': self.last_obs[i].tolist() if isinstance(self.last_obs[i], np.ndarray) else self.last_obs[i],
+                            'action': actions[i].tolist() if isinstance(actions[i], np.ndarray) else actions[i],
+                            'reward': float(rewards[i]),
+                            'next_observation': new_obs[i].tolist() if isinstance(new_obs[i], np.ndarray) else new_obs[i],
+                            'done': bool(dones[i])
+                        }
+                        self.trajectories.append(trajectory)
+                    
+                    self.last_obs = new_obs
+            except Exception as e:
+                logger.debug(f"Failed to collect trajectory: {e}")
+        
         return True
+        
+    def _on_training_end(self) -> None:
+        if self.save_trajectories and self.data_lake and len(self.trajectories) > 0:
+            try:
+                df_trajectories = pd.DataFrame(self.trajectories)
+                dataset_name = f"rl_trajectories_{self.env_id}"
+                file_name = f"trajectories_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                self.data_lake.save_dataframe(df_trajectories, dataset_name, file_name)
+                logger.info(f"Trajectories saved to Data Lake: {dataset_name}/{file_name}")
+                mlflow.log_artifact(str(self.data_lake.base_path / dataset_name / file_name))
+            except Exception as e:
+                logger.warning(f"Failed to save trajectories: {e}")
 
 
 class RLTrainer:
@@ -248,7 +293,7 @@ class RLTrainer:
             
         return env_classes[0]
     
-    def train(self, use_optuna: bool = False, optuna_trials: int = 20, **kwargs):
+    def train(self, use_optuna: bool = False, optuna_trials: int = 20, save_trajectories: bool = False, data_lake: Optional[DataLake] = None, **kwargs):
         """Train the RL agent with optional Optuna hyperparameter tuning."""
         logger.info(f"Starting RL training for {self.env_id} with {self.algorithm}")
         
@@ -279,7 +324,13 @@ class RLTrainer:
             verbose=self.verbose
         )
         
-        self.callback = StreamlitRLCallback(verbose=self.verbose)
+        self.callback = StreamlitRLCallback(
+            verbose=self.verbose,
+            save_trajectories=save_trajectories,
+            data_lake=data_lake,
+            env_id=self.env_id
+        )
+        self.callback.training_env = self.env
         
         callback_list = CallbackList([eval_callback, checkpoint_callback, self.callback])
         
@@ -324,8 +375,9 @@ class RLTrainer:
         logger.info("RL training completed!")
         return self.model
     
-    def _objective(self, trial: optuna.Trial):
+    def _objective(self, trial):
         """Optuna objective function for hyperparameter optimization."""
+        import optuna
         hp_space = self.HYPERPARAM_SPACES.get(self.algorithm, {})
         params = {}
         
@@ -355,6 +407,7 @@ class RLTrainer:
     
     def _train_with_optuna(self, optuna_trials: int = 20, **kwargs):
         """Train using Optuna for hyperparameter optimization."""
+        import optuna
         logger.info(f"Starting Optuna hyperparameter optimization with {optuna_trials} trials")
         
         study = optuna.create_study(direction='maximize', study_name=f"rl_{self.env_id}_{self.algorithm}")
@@ -494,6 +547,163 @@ def get_available_rl_environments():
     ]
     
     return common_envs
+
+
+try:
+    import d3rlpy
+    D3RLPY_AVAILABLE = True
+except ImportError:
+    D3RLPY_AVAILABLE = False
+
+
+class OfflineRLTrainer:
+    """Offline Reinforcement Learning trainer using d3rlpy (BCQ, CQL, etc.)."""
+    
+    ALGORITHMS = {
+        'bcq': 'BCQ',
+        'cql': 'CQL',
+        'td3_bc': 'TD3PlusBC',
+        'iwbc': 'IWBC'
+    }
+    
+    ALGORITHM_DISPLAY_NAMES = {
+        'bcq': 'Batch-Constrained Q-Learning (BCQ)',
+        'cql': 'Conservative Q-Learning (CQL)',
+        'td3_bc': 'TD3 Plus Behavior Cloning (TD3+BC)',
+        'iwbc': 'Importance Weighted Behavior Cloning (IWBC)'
+    }
+    
+    def __init__(
+        self,
+        algorithm: str = 'bcq',
+        observation_shape: Optional[Tuple[int, ...]] = None,
+        action_size: Optional[int] = None,
+        action_scaler: Optional[str] = None,
+        **kwargs
+    ):
+        if not D3RLPY_AVAILABLE:
+            raise ImportError(
+                "d3rlpy is required for Offline RL. "
+                "Install it with: pip install d3rlpy==2.3.0"
+            )
+            
+        self.algorithm = algorithm.lower()
+        self.observation_shape = observation_shape
+        self.action_size = action_size
+        self.action_scaler = action_scaler
+        self.kwargs = kwargs
+        self.model = None
+        
+        if self.algorithm not in self.ALGORITHMS:
+            raise ValueError(
+                f"Unknown offline RL algorithm: {self.algorithm}. "
+                f"Available: {list(self.ALGORITHMS.keys())}"
+            )
+            
+    def _prepare_dataset(self, df_trajectories: pd.DataFrame):
+        """Prepare d3rlpy dataset from trajectories DataFrame."""
+        observations = []
+        actions = []
+        rewards = []
+        next_observations = []
+        terminals = []
+        
+        for _, row in df_trajectories.iterrows():
+            observations.append(np.array(row['observation']))
+            actions.append(np.array(row['action']))
+            rewards.append(row['reward'])
+            next_observations.append(np.array(row['next_observation']))
+            terminals.append(1.0 if row['done'] else 0.0)
+            
+        observations = np.array(observations)
+        actions = np.array(actions)
+        rewards = np.array(rewards)
+        next_observations = np.array(next_observations)
+        terminals = np.array(terminals)
+        
+        if self.action_scaler:
+            from d3rlpy.preprocessing import MinMaxActionScaler
+            action_scaler = MinMaxActionScaler()
+            action_scaler.fit(actions)
+        else:
+            action_scaler = None
+            
+        dataset = d3rlpy.dataset.MDPDataset(
+            observations=observations,
+            actions=actions,
+            rewards=rewards,
+            terminals=terminals,
+            action_scaler=action_scaler
+        )
+        
+        return dataset
+        
+    def train(
+        self,
+        df_trajectories: pd.DataFrame,
+        n_epochs: int = 100,
+        n_steps_per_epoch: int = 1000,
+        **kwargs
+    ):
+        """Train the offline RL agent on trajectories."""
+        logger.info(f"Starting Offline RL training with {self.algorithm}")
+        
+        dataset = self._prepare_dataset(df_trajectories)
+        
+        algo_class = getattr(d3rlpy.algos, self.ALGORITHMS[self.algorithm])
+        
+        if self.observation_shape is None:
+            self.observation_shape = dataset.observation_shape
+        if self.action_size is None:
+            self.action_size = dataset.action_size
+            
+        self.model = algo_class(
+            observation_shape=self.observation_shape,
+            action_size=self.action_size,
+            **self.kwargs
+        )
+        
+        self.model.fit(
+            dataset,
+            n_epochs=n_epochs,
+            n_steps_per_epoch=n_steps_per_epoch,
+            **kwargs
+        )
+        
+        logger.info("Offline RL training completed!")
+        return self.model
+        
+    def predict(self, observation, deterministic: bool = True):
+        """Make predictions using the trained offline RL model."""
+        if self.model is None:
+            raise ValueError("Model not trained. Call train() first.")
+            
+        if isinstance(observation, list) or isinstance(observation, np.ndarray):
+            observation = np.array(observation)
+        if len(observation.shape) == 1:
+            observation = observation.reshape(1, -1)
+            
+        return self.model.predict(observation)
+        
+    def save(self, path: str):
+        """Save the trained offline RL model."""
+        if self.model is None:
+            raise ValueError("No model to save. Train first.")
+            
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        self.model.save(path)
+        logger.info(f"Offline RL model saved to {path}")
+        
+    @classmethod
+    def load(cls, path: str, algorithm: str = 'bcq'):
+        """Load a trained offline RL model."""
+        if not D3RLPY_AVAILABLE:
+            raise ImportError("d3rlpy is required.")
+            
+        trainer = cls(algorithm=algorithm)
+        algo_class = getattr(d3rlpy.algos, cls.ALGORITHMS[algorithm])
+        trainer.model = algo_class.load(path)
+        return trainer
 
 
 def compare_agents(agents: List[RLTrainer], env_id: str, n_eval_episodes: int = 10):

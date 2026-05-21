@@ -8,8 +8,9 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 from src.core.processor import AutoMLDataProcessor
+from src.core.data_lake import DataLake
 from src.engines.classical import AutoMLTrainer
-from src.engines.reinforcement_learning import RLTrainer, get_available_rl_environments, STABLE_BASELINES_AVAILABLE
+from src.engines.reinforcement_learning import RLTrainer, get_available_rl_environments, STABLE_BASELINES_AVAILABLE, OfflineRLTrainer, D3RLPY_AVAILABLE
 from dotenv import load_dotenv
 import os
 
@@ -3321,7 +3322,7 @@ if current_main_section == "🤖 Reinforcement Learning":
     st.markdown("""
     <div class='hero-header'>
       <div class='hero-title'>🤖 Reinforcement Learning</div>
-      <div class='hero-subtitle'>Train intelligent agents that learn from interaction with environments.</div>
+      <div class='hero-subtitle'>Train intelligent agents that learn from interaction with environments (Online) or from existing trajectories (Offline).</div>
     </div>""", unsafe_allow_html=True)
 
     if not STABLE_BASELINES_AVAILABLE:
@@ -3337,62 +3338,67 @@ if current_main_section == "🤖 Reinforcement Learning":
         if 'rl_training_history' not in st.session_state:
             st.session_state['rl_training_history'] = []
             
-        col_config, col_visuals = st.columns([1, 1])
+        rl_tab1, rl_tab2, rl_tab3 = st.tabs(["🤖 Online RL", "📦 Offline RL", "📊 Visualizar Trajetórias"])
         
-        with col_config:
-            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-            st.subheader("⚙️ Configuração do Agente")
+        with rl_tab1:
+            col_config, col_visuals = st.columns([1, 1])
             
-            use_custom_env = st.checkbox("Usar ambiente customizado", value=False)
-            custom_env_path = None
-            
-            if use_custom_env:
-                uploaded_file = st.file_uploader("Upload arquivo .py com classe gym.Env", type=['py'])
-                if uploaded_file:
-                    custom_env_dir = os.path.join(ROOT_DIR, "tmp")
-                    os.makedirs(custom_env_dir, exist_ok=True)
-                    custom_env_path = os.path.join(custom_env_dir, uploaded_file.name)
-                    with open(custom_env_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    st.success(f"✅ Arquivo salvo em: {custom_env_path}")
-            
-            available_envs = get_available_rl_environments()
-            env_id = st.selectbox(
-                "🌍 Ambiente",
-                available_envs,
-                index=0,
-                disabled=use_custom_env
-            )
-            
-            algorithm = st.selectbox(
-                "🤖 Algoritmo",
-                list(RLTrainer.ALGORITHM_DISPLAY_NAMES.keys()),
-                format_func=lambda x: RLTrainer.ALGORITHM_DISPLAY_NAMES[x]
-            )
-            
-            total_timesteps = st.number_input(
-                "⏱️ Timesteps Totais",
-                min_value=1000,
-                max_value=10_000_000,
-                value=10_000,
-                step=10_000
-            )
-            
-            policy = st.selectbox(
-                "🧠 Política (Rede Neural)",
-                ["MlpPolicy", "CnnPolicy"],
-                index=0
-            )
-            
-            use_optuna = st.checkbox("Usar Optuna para otimização de hiperparâmetros", value=False)
-            if use_optuna:
-                optuna_trials = st.number_input(
-                    "Número de trials Optuna",
-                    min_value=5,
-                    max_value=100,
-                    value=20,
-                    step=5
+            with col_config:
+                st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+                st.subheader("⚙️ Configuração do Agente")
+                
+                use_custom_env = st.checkbox("Usar ambiente customizado", value=False)
+                custom_env_path = None
+                
+                if use_custom_env:
+                    uploaded_file = st.file_uploader("Upload arquivo .py com classe gym.Env", type=['py'])
+                    if uploaded_file:
+                        custom_env_dir = os.path.join(ROOT_DIR, "tmp")
+                        os.makedirs(custom_env_dir, exist_ok=True)
+                        custom_env_path = os.path.join(custom_env_dir, uploaded_file.name)
+                        with open(custom_env_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                        st.success(f"✅ Arquivo salvo em: {custom_env_path}")
+                
+                available_envs = get_available_rl_environments()
+                env_id = st.selectbox(
+                    "🌍 Ambiente",
+                    available_envs,
+                    index=0,
+                    disabled=use_custom_env
                 )
+                
+                algorithm = st.selectbox(
+                    "🤖 Algoritmo",
+                    list(RLTrainer.ALGORITHM_DISPLAY_NAMES.keys()),
+                    format_func=lambda x: RLTrainer.ALGORITHM_DISPLAY_NAMES[x]
+                )
+                
+                total_timesteps = st.number_input(
+                    "⏱️ Timesteps Totais",
+                    min_value=1000,
+                    max_value=10_000_000,
+                    value=10_000,
+                    step=10_000
+                )
+                
+                policy = st.selectbox(
+                    "🧠 Política (Rede Neural)",
+                    ["MlpPolicy", "CnnPolicy"],
+                    index=0
+                )
+                
+                use_optuna = st.checkbox("Usar Optuna para otimização de hiperparâmetros", value=False)
+                if use_optuna:
+                    optuna_trials = st.number_input(
+                        "Número de trials Optuna",
+                        min_value=5,
+                        max_value=100,
+                        value=20,
+                        step=5
+                    )
+                    
+                save_trajectories = st.checkbox("Salvar trajetórias no Data Lake", value=False)
             
             st.divider()
             st.subheader("📦 Wrappers")
@@ -3459,7 +3465,7 @@ if current_main_section == "🤖 Reinforcement Learning":
             
             st.markdown("</div>", unsafe_allow_html=True)
             
-            col_train, col_eval, col_save = st.columns(3)
+            col_train, col_eval, col_save, col_job = st.columns(4)
             with col_train:
                 if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
                     progress_bar = st.progress(0)
@@ -3487,9 +3493,12 @@ if current_main_section == "🤖 Reinforcement Learning":
                                 mlflow.log_param(key, value)
                             
                             status_text.text("Treinando...")
+                            data_lake = DataLake(base_path=os.path.join(ROOT_DIR, "data_lake"))
                             model = trainer.train(
                                 use_optuna=use_optuna,
-                                optuna_trials=optuna_trials if use_optuna else 20
+                                optuna_trials=optuna_trials if use_optuna else 20,
+                                save_trajectories=save_trajectories,
+                                data_lake=data_lake
                             )
                             
                             st.session_state['rl_trainer'] = trainer
@@ -3531,6 +3540,34 @@ if current_main_section == "🤖 Reinforcement Learning":
                             st.success(f"✅ Agente salvo em: {save_path}")
                         except Exception as e:
                             st.error(f"Erro ao salvar: {str(e)}")
+            with col_job:
+                if st.button("🧪 Enviar para Job Manager", use_container_width=True):
+                    jm: TrainingJobManager = st.session_state['job_manager']
+                    
+                    job_config = {
+                        'type': 'rl',
+                        'env_id': env_id,
+                        'algorithm': algorithm,
+                        'total_timesteps': total_timesteps,
+                        'policy': policy,
+                        'use_optuna': use_optuna,
+                        'optuna_trials': optuna_trials if use_optuna else 20,
+                        'save_trajectories': save_trajectories,
+                        'wrappers': wrappers,
+                        'custom_env_path': custom_env_path,
+                        'data_lake_base_path': os.path.join(ROOT_DIR, "data_lake"),
+                        'save_dir': os.path.join(ROOT_DIR, "models", "rl"),
+                        'mlflow_tracking_uri': mlflow.get_tracking_uri(),
+                        'target_metric_name': 'MEAN_REWARD'
+                    }
+                    
+                    job_id = jm.submit_job(
+                        config=job_config,
+                        name=f"RL_{env_id}_{algorithm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                    )
+                    
+                    st.success(f"✅ Job de RL enviado com sucesso! Job ID: {job_id}")
+                    st.info("Vá para a página 'Experiments' para acompanhar o progresso!")
         
         with col_visuals:
             tab1, tab2 = st.tabs(["📊 Monitoramento", "📜 Histórico"])
@@ -3618,28 +3655,53 @@ if current_main_section == "🤖 Reinforcement Learning":
                         with eval_m4:
                             st.metric("Máxima", f"{results['max_reward']:.2f}")
                         
-                        eval_df = pd.DataFrame({
-                            "Episódio": list(range(1, len(results['rewards']) + 1)),
-                            "Recompensa": results['rewards']
-                        })
+                        st.divider()
                         
-                        eval_fig = px.bar(
-                            eval_df,
-                            x="Episódio",
-                            y="Recompensa",
-                            title="Recompensa por Episódio de Avaliação",
-                            color_discrete_sequence=['#2f80ed']
-                        )
+                        eval_tab1, eval_tab2 = st.tabs(["Gráfico de Barras", "Histograma de Recompensas"])
                         
-                        eval_fig.update_layout(
-                            paper_bgcolor='rgba(0,0,0,0)',
-                            plot_bgcolor='rgba(0,0,0,0)',
-                            font_color='#e6edf3',
-                            title_font_size=14,
-                            margin=dict(t=30, b=10, l=10, r=10)
-                        )
+                        with eval_tab1:
+                            eval_df = pd.DataFrame({
+                                "Episódio": list(range(1, len(results['rewards']) + 1)),
+                                "Recompensa": results['rewards']
+                            })
+                            
+                            eval_fig = px.bar(
+                                eval_df,
+                                x="Episódio",
+                                y="Recompensa",
+                                title="Recompensa por Episódio de Avaliação",
+                                color_discrete_sequence=['#2f80ed']
+                            )
+                            
+                            eval_fig.update_layout(
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                font_color='#e6edf3',
+                                title_font_size=14,
+                                margin=dict(t=30, b=10, l=10, r=10)
+                            )
+                            
+                            st.plotly_chart(eval_fig, use_container_width=True)
                         
-                        st.plotly_chart(eval_fig, use_container_width=True)
+                        with eval_tab2:
+                            hist_fig = px.histogram(
+                                results['rewards'],
+                                nbins=10,
+                                title="Distribuição de Recompensas",
+                                color_discrete_sequence=['#8b5cf6']
+                            )
+                            
+                            hist_fig.update_layout(
+                                paper_bgcolor='rgba(0,0,0,0)',
+                                plot_bgcolor='rgba(0,0,0,0)',
+                                font_color='#e6edf3',
+                                title_font_size=14,
+                                xaxis_title="Recompensa",
+                                yaxis_title="Contagem",
+                                margin=dict(t=30, b=10, l=10, r=10)
+                            )
+                            
+                            st.plotly_chart(hist_fig, use_container_width=True)
                 else:
                     st.info("Treine um agente para ver os resultados em tempo real!")
                 st.markdown("</div>", unsafe_allow_html=True)
@@ -3692,6 +3754,123 @@ if current_main_section == "🤖 Reinforcement Learning":
                 else:
                     st.info("Nenhum treinamento registrado ainda!")
                 st.markdown("</div>", unsafe_allow_html=True)
+        
+        with rl_tab2:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("📦 Offline Reinforcement Learning")
+            
+            if not D3RLPY_AVAILABLE:
+                st.error("""
+                d3rlpy is not installed! Please install it with:
+                ```
+                pip install d3rlpy==2.3.0
+                ```
+                """)
+            else:
+                col_off_config, col_off_results = st.columns([1,1])
+                
+                with col_off_config:
+                    st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+                    
+                    available_datasets = []
+                    data_lake = DataLake(base_path=os.path.join(ROOT_DIR, "data_lake"))
+                    dataset_root = data_lake.base_path
+                    
+                    if dataset_root.exists():
+                        for dataset_dir in dataset_root.iterdir():
+                            if dataset_dir.is_dir() and dataset_dir.name.startswith("rl_trajectories_"):
+                                for file in dataset_dir.iterdir():
+                                    if file.suffix == ".csv":
+                                        available_datasets.append(f"{dataset_dir.name}/{file.name}")
+                    
+                    if not available_datasets:
+                        st.info("Nenhuma trajetória encontrada no Data Lake! Treine um agente Online com 'Salvar trajetórias' habilitado.")
+                    else:
+                        selected_dataset = st.selectbox("📊 Dataset de Trajetórias", available_datasets, index=0)
+                        off_algorithm = st.selectbox("🤖 Algoritmo Offline", list(OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES.keys()), format_func=lambda x: OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES[x])
+                        n_epochs = st.number_input("⏱️ Épocas de Treinamento", min_value=1, max_value=1000, value=100, step=10)
+                        n_steps_per_epoch = st.number_input("Passos por Época", min_value=100, max_value=10000, value=1000, step=100)
+                        
+                        if st.button("🚀 Treinar Offline", type="primary"):
+                            dataset_path = dataset_root / selected_dataset
+                            df_trajectories = pd.read_csv(dataset_path)
+                            
+                            with st.spinner("Treinando agente offline..."):
+                                trainer = OfflineRLTrainer(algorithm=off_algorithm)
+                                model = trainer.train(df_trajectories, n_epochs=n_epochs, n_steps_per_epoch=n_steps_per_epoch)
+                                
+                                save_dir = os.path.join(ROOT_DIR, "models", "offline_rl")
+                                os.makedirs(save_dir, exist_ok=True)
+                                save_path = os.path.join(save_dir, f"offline_agent_{off_algorithm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+                                trainer.save(save_path)
+                                
+                                st.success(f"✅ Agente Offline treinado e salvo em {save_path}!")
+                    st.markdown("</div>", unsafe_allow_html=True)
+                    
+                with col_off_results:
+                    st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+                    st.info("Treine um agente offline para ver os resultados!")
+                    st.markdown("</div>", unsafe_allow_html=True)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
+        
+        with rl_tab3:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("📊 Visualizar Trajetórias")
+            
+            data_lake = DataLake(base_path=os.path.join(ROOT_DIR, "data_lake"))
+            dataset_root = data_lake.base_path
+            available_datasets = []
+            
+            if dataset_root.exists():
+                for dataset_dir in dataset_root.iterdir():
+                    if dataset_dir.is_dir() and dataset_dir.name.startswith("rl_trajectories_"):
+                        for file in dataset_dir.iterdir():
+                            if file.suffix == ".csv":
+                                available_datasets.append(f"{dataset_dir.name}/{file.name}")
+            
+            if not available_datasets:
+                st.info("Nenhuma trajetória encontrada no Data Lake!")
+            else:
+                selected_dataset = st.selectbox("Selecionar Dataset", available_datasets, index=0, key="traj_select")
+                dataset_path = dataset_root / selected_dataset
+                df_trajectories = pd.read_csv(dataset_path)
+                
+                st.divider()
+                st.subheader("📈 Estatísticas Básicas")
+                t1, t2, t3, t4 = st.columns(4)
+                with t1:
+                    st.metric("Total de Timesteps", len(df_trajectories))
+                with t2:
+                    st.metric("Recompensa Total", f"{df_trajectories['reward'].sum():.2f}")
+                with t3:
+                    st.metric("Recompensa Média", f"{df_trajectories['reward'].mean():.2f}")
+                with t4:
+                    st.metric("Episódios", df_trajectories['done'].sum())
+                
+                st.divider()
+                
+                traj_tab1, traj_tab2, traj_tab3 = st.tabs(["📋 Tabela de Dados", "📊 Gráficos", "ℹ️ Info do Dataset"])
+                
+                with traj_tab1:
+                    st.dataframe(df_trajectories, use_container_width=True)
+                    
+                with traj_tab2:
+                    fig_reward = px.line(df_trajectories, x='timestep', y='reward', title='Recompensa por Timestep', color_discrete_sequence=['#2f80ed'])
+                    fig_reward.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#e6edf3')
+                    st.plotly_chart(fig_reward, use_container_width=True)
+                    
+                    fig_done = px.histogram(df_trajectories, x='done', title='Distribuição de Done', color_discrete_sequence=['#8b5cf6'])
+                    fig_done.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#e6edf3')
+                    st.plotly_chart(fig_done, use_container_width=True)
+                
+                with traj_tab3:
+                    st.markdown(f"**Caminho do Dataset**: {dataset_path}")
+                    st.markdown(f"**Tamanho**: {dataset_path.stat().st_size / 1024:.2f} KB")
+                    st.markdown(f"**Colunas**: {list(df_trajectories.columns)}")
+                    st.dataframe(df_trajectories.describe(), use_container_width=True)
+            
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # --- TAB 3: EXPERIMENTS ---
 if current_main_section == "🧪 Experiments":

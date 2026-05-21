@@ -121,167 +121,60 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             os.environ['MLFLOW_TRACKING_USERNAME'] = dh_user
             os.environ['MLFLOW_TRACKING_PASSWORD'] = dh_pass
 
-        # Import engine
-        from src.core.processor import AutoMLDataProcessor
-        from src.engines.classical import AutoMLTrainer
+        job_type = config.get('type', 'automl')
 
-        task         = config.get('task', 'classification')
-        target       = config.get('target')
-        date_col     = config.get('date_col')
-        train_df     = config.get('train_df')
-        test_df      = config.get('test_df')
-        preset       = config.get('preset', 'medium')
-        n_trials     = config.get('n_trials')
-        timeout      = config.get('timeout')
-        time_budget  = config.get('time_budget')
-        selected_models = config.get('selected_models')
-        manual_params   = config.get('manual_params')
-        experiment_name = config.get('experiment_name', 'AutoML_Experiment')
-        random_state    = config.get('random_state', 42)
-        validation_strategy = config.get('validation_strategy', 'auto')
-        validation_params   = config.get('validation_params', {})
-        ensemble_config     = config.get('ensemble_config', {})
-        optimization_mode   = config.get('optimization_mode', 'bayesian')
-        optimization_metric = config.get('optimization_metric', 'accuracy')
-        nlp_config          = config.get('nlp_config', {})
-        selected_nlp_cols   = config.get('selected_nlp_cols', [])
-        early_stopping      = config.get('early_stopping', 10)
-        forecast_horizon    = config.get('forecast_horizon', 1)
-        target_metric_name  = config.get('target_metric_name', 'ACCURACY')
-        stability_config    = config.get('stability_config')
-
-        log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
-
-        # Data Processing
-        processor = AutoMLDataProcessor(
-            target_column=target, task_type=task,
-            date_col=date_col, forecast_horizon=forecast_horizon,
-            nlp_config=nlp_config
-        )
-        X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
-
-        if test_df is not None:
-            X_test_proc, y_test_proc = processor.transform(test_df)
-        else:
-            X_test_proc, y_test_proc = None, None
-
-        feature_names = processor.get_feature_names()
-        class_names = None
-        if hasattr(processor, 'label_encoder') and processor.label_encoder is not None:
-            try:
-                class_names = processor.label_encoder.classes_.tolist()
-            except Exception:
-                pass
-
-        log_queue.put(("log", f"[JOB] Preprocessing done. Features: {len(feature_names) if feature_names else 'N/A'}"))
-
-        # Trials accumulator
-        trials_data = []
-        report_data = {}
-        model_summaries_snapshot = {}
-
-        # -- Callback from trainer (runs in same subprocess, same thread) --
-        def callback(trial, score, full_name, dur, metrics=None):
-            # Check pause_event
-            while pause_event.is_set():
-                time.sleep(0.5)
-
-            if metrics and '__report__' in metrics:
-                report = metrics['__report__']
-                model_name = report.get('model_name', 'Unknown')
-                report_data[model_name] = report
-
-                # Serialize plots to buffers
-                import io
-                serialized_plots = {}
-                for pname, pobj in report.get('plots', {}).items():
-                    try:
-                        import matplotlib
-                        from PIL import Image
-                        if isinstance(pobj, Image.Image):
-                            buf = io.BytesIO()
-                            pobj.save(buf, format='PNG')
-                            serialized_plots[pname] = ('pil', buf.getvalue())
-                        elif hasattr(pobj, 'savefig'):
-                            buf = io.BytesIO()
-                            pobj.savefig(buf, format='png', bbox_inches='tight', dpi=80)
-                            serialized_plots[pname] = ('mpl', buf.getvalue())
-                    except Exception:
-                        pass
-                serialized_report = {k: v for k, v in report.items() if k != 'plots'}
-                serialized_report['plots'] = serialized_plots
-                status_queue.put({"type": "report", "model_name": model_name, "report": serialized_report})
-                return
-
-            try:
-                algo_name  = full_name.split(" - ")[0]
-                trial_label = full_name.split(" - ")[1]
-                trial_num   = int(trial_label.replace("Trial ", ""))
-            except Exception:
-                algo_name  = full_name
-                trial_num  = getattr(trial, 'number', 0)
-
-            import numpy as np
-            trial_info = {
-                "Global Trial": getattr(trial, 'number', 0) + 1,
-                "Model Trial": trial_num,
-                "Model": algo_name,
-                "Identifier": full_name,
-                "Duration (s)": dur,
-            }
-            if metrics:
-                for m_k, m_v in metrics.items():
-                    if m_k != "__report__" and isinstance(m_v, (int, float, np.number)):
-                        trial_info[m_k.upper()] = m_v
-            if target_metric_name not in trial_info:
-                trial_info[target_metric_name] = score
-
-            trials_data.append(trial_info)
-            status_queue.put({"type": "trial", "trial": trial_info, "score": float(score), "full_name": full_name})
-
-        # Training — forward DL/ensemble flags from job config
-        use_ensemble      = config.get('use_ensemble', True)
-        use_deep_learning = config.get('use_deep_learning', True)
-        ensemble_mode     = config.get('ensemble_mode', 'both')  # 'single', 'ensemble_only', 'both'
-        trainer = AutoMLTrainer(
-            task_type=task,
-            preset=preset,
-            ensemble_config=ensemble_config,
-            use_ensemble=use_ensemble,
-            use_deep_learning=use_deep_learning,
-            ensemble_mode=ensemble_mode,
-            n_jobs=config.get('n_jobs', -1)
-        )
-        clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
-
-        best_model = trainer.train(
-            X_train_proc, y_train_proc,
-            n_trials=n_trials,
-            timeout=timeout,
-            time_budget=time_budget,
-            callback=callback,
-            selected_models=selected_models,
-            early_stopping_rounds=early_stopping,
-            manual_params=manual_params,
-            experiment_name=clean_exp_name,
-            random_state=random_state,
-            validation_strategy=validation_strategy,
-            validation_params=validation_params,
-            optimization_mode=optimization_mode,
-            optimization_metric=optimization_metric,
-            stability_config=stability_config,
-            feature_names=feature_names,
-            class_names=class_names,
-        )
-
-        best_score = getattr(trainer, 'best_score', None)
-        best_params = getattr(trainer, 'best_params', {})
-        model_summaries_snapshot = getattr(trainer, 'model_summaries', {})
-        consumption_code = getattr(trainer, 'best_consumption_code', None)
-
-        # Get MLflow run ID
-        run_id = getattr(trainer, 'best_run_id', None)
-        if not run_id:
+        if job_type == 'rl':
+            log_queue.put(("log", f"[JOB] Starting RL training for {config.get('env_id')} with {config.get('algorithm')}"))
+            
+            from src.engines.reinforcement_learning import RLTrainer
+            from src.core.data_lake import DataLake
+            
+            env_id = config.get('env_id', 'CartPole-v1')
+            algorithm = config.get('algorithm', 'ppo')
+            total_timesteps = config.get('total_timesteps', 10000)
+            policy = config.get('policy', 'MlpPolicy')
+            use_optuna = config.get('use_optuna', False)
+            optuna_trials = config.get('optuna_trials', 20)
+            save_trajectories = config.get('save_trajectories', False)
+            wrappers = config.get('wrappers', [])
+            custom_env_path = config.get('custom_env_path', None)
+            data_lake_base_path = config.get('data_lake_base_path', None)
+            
+            data_lake = None
+            if save_trajectories and data_lake_base_path:
+                data_lake = DataLake(base_path=data_lake_base_path)
+            
+            trainer = RLTrainer(
+                env_id=env_id,
+                algorithm=algorithm,
+                total_timesteps=total_timesteps,
+                policy=policy,
+                wrappers=wrappers,
+                custom_env_path=custom_env_path,
+                verbose=1
+            )
+            
+            model = trainer.train(
+                use_optuna=use_optuna,
+                optuna_trials=optuna_trials,
+                save_trajectories=save_trajectories,
+                data_lake=data_lake
+            )
+            
+            eval_results = trainer.evaluate(n_eval_episodes=10)
+            mean_reward = eval_results['mean_reward']
+            std_reward = eval_results['std_reward']
+            
+            log_queue.put(("log", f"[JOB] RL training complete! Mean reward: {mean_reward:.2f} ± {std_reward:.2f}"))
+            
+            save_dir = config.get('save_dir', os.path.join(os.getcwd(), 'models', 'rl'))
+            os.makedirs(save_dir, exist_ok=True)
+            save_path = os.path.join(save_dir, f"rl_agent_{env_id}_{algorithm}")
+            trainer.save(save_path)
+            log_queue.put(("log", f"[JOB] Model saved to {save_path}"))
+            
+            # Get MLflow run ID
+            run_id = None
             try:
                 import mlflow
                 active = mlflow.active_run()
@@ -289,33 +182,218 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                     run_id = active.info.run_id
             except Exception:
                 pass
+                
+            status_queue.put({
+                "type": "done",
+                "best_score": float(mean_reward),
+                "best_params": {
+                    "env_id": env_id,
+                    "algorithm": algorithm,
+                    "total_timesteps": total_timesteps
+                },
+                "mlflow_run_id": run_id,
+                "mlflow_experiment": f"RL_{env_id}",
+                "model_summaries": {},
+                "eval_metrics": eval_results,
+                "consumption_code": None
+            })
+            
+        else:
+            # Import engine
+            from src.core.processor import AutoMLDataProcessor
+            from src.engines.classical import AutoMLTrainer
 
-        # Evaluate on test set
-        eval_metrics = None
-        if X_test_proc is not None:
-            try:
-                eval_metrics, _ = trainer.evaluate(X_test_proc, y_test_proc)
-            except Exception as e:
-                log_queue.put(("log", f"[JOB] Evaluation failed: {e}"))
+            task         = config.get('task', 'classification')
+            target       = config.get('target')
+            date_col     = config.get('date_col')
+            train_df     = config.get('train_df')
+            test_df      = config.get('test_df')
+            preset       = config.get('preset', 'medium')
+            n_trials     = config.get('n_trials')
+            timeout      = config.get('timeout')
+            time_budget  = config.get('time_budget')
+            selected_models = config.get('selected_models')
+            manual_params   = config.get('manual_params')
+            experiment_name = config.get('experiment_name', 'AutoML_Experiment')
+            random_state    = config.get('random_state', 42)
+            validation_strategy = config.get('validation_strategy', 'auto')
+            validation_params   = config.get('validation_params', {})
+            ensemble_config     = config.get('ensemble_config', {})
+            optimization_mode   = config.get('optimization_mode', 'bayesian')
+            optimization_metric = config.get('optimization_metric', 'accuracy')
+            nlp_config          = config.get('nlp_config', {})
+            selected_nlp_cols   = config.get('selected_nlp_cols', [])
+            early_stopping      = config.get('early_stopping', 10)
+            forecast_horizon    = config.get('forecast_horizon', 1)
+            target_metric_name  = config.get('target_metric_name', 'ACCURACY')
+            stability_config    = config.get('stability_config')
 
-        log_queue.put(("log", f"[JOB] Training complete! Best: {best_params.get('model_name','?')} Score: {best_score:.4f}" if best_score else "[JOB] Training complete!"))
+            log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
 
-        # Serialize model summaries (drop non-serializable plot objects)
-        safe_summaries = {}
-        for m_name, info in model_summaries_snapshot.items():
-            safe_info = {k: v for k, v in info.items() if k not in ('model', 'plots')}
-            safe_summaries[m_name] = safe_info
+            # Data Processing
+            processor = AutoMLDataProcessor(
+                target_column=target, task_type=task,
+                date_col=date_col, forecast_horizon=forecast_horizon,
+                nlp_config=nlp_config
+            )
+            X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
 
-        status_queue.put({
-            "type": "done",
-            "best_score": float(best_score) if best_score is not None else None,
-            "best_params": best_params,
-            "mlflow_run_id": run_id,
-            "mlflow_experiment": clean_exp_name,
-            "model_summaries": safe_summaries,
-            "eval_metrics": eval_metrics,
-            "consumption_code": consumption_code,
-        })
+            if test_df is not None:
+                X_test_proc, y_test_proc = processor.transform(test_df)
+            else:
+                X_test_proc, y_test_proc = None, None
+
+            feature_names = processor.get_feature_names()
+            class_names = None
+            if hasattr(processor, 'label_encoder') and processor.label_encoder is not None:
+                try:
+                    class_names = processor.label_encoder.classes_.tolist()
+                except Exception:
+                    pass
+
+            log_queue.put(("log", f"[JOB] Preprocessing done. Features: {len(feature_names) if feature_names else 'N/A'}"))
+
+            # Trials accumulator
+            trials_data = []
+            report_data = {}
+            model_summaries_snapshot = {}
+
+            # -- Callback from trainer (runs in same subprocess, same thread) --
+            def callback(trial, score, full_name, dur, metrics=None):
+                # Check pause_event
+                while pause_event.is_set():
+                    time.sleep(0.5)
+
+                if metrics and '__report__' in metrics:
+                    report = metrics['__report__']
+                    model_name = report.get('model_name', 'Unknown')
+                    report_data[model_name] = report
+
+                    # Serialize plots to buffers
+                    import io
+                    serialized_plots = {}
+                    for pname, pobj in report.get('plots', {}).items():
+                        try:
+                            import matplotlib
+                            from PIL import Image
+                            if isinstance(pobj, Image.Image):
+                                buf = io.BytesIO()
+                                pobj.save(buf, format='PNG')
+                                serialized_plots[pname] = ('pil', buf.getvalue())
+                            elif hasattr(pobj, 'savefig'):
+                                buf = io.BytesIO()
+                                pobj.savefig(buf, format='png', bbox_inches='tight', dpi=80)
+                                serialized_plots[pname] = ('mpl', buf.getvalue())
+                        except Exception:
+                            pass
+                    serialized_report = {k: v for k, v in report.items() if k != 'plots'}
+                    serialized_report['plots'] = serialized_plots
+                    status_queue.put({"type": "report", "model_name": model_name, "report": serialized_report})
+                    return
+
+                try:
+                    algo_name  = full_name.split(" - ")[0]
+                    trial_label = full_name.split(" - ")[1]
+                    trial_num   = int(trial_label.replace("Trial ", ""))
+                except Exception:
+                    algo_name  = full_name
+                    trial_num  = getattr(trial, 'number', 0)
+
+                import numpy as np
+                trial_info = {
+                    "Global Trial": getattr(trial, 'number', 0) + 1,
+                    "Model Trial": trial_num,
+                    "Model": algo_name,
+                    "Identifier": full_name,
+                    "Duration (s)": dur,
+                }
+                if metrics:
+                    for m_k, m_v in metrics.items():
+                        if m_k != "__report__" and isinstance(m_v, (int, float, np.number)):
+                            trial_info[m_k.upper()] = m_v
+                if target_metric_name not in trial_info:
+                    trial_info[target_metric_name] = score
+
+                trials_data.append(trial_info)
+                status_queue.put({"type": "trial", "trial": trial_info, "score": float(score), "full_name": full_name})
+
+            # Training — forward DL/ensemble flags from job config
+            use_ensemble      = config.get('use_ensemble', True)
+            use_deep_learning = config.get('use_deep_learning', True)
+            ensemble_mode     = config.get('ensemble_mode', 'both')  # 'single', 'ensemble_only', 'both'
+            trainer = AutoMLTrainer(
+                task_type=task,
+                preset=preset,
+                ensemble_config=ensemble_config,
+                use_ensemble=use_ensemble,
+                use_deep_learning=use_deep_learning,
+                ensemble_mode=ensemble_mode,
+                n_jobs=config.get('n_jobs', -1)
+            )
+            clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
+
+            best_model = trainer.train(
+                X_train_proc, y_train_proc,
+                n_trials=n_trials,
+                timeout=timeout,
+                time_budget=time_budget,
+                callback=callback,
+                selected_models=selected_models,
+                early_stopping_rounds=early_stopping,
+                manual_params=manual_params,
+                experiment_name=clean_exp_name,
+                random_state=random_state,
+                validation_strategy=validation_strategy,
+                validation_params=validation_params,
+                optimization_mode=optimization_mode,
+                optimization_metric=optimization_metric,
+                stability_config=stability_config,
+                feature_names=feature_names,
+                class_names=class_names,
+            )
+
+            best_score = getattr(trainer, 'best_score', None)
+            best_params = getattr(trainer, 'best_params', {})
+            model_summaries_snapshot = getattr(trainer, 'model_summaries', {})
+            consumption_code = getattr(trainer, 'best_consumption_code', None)
+
+            # Get MLflow run ID
+            run_id = getattr(trainer, 'best_run_id', None)
+            if not run_id:
+                try:
+                    import mlflow
+                    active = mlflow.active_run()
+                    if active:
+                        run_id = active.info.run_id
+                except Exception:
+                    pass
+
+            # Evaluate on test set
+            eval_metrics = None
+            if X_test_proc is not None:
+                try:
+                    eval_metrics, _ = trainer.evaluate(X_test_proc, y_test_proc)
+                except Exception as e:
+                    log_queue.put(("log", f"[JOB] Evaluation failed: {e}"))
+
+            log_queue.put(("log", f"[JOB] Training complete! Best: {best_params.get('model_name','?')} Score: {best_score:.4f}" if best_score else "[JOB] Training complete!"))
+
+            # Serialize model summaries (drop non-serializable plot objects)
+            safe_summaries = {}
+            for m_name, info in model_summaries_snapshot.items():
+                safe_info = {k: v for k, v in info.items() if k not in ('model', 'plots')}
+                safe_summaries[m_name] = safe_info
+
+            status_queue.put({
+                "type": "done",
+                "best_score": float(best_score) if best_score is not None else None,
+                "best_params": best_params,
+                "mlflow_run_id": run_id,
+                "mlflow_experiment": clean_exp_name,
+                "model_summaries": safe_summaries,
+                "eval_metrics": eval_metrics,
+                "consumption_code": consumption_code,
+            })
 
     except Exception as e:
         err = traceback.format_exc()
