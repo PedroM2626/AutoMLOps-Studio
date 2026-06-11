@@ -35,6 +35,10 @@ def test_rl_basic():
     print("=" * 60)
     
     try:
+        import mlflow
+        mlflow.set_tracking_uri("sqlite:///tmp_test_mlflow.db")
+        mlflow.set_experiment("RL_Test_Experiment")
+        
         trainer = RLTrainer(
             env_id='CartPole-v1',
             algorithm='ppo',

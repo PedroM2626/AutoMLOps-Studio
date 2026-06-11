@@ -10,185 +10,129 @@
 [![MLflow](https://img.shields.io/badge/MLflow-Integrated-0194E2?style=flat&logo=mlflow&logoColor=white)](https://mlflow.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-App-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://streamlit.io/)
 
-**AutoMLOps Studio** is an "end-to-end" educational platform designed to simplify the Machine Learning lifecycle. Developed **by a student, for students**, the project provides an intuitive interface to explore everything from data ingestion to production model monitoring.
+**AutoMLOps Studio** is an "end-to-end" educational and practical platform designed to simplify the Machine Learning lifecycle. Developed **by a student, for students**, the project provides an intuitive interface to explore everything from data ingestion to production model monitoring, applying the best MLOps principles at every stage.
 
 **🔗 Access the live Demo:** [Streamlit Cloud - AutoMLOps Studio](https://automlops-studio.streamlit.app/)
-
----
-
-## 🌟 What's New in v5.3.0
-
-### 🤖 Complete Reinforcement Learning Module
-- **Online RL with Job Manager**: Submit RL training jobs to run in background via Job Manager
-- **Offline RL**: Train agents from existing trajectories using BCQ, CQL, TD3+BC, or IWBC (via d3rlpy)
-- **Trajectory Visualization**: Detailed visualization of saved trajectories from the Data Lake
-- **Trajectory Saving to Data Lake**: Save agent trajectories (state, action, reward, done) to the data lake
-- **Enhanced Evaluation**: Histograms of reward distribution, detailed stats, and visualizations
-- **Real-Time Monitoring**: Live metrics display during training:
-  - Reward per episode
-  - Moving average (last 100 episodes)
-  - Timesteps completed
-  - Memory usage
-- **Custom Environment Support**: Upload your own Gymnasium-compatible environment files
-- **Common Wrappers**: Quick access to FrameStack, GrayScaleObservation, ResizeObservation, NormalizeObservation, NormalizeReward
-- **Optuna Integration**: Automated hyperparameter optimization with configurable trials
-- **Training History**: Track multiple training runs and compare them side by side
-- **Configuration Saving**: Save and load training configurations (JSON and YAML)
-- **Improved MLflow Integration**: Logging of all hyperparameters, metrics, config files, and trajectories
-
-## 🌟 What's New in v5.2.0
-
-### 🤖 Enhanced Reinforcement Learning Module
-- **Real-Time Monitoring**: Live metrics display during training:
-  - Reward per episode
-  - Moving average (last 100 episodes)
-  - Timesteps completed
-  - Memory usage
-- **Custom Environment Support**: Upload your own Gymnasium-compatible environment files
-- **Common Wrappers**: Quick access to FrameStack, GrayScaleObservation, ResizeObservation, NormalizeObservation, NormalizeReward
-- **Optuna Integration**: Automated hyperparameter optimization with configurable trials
-- **Training History**: Track multiple training runs and compare them side by side
-- **Enhanced Evaluation**: Detailed evaluation metrics (mean, std, min, max) and visualizations
-- **Configuration Saving**: Save and load training configurations (JSON and YAML)
-- **Improved MLflow Integration**: Logging of all hyperparameters, metrics, and config files
-
-### 🤖 Reinforcement Learning Module (v5.1.0)
-- **New RL Page**: Complete interface for training and evaluating reinforcement learning agents
-- **Supported Algorithms**: PPO, DQN, A2C, SAC, TD3 (via Stable Baselines3)
-- **Gymnasium Integration**: Support for standard RL environments (CartPole, MountainCar, LunarLander, etc.)
-- **MLflow Tracking**: Full integration to track RL experiments (parameters, metrics, artifacts)
-- **Hyperparameter Tuning**: Dynamic UI for configuring algorithm-specific hyperparameters
-- **Visualization**: Real-time results display with metrics and reward plots
-- **Save/Load**: Save trained agents and load them for later use
-
-### 🤖 Unified AutoML Studio
-- **Single Unified Entry Point**: AutoML now starts in one workspace with a modality selector (**Tabular** or **Computer Vision**)
-- **Conditional Options**: Dynamic interface adapts to selected modality and task type
-- **Simplified Navigation**: No duplicated training flows between separate tabs
-
-### 🖼️ Enhanced Computer Vision
-- **New Vision Tasks**: Added **Anomaly Detection** and **Pose Estimation**
-- **Task-Specific Configuration**: Different options for classification, multi-label, segmentation, detection, anomaly detection, and pose estimation
-- **Dynamic UI**: Options appear/hide based on selected CV task type
-- **Integrated Pipeline**: CV models now follow the same MLOps pipeline as tabular models
-
-### 🎯 Smart Task Selection
-- **New Tabular Tasks**: Added **Association Rules**, **Ranking**, and **Multi-Label** for tabular datasets
-- **Unified Task Types**: Tabular and vision tasks are available from the same AutoML entry point
-- **Context-Aware Options**: Parameters change dynamically based on data and task type
-- **Mixed Data Support**: Handle both tabular and image data in unified workflows
-
-### ✅ Pipeline Coverage Improvements
-- **Tabular Multi-Label End-to-End**: Multi-target column selection and processing now supported in the training pipeline
-- **Association Rules Engine**: Built-in rule-mining flow with support, confidence, and lift-based scoring
-- **Ranking Metrics**: Ranking workflows now include ranking-aware optimization metrics (for example, NDCG)
-
-## 📋 Supported Task Types (Tabular vs CV vs RL)
-
-| Modality | Task Type | Brief Description | Main Metrics |
-|---|---|---|---|
-| Tabular | `classification` | Predict a discrete class label. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
-| Tabular | `regression` | Predict a continuous numeric target. | `r2`, `rmse`, `mae` |
-| Tabular | `time_series` | Forecast future values from temporal data. | `rmse`, `mae`, `mape` |
-| Tabular | `clustering` | Group samples by similarity without labels. | `silhouette` |
-| Tabular | `anomaly_detection` | Detect outliers or rare abnormal patterns. | `f1` (when labels exist), anomaly ratio/count |
-| Tabular | `dimensionality_reduction` | Reduce feature space while preserving signal. | `explained_variance` |
-| Tabular | `ranking` | Score items for ordered relevance. | `ndcg`, `rmse`, `mae` |
-| Tabular | `multi_label` | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy`, `precision_micro`, `recall_micro`, `hamming_loss` |
-| Tabular | `association_rules` | Discover co-occurrence rules in tabular/binary patterns. | `rule_score`, `rule_count`, `avg_lift` |
-| Computer Vision | `image_classification` | Assign one class to each image. | `val_acc`, `val_loss` |
-| Computer Vision | `image_multi_label` | Assign multiple labels to each image. | `val_acc` (exact match), `val_loss` |
-| Computer Vision | `image_segmentation` | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
-| Computer Vision | `object_detection` | Detect objects and bounding boxes. | Baseline loop enabled; custom detector metrics can be added per dataset |
-| Computer Vision | `image_anomaly_detection` | Classify images as normal vs anomalous patterns. | `val_acc`, `val_loss` |
-| Computer Vision | `pose_estimation` | Estimate keypoints/body joints from images. | Baseline loop enabled; keypoint metrics depend on annotation format |
-| Reinforcement Learning | `rl_agent` | Train an agent to maximize reward through interaction. | `episode_reward`, `mean_reward`, `episode_length` |
-
-> Notes:
-> - Tabular metrics are configurable in the AutoML optimization step.
-> - Some CV tasks (detection/pose) are scaffolded and ready in pipeline/UI; task-specific benchmark metrics (for example mAP/OKS) can be plugged in according to annotation standards.
-
-### 🛠️ Enhanced Training Presets
-- **Fast Preset Fix**: Resolved premature trial termination issue, ensuring consistent behavior across all presets.
-- **Customizable Trials**: Added flexibility for manual configuration of trials and timeouts in "Custom" mode.
-
-### 🎯 Improved Model Selection
-- **`bagging` Removed**: Hidden from user-facing model lists to streamline the selection process.
-- **Dynamic Forms**: Replaced manual JSON editor with interactive forms for algorithm parameter tuning.
-
-### ⚡ MLflow Integration
-- **Warning Fixes**: Addressed `os` variable scope conflicts for seamless logging.
-- **Enhanced Tracking**: Improved parameter and metric logging for better experiment reproducibility.
-
-### 🖥️ Streamlit Wizard Updates
-- **Robustness Improvements**: Enhanced error handling for missing dataset versions and invalid configurations.
-- **UI Refinements**: Polished interface for a smoother user experience.
 
 ---
 
 ## 🎯 Objective & Problem Statement
 
 Learning MLOps often requires dealing with complex infrastructures before even understanding the core concepts. This project solves that by centralizing:
-- **Unified Workflow**: A clear journey from data upload to deployment.
+- **Unified Workflow**: A clear journey from data upload to deployment across multiple domains (Tabular, Vision, Reinforcement Learning).
 - **Visual Experimentation**: Visualize the impact of hyperparameters and architectures in real-time.
 - **Production Concepts**: Learn about Data Drift, Model Serving, and Performance Monitoring without the need to configure complex servers.
+- **Autonomy**: Train models with automatic tracking of parameters, metrics, models, and dependencies using MLflow.
 
+---
 
-### 3. 🧪 Experiments & MLOps
-- **Job Manager**: Comprehensive dashboard for background job control.
-- **MLflow Tracking**: Integrated logging of params, metrics, and architecture diagrams.
-- **Reports**: Automated performance reports (ROC, PR, Residuals, SHAP) saved as artifacts.
-- **Optimized Performance**: Streamlit caching system for fast data loading and real-time updates.
+## 🧠 Educational Concepts Built-In
 
-### 4. 🚀 Serving & Deployment
-- **FastAPI Serving**: Production-ready API for real-time inference with API Key security.
-- **Live Telemetry**: Input data and predictions are logged for drift and performance analysis.
+Since AutoMLOps Studio is built for learning, it natively enforces and exposes industry-standard MLOps practices:
+
+### 1. The Tri-Split Rule (Train / Validation / Test)
+One of the most confusing concepts for beginners is why data needs to be split multiple times. AutoMLOps enforces a strict, professional evaluation pipeline:
+- **Train Split**: The "textbook" the model uses to learn patterns.
+- **Validation Split**: The "practice exam". During AutoML, the system tests thousands of hyperparameter combinations and evaluates them here. Since the model is *tuned* based on this score, the result is artificially optimistic.
+- **Test Split (Global Holdout)**: The "final exam". This data is isolated entirely at the beginning of the pipeline. The model only sees it **once**, at the very end, providing an unbiased, real-world performance metric free of Data Leakage.
+
+### 2. Preventing Data Leakage
+The platform strictly handles preprocessing (like scaling, imputation, or SMOTE) inside Scikit-Learn pipelines. This ensures that transformations are fitted *only* on training data and applied safely to validation/test sets, preventing future information from leaking into the training phase.
+
+### 3. Model Telemetry & Data Drift
+Models degrade over time. By serving the model via the FastAPI endpoint, all incoming predictions and actual inputs are logged. The system uses these logs to simulate and detect **Data Drift**, showing students what happens when real-world distributions shift away from the original training data.
+
+---
+
+## 🌟 Key Features
+
+### 1. 🤖 Multi-Domain Machine Learning
+- **Tabular Data**: Full support for Classification, Regression, Time Series Forecasting, Clustering, Anomaly Detection, Ranking, Multi-Label, and Association Rules. Includes Optuna optimization.
+- **Computer Vision**: Train models for Image Classification, Multi-Label, Segmentation, Object Detection, Anomaly Detection, and Pose Estimation with the same MLOps pipeline as tabular data.
+- **Reinforcement Learning**: Complete module for training agents (PPO, DQN, A2C, SAC, TD3) on environments like CartPole, LunarLander, etc. Includes online training, offline RL (via d3rlpy), custom Gymnasium environments, wrappers, Optuna hyperparameter tuning, and live visualization of rewards.
+
+### 2. 🧪 Experiments & MLOps Integration
+- **MLflow Tracking**: Every experiment run is automatically tracked. This includes logging of configurations, hyperparameters, metrics, and model artifacts (including environments and YAML configurations for RL runs).
+- **Job Manager**: Comprehensive dashboard for background job control. Train complex models and RL agents in the background via subprocesses without locking the Streamlit UI.
+- **Data Lake & Trajectories**: Save datasets, images, and RL agent trajectories (states, actions, rewards, terminal signals) to a centralized Data Lake.
+
+### 3. 🚀 Serving & Deployment
+- **FastAPI Serving**: Production-ready API (`api.py`) for real-time inference with API Key security.
+- **Live Telemetry & Data Drift**: Input data and predictions are logged dynamically for drift and performance analysis.
 - **Playground**: Interactive UI to test registered models via JSON or CSV Batch.
+
+---
+
+## 📋 Supported Task Types
+
+| Modality | Task Type | Brief Description | Main Metrics |
+|---|---|---|---|
+| **Tabular** | `classification` | Predict a discrete class label. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
+| **Tabular** | `regression` | Predict a continuous numeric target. | `r2`, `rmse`, `mae` |
+| **Tabular** | `time_series` | Forecast future values from temporal data. | `rmse`, `mae`, `mape` |
+| **Tabular** | `clustering` | Group samples by similarity without labels. | `silhouette` |
+| **Tabular** | `anomaly_detection` | Detect outliers or rare abnormal patterns. | `f1`, anomaly ratio |
+| **Tabular** | `ranking` | Score items for ordered relevance. | `ndcg` |
+| **Tabular** | `multi_label` | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy` |
+| **Tabular** | `association_rules` | Discover co-occurrence rules. | `rule_score`, `lift` |
+| **Computer Vision** | `image_classification` | Assign one class to each image. | `val_acc`, `val_loss` |
+| **Computer Vision** | `image_segmentation` | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
+| **Computer Vision** | `object_detection` | Detect objects and bounding boxes. | Benchmark metrics |
+| **Computer Vision** | `pose_estimation` | Estimate keypoints/body joints. | Keypoint accuracy |
+| **Reinforcement Learning** | `rl_agent` | Train an agent to maximize reward. | `episode_reward`, `mean_reward` |
 
 ---
 
 ## 📂 Project Structure
 
-- `app.py`: Main Streamlit UI with unified AutoML mode switching (Tabular/CV) and optimized caching.
-- `src/core/`: Data processor, Drift detection, and Trainer constants.
-- `src/engines/`: Classical (Scikit-Learn/XGB), Vision (Torch), and Stability engines with extended task-type support.
-- `src/tracking/`: Subprocess Job Manager and MLflow wrappers.
+- `app.py`: Main Streamlit UI with unified mode switching (Tabular, CV, RL) and optimized caching.
+- `api.py`: FastAPI implementation for model serving and telemetry.
+- `src/engines/`: Contains the core machine learning logic.
+  - `reinforcement_learning.py`: RL logic handling Online/Offline training and Callbacks.
+- `src/tracking/`: Subprocess Job Manager and MLflow tracking wrappers.
+- `src/core/`: Data processors, Drift detection logic.
 - `src/ui/`: Design system and custom CSS components.
-- `api.py`: FastAPI implementation for model serving.
+- `Dockerfile` & `docker-compose.yml`: Infrastructure containerization.
+- `requirements.txt`: Project dependencies with pinned environment libraries.
 
 ---
 
 ## 🚀 How to Run
 
-### 🐳 Via Docker (Fastest)
+### 🐳 Via Docker (Recommended)
+AutoMLOps Studio is fully dockerized to ensure it can be easily deployed and used in any environment.
+
 ```bash
 docker-compose up --build
 ```
-This starts the **Dashboard (8501)**, the **Serving API (8000)**, and the **MLflow UI (5000)**.
+This single command spins up three services:
+- **Dashboard (Streamlit)**: `http://localhost:8501`
+- **Serving API (FastAPI)**: `http://localhost:8000`
+- **MLflow UI**: `http://localhost:5000`
 
 ### 🐍 Locally (Python)
+Ensure you have Python installed.
+
+1. **Install Requirements**:
 ```bash
 pip install -r requirements.txt
+```
+*(Dependencies like `stable-baselines3[extra]`, `gymnasium`, and `d3rlpy` are included for full ML and RL support).*
+
+2. **Run the Streamlit Dashboard**:
+```bash
 python -m streamlit run app.py
 ```
 
----
+3. **Run the Serving API (Optional)**:
+```bash
+uvicorn api:app --reload --port 8000
+```
 
-## ❗ Discontinued: Reflex Interface
-
-The Reflex-based interface was **discontinued and completely removed** from the project in version v4.8.0. 
-
-### 📋 Reasons for Discontinuation:
-1. **Performance & Complexity**: The Streamlit interface, after implementing comprehensive caching strategies (`st.cache_data`), achieved superior performance and responsiveness.
-2. **Development Velocity**: Streamlit's data-first approach allows for faster iteration and implementation of MLOps features compared to the overhead of managing state in Reflex.
-3. **Redundancy**: Maintaining two separate UIs (Streamlit + Reflex) created unnecessary complexity without significant user benefits.
-4. **Ecosystem Maturity**: Streamlit's mature ecosystem for data visualization (Plotly, Matplotlib, SHAP) and MLflow integration proved more reliable for MLOps workflows.
-
-### ✅ Current State:
-- **Streamlit Only**: The project now focuses exclusively on a single, highly-optimized Streamlit interface.
-- **Enhanced Performance**: Implemented intelligent caching for Data Lake operations, MLflow queries, and DataFrame loading.
-- **Unified Experience**: AutoML now uses one workflow entry point with modality-based dynamic options.
-- **Broader Task Coverage**: New task types for both tabular and vision are integrated into the same MLOps pipeline.
+4. **Run the MLflow UI (Optional)**:
+```bash
+mlflow ui --port 5000
+```
 
 ---
 

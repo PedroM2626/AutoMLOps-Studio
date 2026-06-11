@@ -25,9 +25,7 @@ try:
         BaseCallback, EvalCallback, CheckpointCallback, 
         StopTrainingOnRewardThreshold, CallbackList
     )
-    from stable_baselines3.common.atari_wrappers import (
-        FrameStack, GrayScaleObservation, ResizeObservation
-    )
+
     import optuna
     STABLE_BASELINES_AVAILABLE = True
 except ImportError:
@@ -246,13 +244,13 @@ class RLTrainer:
                 wrapper_params = wrapper_config.get('params', {})
                 
                 if wrapper_name == 'FrameStack':
-                    from stable_baselines3.common.atari_wrappers import FrameStack
+                    from gymnasium.wrappers import FrameStackObservation as FrameStack
                     env = FrameStack(env, **wrapper_params)
                 elif wrapper_name == 'GrayScaleObservation':
-                    from stable_baselines3.common.atari_wrappers import GrayScaleObservation
+                    from gymnasium.wrappers import GrayScaleObservation
                     env = GrayScaleObservation(env, **wrapper_params)
                 elif wrapper_name == 'ResizeObservation':
-                    from stable_baselines3.common.atari_wrappers import ResizeObservation
+                    from gymnasium.wrappers import ResizeObservation
                     env = ResizeObservation(env, **wrapper_params)
             
             env = Monitor(env)
@@ -330,7 +328,6 @@ class RLTrainer:
             data_lake=data_lake,
             env_id=self.env_id
         )
-        self.callback.training_env = self.env
         
         callback_list = CallbackList([eval_callback, checkpoint_callback, self.callback])
         
@@ -354,6 +351,7 @@ class RLTrainer:
             'timestamp': datetime.now().isoformat()
         }
         
+        os.makedirs("tmp", exist_ok=True)
         with open("tmp/rl_config.yaml", "w") as f:
             yaml.dump(config_dict, f)
         
