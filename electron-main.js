@@ -9,7 +9,7 @@ let pythonProcess = null;
 
 // Configuration
 const PY_PORT = 8501;
-const UI_URL = `http://localhost:${PY_PORT}`;
+const UI_URL = `http://127.0.0.1:${PY_PORT}`;
 
 function getPythonPath() {
   // Check for virtual environment first
@@ -45,10 +45,10 @@ function createPythonProcess() {
 
   // Use shell: true on Windows to help resolve commands
   pythonProcess = spawn(pythonExecutable, [
-    '-m', 'streamlit', 'run', `"${scriptPath}"`,
+    '-m', 'streamlit', 'run', scriptPath,
     '--server.port', PY_PORT.toString(),
     '--server.headless', 'true',
-    '--server.address', 'localhost'
+    '--server.address', '127.0.0.1'
   ], { 
     env,
     shell: os.platform() === 'win32' // Important for command resolution on Windows
@@ -98,7 +98,9 @@ function createWindow() {
       if (retries < 20) {
         setTimeout(() => loadUrlWithRetry(retries + 1), 1000);
       } else {
-        mainWindow.loadFile(path.join(__dirname, 'error_loading.html')); // Fallback
+        mainWindow.loadFile(path.join(__dirname, 'error_loading.html')).catch(e => {
+            console.error('Failed to load error_loading.html:', e);
+        }); // Fallback
       }
     });
   };
