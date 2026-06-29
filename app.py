@@ -11,6 +11,7 @@ from src.core.processor import AutoMLDataProcessor
 from src.core.data_lake import DataLake
 from src.engines.classical import AutoMLTrainer
 from src.engines.reinforcement_learning import RLTrainer, get_available_rl_environments, STABLE_BASELINES_AVAILABLE, OfflineRLTrainer, D3RLPY_AVAILABLE
+from src.core.orchestrator import AutoMLOrchestrator
 from dotenv import load_dotenv
 import os
 
@@ -3295,11 +3296,21 @@ if current_main_section == "⚙️ AutoML":
                             mlflow.set_tag("task_type", cv_task)
                             mlflow.set_tag("is_cv", "true")
 
-                            best_model_cv = trainer.train(
-                                data_dir=data_dir, n_epochs=epochs, batch_size=batch_size,
-                                lr=lr_cv, callback=cv_callback, mask_dir=None,
-                                augmentation_config=aug_config, label_csv=label_csv_path,
-                                val_split=val_split, optimizer_name=optimizer
+                            orchestrator = AutoMLOrchestrator({
+                                'task_type': cv_task,
+                                'selected_backbone': selected_backbone,
+                                'epochs': epochs,
+                                'batch_size': batch_size,
+                                'lr': lr_cv,
+                                'dataset_path': data_dir,
+                            })
+                            trainer, best_model_cv = orchestrator.run_vision_training(
+                                epoch_callback=cv_callback,
+                                mask_dir=None,
+                                augmentation_config=aug_config,
+                                label_csv=label_csv_path,
+                                val_split=val_split,
+                                optimizer_name=optimizer
                             )
                             st.success("✨ Vision Training Complete!")
                             st.session_state['best_cv_model'] = best_model_cv
@@ -3545,50 +3556,37 @@ if current_main_section == "🤖 Reinforcement Learning":
                     status_text = st.empty()
                     
                     try:
-                        trainer = RLTrainer(
-                            env_id=env_id,
-                            algorithm=algorithm,
-                            total_timesteps=total_timesteps,
-                            policy=policy,
-                            custom_env_path=custom_env_path,
-                            wrappers=wrappers,
-                            verbose=1,
-                            **hyperparams
-                        )
+                        orchestrator = AutoMLOrchestrator({
+                            'env_id': env_id,
+                            'algorithm': algorithm,
+                            'total_timesteps': total_timesteps,
+                            'policy': policy,
+                            'custom_env_path': custom_env_path,
+                            'wrappers': wrappers,
+                            'use_optuna': use_optuna,
+                            'optuna_trials': optuna_trials if use_optuna else 20,
+                            'save_trajectories': save_trajectories,
+                            'data_lake_base_path': os.path.join(ROOT_DIR, "data_lake")
+                        })
                         
-                        with mlflow.start_run(run_name=f"RL_{env_id}_{algorithm}"):
-                            mlflow.log_param("env_id", env_id)
-                            mlflow.log_param("algorithm", algorithm)
-                            mlflow.log_param("total_timesteps", total_timesteps)
-                            mlflow.log_param("policy", policy)
-                            mlflow.log_param("use_optuna", use_optuna)
-                            for key, value in hyperparams.items():
-                                mlflow.log_param(key, value)
-                            
-                            status_text.text("Treinando...")
-                            data_lake = DataLake(base_path=os.path.join(ROOT_DIR, "data_lake"))
-                            model = trainer.train(
-                                use_optuna=use_optuna,
-                                optuna_trials=optuna_trials if use_optuna else 20,
-                                save_trajectories=save_trajectories,
-                                data_lake=data_lake
-                            )
-                            
-                            st.session_state['rl_trainer'] = trainer
-                            
-                            if trainer.callback:
-                                history_entry = {
-                                    'timestamp': datetime.now().isoformat(),
-                                    'env_id': env_id,
-                                    'algorithm': algorithm,
-                                    'total_timesteps': total_timesteps,
-                                    'metrics': trainer.callback.metrics
-                                }
-                                st.session_state['rl_training_history'].append(history_entry)
-                            
-                            progress_bar.progress(100)
-                            status_text.text("Treinamento concluído!")
-                            st.success("✅ Treinamento concluído!")
+                        status_text.text("Treinando...")
+                        trainer, model, eval_results = orchestrator.run_rl_training()
+                        
+                        st.session_state['rl_trainer'] = trainer
+                        
+                        if trainer.callback:
+                            history_entry = {
+                                'timestamp': datetime.now().isoformat(),
+                                'env_id': env_id,
+                                'algorithm': algorithm,
+                                'total_timesteps': total_timesteps,
+                                'metrics': trainer.callback.metrics
+                            }
+                            st.session_state['rl_training_history'].append(history_entry)
+                        
+                        progress_bar.progress(100)
+                        status_text.text("Treinamento concluído!")
+                        st.success("✅ Treinamento concluído!")
                     except Exception as e:
                         st.error(f"Erro durante o treinamento: {str(e)}")
                         import traceback
