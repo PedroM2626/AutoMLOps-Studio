@@ -69,17 +69,38 @@ Models degrade over time. By serving the model via the FastAPI endpoint, all inc
 |---|---|---|---|
 | **Tabular** | `classification` | Predict a discrete class label. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
 | **Tabular** | `regression` | Predict a continuous numeric target. | `r2`, `rmse`, `mae` |
-| **Tabular** | `time_series` | Forecast future values from temporal data. | `rmse`, `mae`, `mape` |
+| **Tabular** | `forecast` | Predict future values using historical temporal data. | `r2`, `rmse`, `mae` |
 | **Tabular** | `clustering` | Group samples by similarity without labels. | `silhouette` |
 | **Tabular** | `anomaly_detection` | Detect outliers or rare abnormal patterns. | `f1`, anomaly ratio |
 | **Tabular** | `ranking` | Score items for ordered relevance. | `ndcg` |
 | **Tabular** | `multi_label` | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy` |
+| **Tabular** | `multi_task` | Predict multiple disparate classification targets concurrently. | `f1_micro`, `subset_accuracy` |
 | **Tabular** | `association_rules` | Discover co-occurrence rules. | `rule_score`, `lift` |
 | **Computer Vision** | `image_classification` | Assign one class to each image. | `val_acc`, `val_loss` |
 | **Computer Vision** | `image_segmentation` | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
 | **Computer Vision** | `object_detection` | Detect objects and bounding boxes. | Benchmark metrics |
 | **Computer Vision** | `pose_estimation` | Estimate keypoints/body joints. | Keypoint accuracy |
 | **Reinforcement Learning** | `rl_agent` | Train an agent to maximize reward. | `episode_reward`, `mean_reward` |
+
+---
+
+## 🚀 Advanced ML Capabilities (New Features)
+
+AutoMLOps Studio now features a completely rebuilt data preprocessing pipeline and training engine supporting advanced tasks:
+
+### 1. Temporal & Text Data Characteristics
+Instead of treating "NLP" or "Time Series" as separate top-level tasks, you can select checkboxes specifying that your dataset contains:
+- **Temporal Data**: Automatically applies chronological validation splits and generates temporal lags and rolling window features (mean, std, min, max).
+- **Text / NLP Data**: Automatically vectorizes text columns using a high-performance TF-IDF pipeline or sentence embeddings, integrating text seamlessly with tabular features.
+
+### 2. Forecast Task Type
+Replaces traditional Time Series with a dedicated `forecast` task type that leverages lag features, rolling windows, and custom optimization metrics.
+
+### 3. Multi-Task Classification
+Allows predicting multiple target columns concurrently. The engine automatically wraps classification models in a `MultiOutputClassifier` to fit and track multiple prediction heads.
+
+### 4. Semi-Supervised Learning
+Leverages unlabeled data alongside labeled samples. By selecting the **Self-Training** paradigm, the system wraps base models in a `SelfTrainingClassifier` (utilizing target values of `-1` or `NaN` as unlabeled points) to iteratively pseudo-label the dataset and improve overall performance.
 
 ---
 

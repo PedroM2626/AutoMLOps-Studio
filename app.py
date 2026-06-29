@@ -1135,7 +1135,7 @@ def render_pipeline_progress_ring(trials_done: int, total_est: int, is_done: boo
     </div>""", unsafe_allow_html=True)
 
 
-def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None):
+def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None, is_time_series=False):
     """
     Loads and splits multiple datasets based on user configurations.
     selected_configs: List of dicts with {'name': str, 'version': str, 'split': float}
@@ -1143,6 +1143,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
     task_type: Type of task to determine split strategy (e.g., temporal for time_series).
     date_col: Required for temporal split in time_series.
     target_col: Optional, for stratified split in classification.
+    is_time_series: True if time series properties are enabled.
     """
     train_dfs = []
     test_dfs = []
@@ -1181,7 +1182,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         elif split_ratio <= 0.0:
             test_dfs.append(df_ds)
         else:
-            if strat == 'Cronológico (Chronological)' or (task_type == 'time_series' and date_col and date_col in df_ds.columns):
+            if strat == 'Cronológico (Chronological)' or ((task_type == 'time_series' or task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
                 # Temporal split
                 time_col = config.get('time_column', date_col)
                 if time_col and time_col in df_ds.columns:
@@ -2104,10 +2105,10 @@ if current_main_section == "⚙️ AutoML":
                               task_tmp = cfg.get('task', 'classification')
                               unsup_targetless_tasks = ["clustering", "anomaly_detection", "dimensionality_reduction", "association_rules"]
                               if task_tmp not in unsup_targetless_tasks:
-                                  if task_tmp == "multi_label":
+                                  if task_tmp in ["multi_label", "multi_task"]:
                                       default_targets = [c for c in sample_df.columns[-2:] if c in sample_df.columns]
                                       target_pre_w = st.multiselect(
-                                          "🎯 Target Columns (Multi-Label)",
+                                          f"🎯 Target Columns ({'Multi-Label' if task_tmp == 'multi_label' else 'Multi-Task'})",
                                           sample_df.columns.tolist(),
                                           default=cfg.get('target', default_targets if default_targets else []),
                                           key="wizard_target_multi"
@@ -2122,10 +2123,44 @@ if current_main_section == "⚙️ AutoML":
                                           key="wizard_target"
                                       )
                                       cfg['target'] = target_pre_w
-                          with col_dc:
-                              if task_tmp == 'time_series':
+                          
+                          # Data Characteristics Section
+                          st.markdown("##### 📊 Data Characteristics", unsafe_allow_html=True)
+                          col_char_ts, col_char_nlp = st.columns(2)
+                          with col_char_ts:
+                              is_ts = st.checkbox(
+                                  "📅 Contains Temporal / Time Series Data",
+                                  value=cfg.get('is_time_series', False) or task_tmp == 'forecast',
+                                  help="Enable to extract date features and apply chronological validation.",
+                                  key="wiz_is_ts"
+                              )
+                              cfg['is_time_series'] = is_ts
+                          with col_char_nlp:
+                              is_nlp = st.checkbox(
+                                  "📝 Contains Text / NLP Data",
+                                  value=cfg.get('is_nlp', False) or bool(cfg.get('selected_nlp_cols', [])),
+                                  help="Enable to select text columns for NLP preprocessing.",
+                                  key="wiz_is_nlp"
+                              )
+                              cfg['is_nlp'] = is_nlp
+
+                          col_opts1, col_opts2 = st.columns(2)
+                          with col_opts1:
+                              if cfg.get('is_time_series', False) or task_tmp == 'forecast':
                                   date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
                                   cfg['date_col'] = date_col_pre_w
+                                  if task_tmp == 'forecast':
+                                      horizon_pre_w = st.number_input("⏳ Forecast Horizon", min_value=1, value=cfg.get('forecast_horizon', 1), key="wizard_horizon")
+                                      cfg['forecast_horizon'] = horizon_pre_w
+                          with col_opts2:
+                              if cfg.get('is_nlp', False):
+                                  nlp_cols_w = st.multiselect(
+                                      "📝 Text Column(s) for NLP Processing",
+                                      [c for c in sample_df.columns if c != cfg.get('target')],
+                                      default=cfg.get('selected_nlp_cols', []),
+                                      key="wizard_nlp_cols"
+                                  )
+                                  cfg['selected_nlp_cols'] = nlp_cols_w
                       except Exception as e:
                           st.error(f"Error loading preview: {e}")
 
@@ -2220,26 +2255,40 @@ if current_main_section == "⚙️ AutoML":
             SUPERVISED_TASKS = [
                 ("classification", "🎯", "Classification", "Predict a category or label"),
                 ("regression",     "📈", "Regression",     "Predict a continuous value"),
-                ("time_series",    "⏳", "Time Series",    "Forecast future values from historical sequences"),
-                                ("ranking",        "🥇", "Ranking",        "Score items to optimize ordering relevance"),
-                                ("multi_label",    "🏷️", "Multi-Label",    "Predict multiple target labels per row"),
+                ("forecast",       "⏳", "Forecast",       "Forecast future values from historical sequences"),
+                ("ranking",        "🥇", "Ranking",        "Score items to optimize ordering relevance"),
+                ("multi_label",    "🏷️", "Multi-Label",    "Predict multiple target labels per row"),
+                ("multi_task",     "🔗", "Multi-Task",     "Predict multiple multi-class target columns simultaneously"),
             ]
             UNSUP_TASKS = [
                 ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
                 ("anomaly_detection",        "🚨", "Anomaly Detection",        "Identify unusual data points"),
                 ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently"),
-                                ("association_rules",        "🧩", "Association Rules",        "Discover co-occurrence patterns and rules"),
+                ("association_rules",        "🧩", "Association Rules",        "Discover co-occurrence patterns and rules"),
             ]
+
+            paradigm_index = 0
+            if cfg.get('semi_supervised', False):
+                paradigm_index = 1
+            elif cfg.get('task', 'classification') in [t[0] for t in UNSUP_TASKS]:
+                paradigm_index = 2
 
             learn_type = st.radio(
                 "Learning Paradigm",
-                ["Supervised", "Unsupervised"],
-                index=0 if cfg.get('task', 'classification') not in [t[0] for t in UNSUP_TASKS] else 1,
+                ["Supervised", "Semi-Supervised", "Unsupervised"],
+                index=paradigm_index,
                 horizontal=True,
                 key="wiz_learn_type"
             )
 
-            task_list = SUPERVISED_TASKS if learn_type == "Supervised" else UNSUP_TASKS
+            if learn_type == "Semi-Supervised":
+                cfg['semi_supervised'] = True
+                cfg['task'] = 'classification'
+                task_list = [("classification", "🎯", "Classification", "Predict a category using labeled and unlabeled data")]
+            else:
+                cfg['semi_supervised'] = False
+                task_list = SUPERVISED_TASKS if learn_type == "Supervised" else UNSUP_TASKS
+                
             current_task = cfg.get('task', task_list[0][0])
             if current_task not in [t[0] for t in task_list]:
                 current_task = task_list[0][0]
@@ -2929,7 +2978,8 @@ if current_main_section == "⚙️ AutoML":
                                 global_split=None,
                                 task_type=task,
                                 date_col=cfg.get('date_col'),
-                                target_col=cfg.get('target')
+                                target_col=cfg.get('target'),
+                                is_time_series=cfg.get('is_time_series', False)
                             )
                             st.session_state['train_df'] = t_df
                             st.session_state['test_df'] = te_df
@@ -2975,8 +3025,8 @@ if current_main_section == "⚙️ AutoML":
                         st.rerun()
                 with col_sub:
                     if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
-                        if task == "multi_label" and (not isinstance(target, list) or len(target) < 2):
-                            st.error("Please select at least two target columns for Multi-Label tasks.")
+                        if task in ["multi_label", "multi_task"] and (not isinstance(target, list) or len(target) < 2):
+                            st.error(f"Please select at least two target columns for {task.replace('_', ' ').title()} tasks.")
                             st.stop()
 
                         job_config = {
@@ -2997,6 +3047,9 @@ if current_main_section == "⚙️ AutoML":
                             'random_state': cfg.get('random_state', 42),
                             'validation_strategy': cfg.get('validation_strategy', 'auto'),
                             'validation_params': cfg.get('validation_params', {}),
+                            'is_time_series': cfg.get('is_time_series', False),
+                            'semi_supervised': cfg.get('semi_supervised', False),
+                            'forecast_horizon': cfg.get('forecast_horizon', 1),
                             'ensemble_config': cfg.get('ensemble_config', {}),
                             'optimization_mode': cfg.get('optimization_mode', 'bayesian'),
                             'optimization_metric': cfg.get('optimization_metric', 'accuracy'),

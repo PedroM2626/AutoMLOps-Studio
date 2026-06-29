@@ -183,7 +183,8 @@ class AssociationRuleMiner(BaseEstimator):
 
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
-                 use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1):
+                 use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1,
+                 is_time_series=False, semi_supervised=False):
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
@@ -191,6 +192,8 @@ class AutoMLTrainer:
         self.use_deep_learning = use_deep_learning
         self.ensemble_mode = ensemble_mode
         self.n_jobs = n_jobs
+        self.is_time_series = is_time_series or (task_type == 'time_series' or task_type == 'forecast')
+        self.semi_supervised = semi_supervised
         self.best_model = None
         self.best_params = None
         self.results = []
@@ -776,19 +779,36 @@ class AutoMLTrainer:
                     n_jobs=None
                 )
             }
-        elif self.task_type == 'time_series':
+        elif self.task_type == 'time_series' or self.task_type == 'forecast':
             models_config = {
+                'random_forest': lambda t: RandomForestRegressor(
+                    n_estimators=t.suggest_int('rf_ts_n_estimators', 50, 200),
+                    n_jobs=self.n_jobs
+                ),
+                'xgboost': lambda t: xgb.XGBRegressor(
+                    n_estimators=t.suggest_int('xgb_ts_n_estimators', 50, 200),
+                    n_jobs=self.n_jobs
+                ),
+                'extra_trees': lambda t: ExtraTreesRegressor(
+                    n_estimators=t.suggest_int('et_ts_n_estimators', 50, 200),
+                    n_jobs=self.n_jobs
+                ),
+                'catboost': lambda t: cb.CatBoostRegressor(
+                    iterations=t.suggest_int('cb_ts_iterations', 50, 200),
+                    verbose=0,
+                    thread_count=-1
+                ) if CATBOOST_AVAILABLE else None,
                 'random_forest_ts': lambda t: RandomForestRegressor(
                     n_estimators=t.suggest_int('rf_ts_n_estimators', 50, 200),
-                    n_jobs=None
+                    n_jobs=self.n_jobs
                 ),
                 'xgboost_ts': lambda t: xgb.XGBRegressor(
                     n_estimators=t.suggest_int('xgb_ts_n_estimators', 50, 200),
-                    n_jobs=None
+                    n_jobs=self.n_jobs
                 ),
                 'extra_trees_ts': lambda t: ExtraTreesRegressor(
                     n_estimators=t.suggest_int('et_ts_n_estimators', 50, 200),
-                    n_jobs=None
+                    n_jobs=self.n_jobs
                 ),
                 'catboost_ts': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_ts_iterations', 50, 200),
@@ -796,6 +816,23 @@ class AutoMLTrainer:
                     thread_count=-1
                 ) if CATBOOST_AVAILABLE else None
             }
+        elif self.task_type == 'multi_task':
+            self.task_type = 'classification'
+            base_models = self._get_models(name=None)
+            self.task_type = 'multi_task'
+            available = [m for m in base_models if m not in _ENSEMBLE_MODEL_KEYS]
+            if name is None:
+                return available
+            if name in available:
+                self.task_type = 'classification'
+                model = self._get_models(trial, name, random_state)
+                self.task_type = 'multi_task'
+                if model is not None:
+                    from sklearn.multioutput import MultiOutputClassifier
+                    if not isinstance(model, MultiOutputClassifier):
+                        model = MultiOutputClassifier(model)
+                return model
+            return None
         elif self.task_type == 'anomaly_detection':
             models_config = {
                 'isolation_forest': lambda t: IsolationForest(
@@ -924,6 +961,13 @@ class AutoMLTrainer:
 
     def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         self.random_state = random_state
+        
+        # Ensure optimization metric is compatible with task type
+        if self.task_type in ['regression', 'time_series', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
+            optimization_metric = 'r2'
+        elif self.task_type in ['classification', 'multi_label', 'multi_task'] and optimization_metric not in ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']:
+            optimization_metric = 'accuracy'
+
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
         n_trials = n_trials if n_trials is not None else preset_config['n_trials']
@@ -958,7 +1002,7 @@ class AutoMLTrainer:
         self.selected_models = self._filter_models(selected_models_to_filter, selected_models=selected_models)
         selected_models = self.selected_models
             
-        self.ts_metadata = kwargs if self.task_type == 'time_series' else {}
+        self.ts_metadata = kwargs if (self.task_type == 'time_series' or self.task_type == 'forecast') else {}
         self.random_state = random_state
         self.ensemble_config = kwargs.get('ensemble_config', {})
         
@@ -971,7 +1015,7 @@ class AutoMLTrainer:
             
         # Automatic Validation Logic
         if validation_strategy == 'auto':
-            if self.task_type == 'time_series':
+            if self.is_time_series or self.task_type == 'time_series' or self.task_type == 'forecast':
                 validation_strategy = 'time_series_cv'
                 logger.info("Automatic Validation: TimeSeriesSplit chosen (given it's a time series).")
             else:
@@ -1098,7 +1142,7 @@ class AutoMLTrainer:
                 # These task types currently use explicit validation for robust and simple scoring.
                 use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series', 'ranking', 'multi_label', 'association_rules']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -1116,7 +1160,7 @@ class AutoMLTrainer:
                 if cache_key in self._split_cache:
                     X_tr, X_val, y_tr, y_val = self._split_cache[cache_key]
                 else:
-                    if self.task_type == 'time_series':
+                    if self.is_time_series or self.task_type == 'time_series' or self.task_type == 'forecast':
                         split_idx = int(len(effective_X) * split_ratio)
                         if isinstance(effective_X, pd.DataFrame):
                             X_tr, X_val = effective_X.iloc[:split_idx], effective_X.iloc[split_idx:]
@@ -1157,7 +1201,7 @@ class AutoMLTrainer:
             trial_params['task_type'] = self.task_type
             
             try:
-                if self.task_type in ['classification', 'regression', 'time_series', 'ranking', 'multi_label']:
+                if self.task_type in ['classification', 'regression', 'time_series', 'forecast', 'ranking', 'multi_label', 'multi_task']:
                     if use_explicit_validation:
                         logger.info(f"DEBUG: fit() called. X_tr type: {type(X_tr)}, shape: {X_tr.shape if hasattr(X_tr, 'shape') else len(X_tr)}")
                         logger.info(f"DEBUG: y_tr type: {type(y_tr)}, shape: {y_tr.shape if hasattr(y_tr, 'shape') else len(y_tr)}")
@@ -1210,6 +1254,28 @@ class AutoMLTrainer:
                                 score = -trial_metrics['hamming_loss']
                             else:
                                 score = trial_metrics['f1_micro']
+                        elif self.task_type == 'multi_task':
+                            accuracies = []
+                            f1s = []
+                            y_val_arr = np.asarray(y_val)
+                            y_pred_val_arr = np.asarray(y_pred_val)
+                            if y_val_arr.ndim == 1:
+                                y_val_arr = y_val_arr.reshape(-1, 1)
+                            if y_pred_val_arr.ndim == 1:
+                                y_pred_val_arr = y_pred_val_arr.reshape(-1, 1)
+                            for col in range(y_val_arr.shape[1]):
+                                accuracies.append(accuracy_score(y_val_arr[:, col], y_pred_val_arr[:, col]))
+                                f1s.append(f1_score(y_val_arr[:, col], y_pred_val_arr[:, col], average='weighted', zero_division=0))
+                            trial_metrics['accuracy'] = float(np.mean(accuracies))
+                            trial_metrics['f1'] = float(np.mean(f1s))
+                            trial_metrics['hamming_loss'] = hamming_loss(y_val_arr, y_pred_val_arr)
+                            
+                            if optimization_metric == 'f1':
+                                score = trial_metrics['f1']
+                            elif optimization_metric == 'hamming_loss':
+                                score = -trial_metrics['hamming_loss']
+                            else:
+                                score = trial_metrics['accuracy']
                         elif self.task_type == 'ranking':
                             y_true_rank = np.asarray(y_val).ravel()
                             y_pred_rank = np.asarray(y_pred_val).ravel()
@@ -1318,6 +1384,27 @@ class AutoMLTrainer:
                                 y_sub_pred = model.predict(X_sub_val)
                                 trial_metrics['val_subset_accuracy'] = accuracy_score(y_sub_val, y_sub_pred)
                                 trial_metrics['val_f1_micro'] = f1_score(y_sub_val, y_sub_pred, average='micro', zero_division=0)
+                                model.fit(X_tr, y_tr)
+                            except:
+                                pass
+                        elif self.task_type == 'multi_task' and hasattr(model, 'predict'):
+                            try:
+                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
+                                model.fit(X_sub_train, y_sub_train)
+                                y_sub_pred = model.predict(X_sub_val)
+                                accuracies_sub = []
+                                f1s_sub = []
+                                y_sub_val_arr = np.asarray(y_sub_val)
+                                y_sub_pred_arr = np.asarray(y_sub_pred)
+                                if y_sub_val_arr.ndim == 1:
+                                    y_sub_val_arr = y_sub_val_arr.reshape(-1, 1)
+                                if y_sub_pred_arr.ndim == 1:
+                                    y_sub_pred_arr = y_sub_pred_arr.reshape(-1, 1)
+                                for col in range(y_sub_val_arr.shape[1]):
+                                    accuracies_sub.append(accuracy_score(y_sub_val_arr[:, col], y_sub_pred_arr[:, col]))
+                                    f1s_sub.append(f1_score(y_sub_val_arr[:, col], y_sub_pred_arr[:, col], average='weighted', zero_division=0))
+                                trial_metrics['val_accuracy'] = float(np.mean(accuracies_sub))
+                                trial_metrics['val_f1'] = float(np.mean(f1s_sub))
                                 model.fit(X_tr, y_tr)
                             except:
                                 pass
@@ -2154,6 +2241,34 @@ class AutoMLTrainer:
             raise e
 
     def _instantiate_model(self, name, params):
+        if self.task_type == 'multi_task':
+            self.task_type = 'classification'
+            model = self._instantiate_model(name, params)
+            self.task_type = 'multi_task'
+            if model is not None:
+                from sklearn.multioutput import MultiOutputClassifier
+                if not isinstance(model, MultiOutputClassifier):
+                    model = MultiOutputClassifier(model)
+            return model
+
+        # Base instantiation
+        model = self._base_instantiate_model(name, params)
+        if model is None:
+            return None
+            
+        # Wrap in SelfTrainingClassifier if semi-supervised
+        if self.task_type == 'classification' and getattr(self, 'semi_supervised', False):
+            from sklearn.semi_supervised import SelfTrainingClassifier
+            # Ensure probability is enabled for SVC
+            if hasattr(model, 'probability'):
+                model.probability = True
+            try:
+                model = SelfTrainingClassifier(model)
+            except Exception as e:
+                logger.warning(f"Could not wrap model {name} in SelfTrainingClassifier: {e}")
+        return model
+
+    def _base_instantiate_model(self, name, params):
         # 1. Custom Models (Uploaded/Registered)
         if hasattr(self, 'custom_models') and self.custom_models and name in self.custom_models:
             logger.info(f"Using custom model: {name}")
@@ -2417,15 +2532,17 @@ class AutoMLTrainer:
                 return Birch(n_clusters=params.get('birch_n_clusters', 3))
             if name == 'spectral':
                 return SpectralClustering(n_clusters=params.get('spectral_n_clusters', 3))
-        elif self.task_type == 'time_series':
-            if name == 'random_forest_ts':
-                return RandomForestRegressor(n_estimators=params.get('rf_ts_n_estimators', 100))
-            if name == 'xgboost_ts':
-                return xgb.XGBRegressor(n_estimators=params.get('xgb_ts_n_estimators', 100))
-            if name == 'extra_trees_ts':
-                return ExtraTreesRegressor(n_estimators=params.get('et_ts_n_estimators', 100))
-            if name == 'catboost_ts':
+        elif self.task_type == 'time_series' or self.task_type == 'forecast':
+            if name == 'random_forest_ts' or name == 'random_forest':
+                return RandomForestRegressor(n_estimators=params.get('rf_ts_n_estimators', params.get('rf_n_estimators', 100)), n_jobs=self.n_jobs)
+            if name == 'xgboost_ts' or name == 'xgboost':
+                return xgb.XGBRegressor(n_estimators=params.get('xgb_ts_n_estimators', params.get('xgb_n_estimators', 100)), n_jobs=self.n_jobs)
+            if name == 'extra_trees_ts' or name == 'extra_trees':
+                return ExtraTreesRegressor(n_estimators=params.get('et_ts_n_estimators', params.get('et_n_estimators', 100)), n_jobs=self.n_jobs)
+            if name == 'catboost_ts' or name == 'catboost':
                 cb_params = {k.replace('cb_ts_', ''): v for k, v in params.items() if k.startswith('cb_ts_')}
+                if not cb_params:
+                    cb_params = {k.replace('cb_', ''): v for k, v in params.items() if k.startswith('cb_')}
                 return cb.CatBoostRegressor(verbose=0, thread_count=-1, **cb_params)
         elif self.task_type == 'anomaly_detection':
             if name == 'isolation_forest':
@@ -2480,7 +2597,23 @@ class AutoMLTrainer:
                 metrics['precision_micro'] = precision_score(y_test, y_pred, average='micro', zero_division=0)
                 metrics['recall_micro'] = recall_score(y_test, y_pred, average='micro', zero_division=0)
                 metrics['hamming_loss'] = hamming_loss(y_test, y_pred)
-            elif self.task_type in ['regression', 'time_series', 'ranking']:
+            elif self.task_type == 'multi_task':
+                accuracies = []
+                f1s = []
+                # Ensure y_test and y_pred are 2D numpy arrays
+                y_t_arr = np.asarray(y_test)
+                y_p_arr = np.asarray(y_pred)
+                if y_t_arr.ndim == 1:
+                    y_t_arr = y_t_arr.reshape(-1, 1)
+                if y_p_arr.ndim == 1:
+                    y_p_arr = y_p_arr.reshape(-1, 1)
+                for col in range(y_t_arr.shape[1]):
+                    accuracies.append(accuracy_score(y_t_arr[:, col], y_p_arr[:, col]))
+                    f1s.append(f1_score(y_t_arr[:, col], y_p_arr[:, col], average='weighted', zero_division=0))
+                metrics['accuracy'] = float(np.mean(accuracies))
+                metrics['f1'] = float(np.mean(f1s))
+                metrics['hamming_loss'] = hamming_loss(y_t_arr, y_p_arr)
+            elif self.task_type in ['regression', 'time_series', 'forecast', 'ranking']:
                 metrics['rmse'] = np.sqrt(mean_squared_error(y_test, y_pred))
                 metrics['mae'] = mean_absolute_error(y_test, y_pred)
                 metrics['median_ae'] = median_absolute_error(y_test, y_pred)

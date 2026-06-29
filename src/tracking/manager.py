@@ -227,6 +227,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             forecast_horizon    = config.get('forecast_horizon', 1)
             target_metric_name  = config.get('target_metric_name', 'ACCURACY')
             stability_config    = config.get('stability_config')
+            is_time_series      = config.get('is_time_series', False) or (task == 'time_series' or task == 'forecast')
+            semi_supervised     = config.get('semi_supervised', False)
 
             log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
 
@@ -234,7 +236,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             processor = AutoMLDataProcessor(
                 target_column=target, task_type=task,
                 date_col=date_col, forecast_horizon=forecast_horizon,
-                nlp_config=nlp_config
+                nlp_config=nlp_config, is_time_series=is_time_series,
+                semi_supervised=semi_supervised
             )
             X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
 
@@ -328,7 +331,9 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 use_ensemble=use_ensemble,
                 use_deep_learning=use_deep_learning,
                 ensemble_mode=ensemble_mode,
-                n_jobs=config.get('n_jobs', -1)
+                n_jobs=config.get('n_jobs', -1),
+                is_time_series=is_time_series,
+                semi_supervised=semi_supervised
             )
             clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
 

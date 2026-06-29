@@ -13,7 +13,7 @@ from sklearn.preprocessing import FunctionTransformer
 logger = logging.getLogger(__name__)
 
 class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard'):
+    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', is_time_series=False, semi_supervised=False):
         self.target_column = target_column
         self.task_type = task_type
         self.date_col = date_col
@@ -22,6 +22,8 @@ class AutoMLDataProcessor:
         self.scaler_type = scaler_type
         self.preprocessor = None
         self.nlp_cols = []
+        self.is_time_series = is_time_series or (task_type == 'time_series' or task_type == 'forecast')
+        self.semi_supervised = semi_supervised
 
     def _resolve_target_columns(self, df):
         """Resolve target column(s) present in the given DataFrame."""
@@ -118,7 +120,7 @@ class AutoMLDataProcessor:
                 if col in df.columns:
                      df[col] = df[col].fillna("")
 
-        if self.task_type == 'time_series':
+        if self.is_time_series:
             df = self._apply_ts_features(df)
 
         target_cols = self._resolve_target_columns(df)
@@ -248,13 +250,28 @@ class AutoMLDataProcessor:
             
         y_processed = None
         if y is not None:
-            if isinstance(y, pd.DataFrame):
+            if isinstance(y, pd.DataFrame) and y.shape[1] > 1:
                 y_processed = y.to_numpy()
-            elif y.dtype == 'object' or y.dtype.name == 'category':
-                self.label_encoder = LabelEncoder()
-                y_processed = self.label_encoder.fit_transform(y)
             else:
-                y_processed = y
+                y_series = y.iloc[:, 0] if isinstance(y, pd.DataFrame) else pd.Series(y)
+                unlabeled_mask = y_series.isna() | (y_series == -1) | (y_series == '-1') | (y_series == '')
+                
+                if self.task_type == 'classification' and self.semi_supervised:
+                    labeled_y = y_series[~unlabeled_mask]
+                    self.label_encoder = LabelEncoder()
+                    if len(labeled_y) > 0:
+                        encoded_labeled = self.label_encoder.fit_transform(labeled_y)
+                    else:
+                        encoded_labeled = []
+                    
+                    y_processed = np.full(len(y_series), -1, dtype=int)
+                    y_processed[~unlabeled_mask] = encoded_labeled
+                else:
+                    if y_series.dtype == 'object' or y_series.dtype.name == 'category':
+                        self.label_encoder = LabelEncoder()
+                        y_processed = self.label_encoder.fit_transform(y_series)
+                    else:
+                        y_processed = y_series.to_numpy()
 
         return X_processed, y_processed
 
@@ -265,7 +282,7 @@ class AutoMLDataProcessor:
                 if col in df.columns:
                      df[col] = df[col].fillna("")
 
-        if self.task_type == 'time_series':
+        if self.is_time_series:
             df = self._apply_ts_features(df)
 
         if df is None or (isinstance(df, pd.DataFrame) and df.empty):
