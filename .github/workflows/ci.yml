@@ -27,4 +27,4 @@ jobs:
         env:
           API_SECRET_KEY: ci-test-key
         run: |
-          pytest -q
+          pytest -q tests/

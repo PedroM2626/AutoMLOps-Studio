@@ -18,7 +18,7 @@ def test_temporal_nlp_processor():
         target_column='target',
         task_type='classification',
         date_col='date',
-        is_time_series=True,
+        data_type='sequential',
         nlp_config={'vectorizer': 'passthrough'}, # passthrough vectorizer
         scaler_type='standard'
     )
@@ -40,7 +40,7 @@ def test_forecast_trainer():
         target_column='target',
         task_type='forecast',
         date_col='date',
-        is_time_series=True
+        data_type='sequential'
     )
     X_proc, y_proc = processor.fit_transform(df)
     

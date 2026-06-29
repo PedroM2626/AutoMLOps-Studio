@@ -9,6 +9,8 @@ ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
+from unittest.mock import patch
+
 from src.engines.reinforcement_learning import (
     RLTrainer,
     get_available_rl_environments,
@@ -16,6 +18,10 @@ from src.engines.reinforcement_learning import (
     compare_agents,
 )
 
+@pytest.fixture(autouse=True)
+def mock_mlflow():
+    with patch("src.engines.reinforcement_learning.mlflow") as mock:
+        yield mock
 
 @pytest.mark.skipif(not STABLE_BASELINES_AVAILABLE, reason="Stable Baselines3 not installed")
 def test_rl_trainer_init():

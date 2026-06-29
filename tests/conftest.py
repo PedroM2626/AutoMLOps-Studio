@@ -20,6 +20,7 @@ def mlflow_test_setup_teardown():
     # Use a temporary directory for MLflow tracking in tests
     temp_dir = tempfile.mkdtemp()
     original_uri = mlflow.get_tracking_uri()
+    os.environ["MLFLOW_ALLOW_FILE_STORE"] = "true"
     mlflow.set_tracking_uri(f"file:///{temp_dir}")
     mlflow.set_experiment("Default")
     
