@@ -86,21 +86,13 @@ Models degrade over time. By serving the model via the FastAPI endpoint, all inc
 
 ## 🚀 Advanced ML Capabilities (New Features)
 
-AutoMLOps Studio now features a completely rebuilt data preprocessing pipeline and training engine supporting advanced tasks:
+## 🆕 What's New (Recent)
 
-### 1. Temporal & Text Data Characteristics
-Instead of treating "NLP" or "Time Series" as separate top-level tasks, you can select checkboxes specifying that your dataset contains:
-- **Temporal Data**: Automatically applies chronological validation splits and generates temporal lags and rolling window features (mean, std, min, max).
-- **Text / NLP Data**: Automatically vectorizes text columns using a high-performance TF-IDF pipeline or sentence embeddings, integrating text seamlessly with tabular features.
-
-### 2. Forecast Task Type
-Replaces traditional Time Series with a dedicated `forecast` task type that leverages lag features, rolling windows, and custom optimization metrics.
-
-### 3. Multi-Task Classification
-Allows predicting multiple target columns concurrently. The engine automatically wraps classification models in a `MultiOutputClassifier` to fit and track multiple prediction heads.
-
-### 4. Semi-Supervised Learning
-Leverages unlabeled data alongside labeled samples. By selecting the **Self-Training** paradigm, the system wraps base models in a `SelfTrainingClassifier` (utilizing target values of `-1` or `NaN` as unlabeled points) to iteratively pseudo-label the dataset and improve overall performance.
+- **Advanced ML Preprocessing & Modeling Pipeline**:
+  - **Temporal & Text Characteristics**: Tabular datasets now support specifying "Contains Temporal Data" (automatically applies chronological validation splits and generates lags/rolling window features) and "Contains Text / NLP Data" (automatically vectorizes text columns using a high-performance TF-IDF pipeline).
+  - **Forecast Task Type**: Replaces the old hardcoded Time Series task with a dedicated Forecast engine integrated across all frameworks.
+  - **Multi-Task Classification**: Support for predicting multiple target columns concurrently. The interface automatically orchestrates separate training runs for each target if the framework does not support it natively.
+  - **Semi-Supervised Learning**: Support for Self-Training Classification using target columns with unlabeled samples (marked as `-1` or `NaN`). The training pipeline dynamically wraps base classifiers in a `SelfTrainingClassifier` wrapper.
 
 ---
 

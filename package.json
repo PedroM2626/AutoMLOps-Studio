@@ -22,12 +22,8 @@
       "assets/**/*",
       "error_loading.html"
     ],
-    "directories": {
-      "buildResources": "assets"
-    },
     "win": {
-      "target": "nsis",
-      "icon": "assets/icon.ico"
+      "target": "nsis"
     },
     "linux": {
       "target": "AppImage"
