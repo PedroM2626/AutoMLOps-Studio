@@ -227,16 +227,16 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             forecast_horizon    = config.get('forecast_horizon', 1)
             target_metric_name  = config.get('target_metric_name', 'ACCURACY')
             stability_config    = config.get('stability_config')
-            is_time_series      = config.get('is_time_series', False) or (task == 'time_series' or task == 'forecast')
+            data_type           = config.get('data_type', 'tabular')
             semi_supervised     = config.get('semi_supervised', False)
 
             log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
 
             # Data Processing
             processor = AutoMLDataProcessor(
-                target_column=target, task_type=task,
+                target_column=target, task_type=task, data_type=data_type,
                 date_col=date_col, forecast_horizon=forecast_horizon,
-                nlp_config=nlp_config, is_time_series=is_time_series,
+                nlp_config=nlp_config,
                 semi_supervised=semi_supervised
             )
             X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)

@@ -13,16 +13,17 @@ from sklearn.preprocessing import FunctionTransformer
 logger = logging.getLogger(__name__)
 
 class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', is_time_series=False, semi_supervised=False):
+    def __init__(self, target_column=None, task_type=None, data_type='tabular', date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', semi_supervised=False):
         self.target_column = target_column
         self.task_type = task_type
+        self.data_type = data_type
         self.date_col = date_col
         self.forecast_horizon = forecast_horizon
         self.nlp_config = nlp_config if nlp_config else {}
         self.scaler_type = scaler_type
         self.preprocessor = None
         self.nlp_cols = []
-        self.is_time_series = is_time_series or (task_type == 'time_series' or task_type == 'forecast')
+        self.is_time_series = (data_type == 'sequential')
         self.semi_supervised = semi_supervised
 
     def _resolve_target_columns(self, df):

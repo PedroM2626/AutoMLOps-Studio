@@ -184,7 +184,7 @@ class AssociationRuleMiner(BaseEstimator):
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
                  use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1,
-                 is_time_series=False, semi_supervised=False):
+                 data_type='tabular', semi_supervised=False):
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
@@ -192,7 +192,8 @@ class AutoMLTrainer:
         self.use_deep_learning = use_deep_learning
         self.ensemble_mode = ensemble_mode
         self.n_jobs = n_jobs
-        self.is_time_series = is_time_series or (task_type == 'time_series' or task_type == 'forecast')
+        self.data_type = data_type
+        self.is_time_series = (data_type == 'sequential')
         self.semi_supervised = semi_supervised
         self.best_model = None
         self.best_params = None
@@ -779,7 +780,7 @@ class AutoMLTrainer:
                     n_jobs=None
                 )
             }
-        elif self.task_type == 'time_series' or self.task_type == 'forecast':
+        elif self.task_type == 'forecast':
             models_config = {
                 'random_forest': lambda t: RandomForestRegressor(
                     n_estimators=t.suggest_int('rf_ts_n_estimators', 50, 200),
@@ -797,23 +798,6 @@ class AutoMLTrainer:
                     iterations=t.suggest_int('cb_ts_iterations', 50, 200),
                     verbose=0,
                     thread_count=-1
-                ) if CATBOOST_AVAILABLE else None,
-                'random_forest_ts': lambda t: RandomForestRegressor(
-                    n_estimators=t.suggest_int('rf_ts_n_estimators', 50, 200),
-                    n_jobs=self.n_jobs
-                ),
-                'xgboost_ts': lambda t: xgb.XGBRegressor(
-                    n_estimators=t.suggest_int('xgb_ts_n_estimators', 50, 200),
-                    n_jobs=self.n_jobs
-                ),
-                'extra_trees_ts': lambda t: ExtraTreesRegressor(
-                    n_estimators=t.suggest_int('et_ts_n_estimators', 50, 200),
-                    n_jobs=self.n_jobs
-                ),
-                'catboost_ts': lambda t: cb.CatBoostRegressor(
-                    iterations=t.suggest_int('cb_ts_iterations', 50, 200),
-                    verbose=0,
-                    thread_count=-1
                 ) if CATBOOST_AVAILABLE else None
             }
         elif self.task_type == 'multi_task':
@@ -828,7 +812,6 @@ class AutoMLTrainer:
                 model = self._get_models(trial, name, random_state)
                 self.task_type = 'multi_task'
                 if model is not None:
-                    from sklearn.multioutput import MultiOutputClassifier
                     if not isinstance(model, MultiOutputClassifier):
                         model = MultiOutputClassifier(model)
                 return model
@@ -963,7 +946,7 @@ class AutoMLTrainer:
         self.random_state = random_state
         
         # Ensure optimization metric is compatible with task type
-        if self.task_type in ['regression', 'time_series', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
+        if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
             optimization_metric = 'r2'
         elif self.task_type in ['classification', 'multi_label', 'multi_task'] and optimization_metric not in ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']:
             optimization_metric = 'accuracy'
@@ -1002,7 +985,7 @@ class AutoMLTrainer:
         self.selected_models = self._filter_models(selected_models_to_filter, selected_models=selected_models)
         selected_models = self.selected_models
             
-        self.ts_metadata = kwargs if (self.task_type == 'time_series' or self.task_type == 'forecast') else {}
+        self.ts_metadata = kwargs if (self.task_type == 'forecast' or self.is_time_series) else {}
         self.random_state = random_state
         self.ensemble_config = kwargs.get('ensemble_config', {})
         
@@ -1015,7 +998,7 @@ class AutoMLTrainer:
             
         # Automatic Validation Logic
         if validation_strategy == 'auto':
-            if self.is_time_series or self.task_type == 'time_series' or self.task_type == 'forecast':
+            if self.is_time_series or self.task_type == 'forecast':
                 validation_strategy = 'time_series_cv'
                 logger.info("Automatic Validation: TimeSeriesSplit chosen (given it's a time series).")
             else:
@@ -1142,7 +1125,7 @@ class AutoMLTrainer:
                 # These task types currently use explicit validation for robust and simple scoring.
                 use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'time_series', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -1160,7 +1143,7 @@ class AutoMLTrainer:
                 if cache_key in self._split_cache:
                     X_tr, X_val, y_tr, y_val = self._split_cache[cache_key]
                 else:
-                    if self.is_time_series or self.task_type == 'time_series' or self.task_type == 'forecast':
+                    if self.is_time_series or self.task_type == 'forecast':
                         split_idx = int(len(effective_X) * split_ratio)
                         if isinstance(effective_X, pd.DataFrame):
                             X_tr, X_val = effective_X.iloc[:split_idx], effective_X.iloc[split_idx:]
@@ -1201,7 +1184,7 @@ class AutoMLTrainer:
             trial_params['task_type'] = self.task_type
             
             try:
-                if self.task_type in ['classification', 'regression', 'time_series', 'forecast', 'ranking', 'multi_label', 'multi_task']:
+                if self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task']:
                     if use_explicit_validation:
                         logger.info(f"DEBUG: fit() called. X_tr type: {type(X_tr)}, shape: {X_tr.shape if hasattr(X_tr, 'shape') else len(X_tr)}")
                         logger.info(f"DEBUG: y_tr type: {type(y_tr)}, shape: {y_tr.shape if hasattr(y_tr, 'shape') else len(y_tr)}")
@@ -1321,9 +1304,9 @@ class AutoMLTrainer:
                                     shuffle=shuffle_splits,
                                     random_state=current_seed if shuffle_splits else None,
                                 )
-                        elif self.task_type == 'regression' or self.task_type == 'time_series':
+                        elif self.task_type == 'regression' or self.task_type == 'forecast':
                             scoring_list = ['r2', 'neg_root_mean_squared_error', 'neg_mean_absolute_error']
-                            if self.task_type == 'time_series' or validation_strategy == 'time_series_cv':
+                            if self.task_type == 'forecast' or validation_strategy == 'time_series_cv':
                                 cv = TimeSeriesSplit(n_splits=n_splits, gap=gap, max_train_size=max_train_size)
                             else:
                                 cv = KFold(
@@ -1690,7 +1673,7 @@ class AutoMLTrainer:
                     is_high_dim = True
                     logger.warning(f"High dimensionality detected ({effective_X_plot.shape[1]} features). Skipping full report generation to save memory.")
                 
-                if validation_strategy == 'time_series_cv' or self.task_type == 'time_series':
+                if validation_strategy == 'time_series_cv' or self.task_type == 'forecast':
                      # Time Series is tricky for 'full' plot. We'll skip complex plot generation here 
                      # or just do a simple validation split at end
                      pass 
@@ -2148,7 +2131,7 @@ class AutoMLTrainer:
         logger.info(f"Best global model found: {best_model_name}")
         logger.info(f"Best parameters: {self.best_params}")
         
-        if self.task_type == 'time_series':
+        if self.task_type == 'forecast':
             self.best_params.update(self.ts_metadata)
         
         self.best_model = self._instantiate_model(best_model_name, self.best_params)
@@ -2246,7 +2229,6 @@ class AutoMLTrainer:
             model = self._instantiate_model(name, params)
             self.task_type = 'multi_task'
             if model is not None:
-                from sklearn.multioutput import MultiOutputClassifier
                 if not isinstance(model, MultiOutputClassifier):
                     model = MultiOutputClassifier(model)
             return model
@@ -2532,7 +2514,7 @@ class AutoMLTrainer:
                 return Birch(n_clusters=params.get('birch_n_clusters', 3))
             if name == 'spectral':
                 return SpectralClustering(n_clusters=params.get('spectral_n_clusters', 3))
-        elif self.task_type == 'time_series' or self.task_type == 'forecast':
+        elif self.task_type == 'forecast':
             if name == 'random_forest_ts' or name == 'random_forest':
                 return RandomForestRegressor(n_estimators=params.get('rf_ts_n_estimators', params.get('rf_n_estimators', 100)), n_jobs=self.n_jobs)
             if name == 'xgboost_ts' or name == 'xgboost':
@@ -2613,7 +2595,7 @@ class AutoMLTrainer:
                 metrics['accuracy'] = float(np.mean(accuracies))
                 metrics['f1'] = float(np.mean(f1s))
                 metrics['hamming_loss'] = hamming_loss(y_t_arr, y_p_arr)
-            elif self.task_type in ['regression', 'time_series', 'forecast', 'ranking']:
+            elif self.task_type in ['regression', 'forecast', 'ranking']:
                 metrics['rmse'] = np.sqrt(mean_squared_error(y_test, y_pred))
                 metrics['mae'] = mean_absolute_error(y_test, y_pred)
                 metrics['median_ae'] = median_absolute_error(y_test, y_pred)
@@ -2985,7 +2967,7 @@ def get_technical_explanation(model_name, params, task_type):
             'birch': "BIRCH is efficient for clustering large datasets, building a cluster feature tree.",
             'spectral': "Spectral Clustering uses the connectivity of the data to group instances, useful for non-convex structures."
         },
-        'time_series': {
+        'forecast': {
             'random_forest_ts': "Random Forest adapted for time series using lags and temporal features as predictors.",
             'xgboost_ts': "XGBoost for time series focuses on capturing trends and seasonalities through boosting.",
             'extra_trees_ts': "Extra Trees for time series helps mitigate the noise inherent in temporal data."

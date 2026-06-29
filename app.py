@@ -1182,7 +1182,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         elif split_ratio <= 0.0:
             test_dfs.append(df_ds)
         else:
-            if strat == 'Cronológico (Chronological)' or ((task_type == 'time_series' or task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
+            if strat == 'Cronológico (Chronological)' or ((task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
                 # Temporal split
                 time_col = config.get('time_column', date_col)
                 if time_col and time_col in df_ds.columns:
@@ -1606,7 +1606,7 @@ if current_main_section == "📉 Monitoring":
                     # Dynamic Target Column Selection
                     target_col = st.selectbox("Target Column Name", options=df_stab_ref.columns.tolist(), index=len(df_stab_ref.columns)-1)
                     
-                task_type_sel = st.selectbox("Task Type", ["classification", "regression", "clustering", "time_series", "anomaly_detection"])
+                task_type_sel = st.selectbox("Task Type", ["classification", "regression", "clustering", "forecast", "anomaly_detection"])
                 
                 # Pre-unwrap actual_model strictly for UI param reading
                 actual_model = None
@@ -2288,6 +2288,26 @@ if current_main_section == "⚙️ AutoML":
             else:
                 cfg['semi_supervised'] = False
                 task_list = SUPERVISED_TASKS if learn_type == "Supervised" else UNSUP_TASKS
+                
+            data_type_opts = ["Tabular", "Sequential", "Text"]
+            current_dt_label = "Tabular"
+            if cfg.get('data_type') == 'sequential': current_dt_label = "Sequential"
+            elif cfg.get('data_type') == 'text': current_dt_label = "Text"
+            
+            data_type_sel = st.radio(
+                "Data Type",
+                data_type_opts,
+                index=data_type_opts.index(current_dt_label),
+                horizontal=True,
+                key="wiz_data_type"
+            )
+            
+            if data_type_sel == "Sequential":
+                cfg['data_type'] = 'sequential'
+            elif data_type_sel == "Text":
+                cfg['data_type'] = 'text'
+            else:
+                cfg['data_type'] = 'tabular'
                 
             current_task = cfg.get('task', task_list[0][0])
             if current_task not in [t[0] for t in task_list]:

@@ -258,16 +258,16 @@ class RLTrainer:
             
         vec_env = DummyVecEnv([make_env])
         
-        if not eval_mode:
-            normalize_obs = any(w.get('name') == 'NormalizeObservation' for w in self.wrappers)
-            normalize_rew = any(w.get('name') == 'NormalizeReward' for w in self.wrappers)
-            
-            if normalize_obs or normalize_rew:
-                vec_env = VecNormalize(
-                    vec_env, 
-                    norm_obs=normalize_obs, 
-                    norm_reward=normalize_rew
-                )
+        normalize_obs = any(w.get('name') == 'NormalizeObservation' for w in self.wrappers)
+        normalize_rew = any(w.get('name') == 'NormalizeReward' for w in self.wrappers)
+        
+        if normalize_obs or normalize_rew:
+            vec_env = VecNormalize(
+                vec_env, 
+                norm_obs=normalize_obs, 
+                norm_reward=normalize_rew if not eval_mode else False,
+                training=not eval_mode
+            )
                 
         return vec_env
     
