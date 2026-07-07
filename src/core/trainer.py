@@ -112,9 +112,9 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
         self._classes = np.unique(y) if y is not None else np.array([0, 1])
 
         logger.info(f"TransformersWrapper: Loading {self.model_name} tokenizer & model (num_labels={num_labels})...")
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, trust_remote_code=False)
         self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_name, num_labels=num_labels
+            self.model_name, num_labels=num_labels, trust_remote_code=False
         ).to(self.device)
 
         # --- Real training loop ---

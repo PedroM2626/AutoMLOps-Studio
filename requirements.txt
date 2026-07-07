@@ -240,3 +240,4 @@ yarl==1.24.2
 zipp==4.1.0
 
 nbformat
+featuretools

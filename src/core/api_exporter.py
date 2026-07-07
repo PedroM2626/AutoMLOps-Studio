@@ -10,6 +10,12 @@ def export_model_api(model_name: str, version: str) -> str:
     Exports a registered model as a self-contained FastAPI + Docker zip bundle.
     Returns the path to the generated zip file.
     """
+    import re
+    if not re.match(r'^[\w-]+$', model_name):
+        raise ValueError("Invalid model_name. Only alphanumeric characters, dashes, and underscores are allowed.")
+    if not re.match(r'^[\w.-]+$', version):
+        raise ValueError("Invalid version. Only alphanumeric characters, dots, dashes, and underscores are allowed.")
+
     client = MlflowClient()
     
     # 1. Get model version details to find the artifact URI

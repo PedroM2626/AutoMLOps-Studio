@@ -238,7 +238,9 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 target_column=target, task_type=task, data_type=data_type,
                 date_col=date_col, forecast_horizon=forecast_horizon,
                 nlp_config=nlp_config,
-                semi_supervised=semi_supervised
+                semi_supervised=semi_supervised,
+                enable_dfs=config.get('enable_dfs', False),
+                dfs_depth=config.get('dfs_depth', 1)
             )
             X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
 
@@ -357,6 +359,9 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 class_names=class_names,
                 X_test=X_test_proc,
                 y_test=y_test_proc,
+                X_raw=train_df,
+                processor=processor,
+                strict_cv=config.get('strict_cv', False)
             )
 
             best_score = getattr(trainer, 'best_score', None)

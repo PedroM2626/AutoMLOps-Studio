@@ -211,7 +211,7 @@ class AutoMLTrainer:
                 'n_trials': 40,
                 'timeout': 1800, # 30 min
                 'cv': 5,
-                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting']
+                'models': ['logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'extra_trees', 'svm', 'knn', 'mlp', 'hist_gradient_boosting', 'ridge', 'lasso', 'elastic_net']
             },
             'high': {
                 'n_trials': 100, 
@@ -221,6 +221,7 @@ class AutoMLTrainer:
                     'logistic_regression', 'random_forest', 'xgboost', 'lightgbm', 'catboost', 
                     'svm', 'mlp', 'extra_trees', 'adaboost', 'sgd_classifier', 'passive_aggressive', 
                     'voting_ensemble', 'stacking_ensemble', 'hist_gradient_boosting',
+                    'ridge', 'lasso', 'elastic_net', 'sgd_regressor',
                     'bert-base-uncased', 'distilbert-base-uncased'
                 ]
             },
@@ -528,7 +529,7 @@ class AutoMLTrainer:
                         ('lgb', lgb.LGBMClassifier(random_state=random_state))
                     ],
                     final_estimator=LogisticRegression(),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 )
             }
         elif self.task_type == 'regression':
@@ -542,7 +543,7 @@ class AutoMLTrainer:
                         random_state
                     ),
                     weights=self.ensemble_config.get('voting_weights', None),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'custom_stacking': lambda t: StackingRegressor(
                     estimators=self._resolve_estimators(
@@ -555,7 +556,7 @@ class AutoMLTrainer:
                     final_estimator=self._get_default_model(self.ensemble_config.get('stacking_final_estimator'), random_state)
                                     if isinstance(self.ensemble_config.get('stacking_final_estimator'), str)
                                     else self.ensemble_config.get('stacking_final_estimator', LinearRegression()),
-                    n_jobs=-1
+                    n_jobs=self.n_jobs
                 ),
                 'custom_bagging': lambda t: BaggingRegressor(
                     estimator=self._get_default_model(
@@ -566,7 +567,7 @@ class AutoMLTrainer:
                     max_samples=t.suggest_float('custom_bag_max_samples', 0.5, 1.0),
                     max_features=t.suggest_float('custom_bag_max_features', 0.5, 1.0),
                     random_state=random_state,
-                    n_jobs=1
+                    n_jobs=self.n_jobs
                 ),
                 'linear_regression': lambda t: LinearRegression(),
                 'random_forest': lambda t: RandomForestRegressor(
@@ -610,11 +611,11 @@ class AutoMLTrainer:
                     n_jobs=-1
                 ),
                 'ridge': lambda t: Ridge(
-                    alpha=t.suggest_float('ridge_alpha', 0.1, 10.0),
+                    alpha=t.suggest_float('ridge_alpha', 0.01, 100.0, log=True),
                     random_state=random_state
                 ),
                 'lasso': lambda t: Lasso(
-                    alpha=t.suggest_float('lasso_alpha', 0.01, 1.0),
+                    alpha=t.suggest_float('lasso_alpha', 0.01, 100.0, log=True),
                     random_state=random_state
                 ),
                 'elastic_net': lambda t: ElasticNet(
@@ -633,6 +634,14 @@ class AutoMLTrainer:
                     random_state=random_state,
                     early_stopping=True,
                     n_iter_no_change=10
+                ),
+                'hist_gradient_boosting': lambda t: HistGradientBoostingRegressor(
+                    max_iter=t.suggest_int('hgb_max_iter', 100, 1000),
+                    learning_rate=t.suggest_float('hgb_lr', 0.01, 0.3, log=True),
+                    max_depth=t.suggest_int('hgb_max_depth', 3, 20),
+                    max_leaf_nodes=t.suggest_int('hgb_max_leaf_nodes', 15, 255),
+                    l2_regularization=t.suggest_float('hgb_l2', 1e-10, 10.0, log=True),
+                    random_state=random_state
                 ),
                 'catboost': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
@@ -988,6 +997,9 @@ class AutoMLTrainer:
         self.ts_metadata = kwargs if (self.task_type == 'forecast' or self.is_time_series) else {}
         self.random_state = random_state
         self.ensemble_config = kwargs.get('ensemble_config', {})
+        self.strict_cv = kwargs.get('strict_cv', False)
+        self.processor = kwargs.get('processor', None)
+        self.X_raw = X_raw
         
         global_start_time = time.time()
 
@@ -1315,8 +1327,34 @@ class AutoMLTrainer:
                                     random_state=current_seed if shuffle_splits else None,
                                 )
                         
-                        from sklearn.model_selection import cross_validate
-                        cv_results = cross_validate(model, X_tr, y_tr, cv=cv, scoring=scoring_list, error_score='raise')
+                        if self.strict_cv and getattr(self, 'processor', None) is not None and getattr(self, 'X_raw', None) is not None:
+                            logger.info("Using Strict CV (Data Leakage Prevention)")
+                            import copy
+                            import numpy as np
+                            from sklearn.metrics import get_scorer
+                            
+                            cv_results = {f'test_{s}': [] for s in scoring_list}
+                            for train_idx, test_idx in cv.split(self.X_raw):
+                                X_raw_train = self.X_raw.iloc[train_idx].copy()
+                                X_raw_test = self.X_raw.iloc[test_idx].copy()
+                                
+                                proc_clone = copy.deepcopy(self.processor)
+                                X_tr_fold, y_tr_fold = proc_clone.fit_transform(X_raw_train)
+                                X_te_fold, y_te_fold = proc_clone.transform(X_raw_test)
+                                
+                                model_clone = copy.deepcopy(model)
+                                model_clone.fit(X_tr_fold, y_tr_fold)
+                                
+                                for s_key in scoring_list:
+                                    scorer = get_scorer(s_key)
+                                    score = scorer(model_clone, X_te_fold, y_te_fold)
+                                    cv_results[f'test_{s_key}'].append(score)
+                                    
+                            for k in cv_results:
+                                cv_results[k] = np.array(cv_results[k])
+                        else:
+                            from sklearn.model_selection import cross_validate
+                            cv_results = cross_validate(model, X_tr, y_tr, cv=cv, scoring=scoring_list, error_score='raise')
                         
                         # Map results from cv_results to trial_metrics
                         for s_key in scoring_list:

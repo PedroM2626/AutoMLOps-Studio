@@ -1595,8 +1595,9 @@ if current_main_section == "📉 Monitoring":
                                 loaded_pipeline = joblib.load(uploaded_model)
                                 st.success("Joblib Model loaded from file!")
                             elif uploaded_model.name.endswith(".pkl"):
-                                import pickle
-                                loaded_pipeline = pickle.load(uploaded_model)
+                                import joblib
+                                st.warning("Warning: Loading raw pickle files can execute arbitrary code. Only load models from trusted sources.")
+                                loaded_pipeline = joblib.load(uploaded_model)
                                 st.success("Pickle Model loaded from file!")
                         except Exception as e:
                             st.error(f"Failed to load model from file: {e}")
@@ -1713,7 +1714,7 @@ if current_main_section == "📉 Monitoring":
                                         processor = st.session_state.get('processor')
                                         if not processor:
                                             st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
-                                            processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel)
+                                            processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel, enable_dfs=cfg.get('enable_dfs', False), dfs_depth=cfg.get('dfs_depth', 1))
                                             X_stab, y_stab = processor.fit_transform(df_stab_ref)
                                         else:
                                             old_target = processor.target_column
@@ -2948,6 +2949,14 @@ if current_main_section == "⚙️ AutoML":
                 if enable_stab:
                     stab_opts = ["Data Variation Robustness", "Initialization Robustness", "Hyperparameter Sensitivity", "General Analysis"]
                     cfg['stability_tests'] = st.multiselect("Tests to Run", stab_opts, default=cfg.get('stability_tests', ["General Analysis"]), key="wiz_stab_tests")
+
+            with st.expander("🧪 Deep Feature Synthesis (DFS)", expanded=False):
+                st.info("Automatically generates highly predictive pairwise features (A+B, A*B, etc.) using `featuretools`.")
+                enable_dfs = st.checkbox("Enable Deep Feature Synthesis", value=cfg.get('enable_dfs', False), key="wiz_enable_dfs")
+                cfg['enable_dfs'] = enable_dfs
+                if enable_dfs:
+                    dfs_depth = st.slider("Max Synthesis Depth", 1, 3, cfg.get('dfs_depth', 1), help="Depth 1 = Pairwise interactions. Depth 2+ can consume massive RAM.", key="wiz_dfs_depth")
+                    cfg['dfs_depth'] = dfs_depth
 
             st.markdown('<br>', unsafe_allow_html=True)
             col_back, col_fwd, _ = st.columns([1, 1, 5])

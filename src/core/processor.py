@@ -13,7 +13,7 @@ from sklearn.preprocessing import FunctionTransformer
 logger = logging.getLogger(__name__)
 
 class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, data_type='tabular', date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', semi_supervised=False):
+    def __init__(self, target_column=None, task_type=None, data_type='tabular', date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', semi_supervised=False, enable_dfs=False, dfs_depth=1):
         self.target_column = target_column
         self.task_type = task_type
         self.data_type = data_type
@@ -25,6 +25,8 @@ class AutoMLDataProcessor:
         self.nlp_cols = []
         self.is_time_series = (data_type == 'sequential')
         self.semi_supervised = semi_supervised
+        self.enable_dfs = enable_dfs
+        self.dfs_depth = dfs_depth
 
     def _resolve_target_columns(self, df):
         """Resolve target column(s) present in the given DataFrame."""
@@ -131,6 +133,34 @@ class AutoMLDataProcessor:
         else:
             X = df
             y = None
+            
+        if self.enable_dfs and not self.is_time_series and not self.nlp_cols:
+            try:
+                import featuretools as ft
+                logger.info("Applying Deep Feature Synthesis (DFS)...")
+                dfs_df = X.copy()
+                es = ft.EntitySet(id="dataset")
+                dfs_df['_dfs_id'] = range(len(dfs_df))
+                es = es.add_dataframe(dataframe_name="data", dataframe=dfs_df, index="_dfs_id")
+                
+                feature_matrix, _ = ft.dfs(
+                    entityset=es,
+                    target_dataframe_name="data",
+                    trans_primitives=['add_numeric', 'multiply_numeric', 'subtract_numeric'],
+                    max_depth=self.dfs_depth,
+                    features_only=False,
+                    verbose=False
+                )
+                
+                if '_dfs_id' in feature_matrix.columns:
+                    feature_matrix = feature_matrix.drop(columns=['_dfs_id'])
+                
+                X = feature_matrix
+                logger.info(f"DFS completed. New feature matrix shape: {X.shape}")
+            except ImportError:
+                logger.warning("DFS failed: 'featuretools' is not installed. Please add it to requirements.")
+            except Exception as e:
+                logger.warning(f"DFS failed: {e}")
         
         process_cols = [c for c in X.columns if c != self.date_col]
         nlp_features = [c for c in self.nlp_cols if c in process_cols]
