@@ -55,6 +55,7 @@ from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_val_predict
 
+from src.engines.pytorch_forecast import PyTorchTimeSeriesRegressor
 import xgboost as xgb
 import lightgbm as lgb
 try:
@@ -807,7 +808,23 @@ class AutoMLTrainer:
                     iterations=t.suggest_int('cb_ts_iterations', 50, 200),
                     verbose=0,
                     thread_count=-1
-                ) if CATBOOST_AVAILABLE else None
+                ) if CATBOOST_AVAILABLE else None,
+                'lstm': lambda t: PyTorchTimeSeriesRegressor(
+                    model_type='lstm',
+                    hidden_size=t.suggest_int('lstm_hidden', 16, 128),
+                    num_layers=t.suggest_int('lstm_layers', 1, 3),
+                    epochs=t.suggest_int('lstm_epochs', 10, 50),
+                    lr=t.suggest_float('lstm_lr', 1e-4, 1e-2, log=True),
+                    random_state=random_state
+                ),
+                'tcn': lambda t: PyTorchTimeSeriesRegressor(
+                    model_type='tcn',
+                    hidden_size=t.suggest_int('tcn_hidden', 16, 128),
+                    num_layers=t.suggest_int('tcn_layers', 1, 4),
+                    epochs=t.suggest_int('tcn_epochs', 10, 50),
+                    lr=t.suggest_float('tcn_lr', 1e-4, 1e-2, log=True),
+                    random_state=random_state
+                )
             }
         elif self.task_type == 'multi_task':
             self.task_type = 'classification'
