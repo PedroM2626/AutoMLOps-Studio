@@ -1348,49 +1348,15 @@ class AutoMLTrainer:
                         logger.info(f"Training finalized for {full_trial_name} (final_fit_duration={t_final_fit_duration:.2f}s)")
 
                         # ADDED: Log multiple metrics for every trial (not just the optimization one)
-                        if self.task_type == 'classification' and hasattr(model, 'predict'):
-                            try:
-                                # Get predictions on a holdout subset or OOF if possible (OOF is expensive here, so use simple predict on train for logging purposes - warning: overfitting metrics!)
-                                # Better: Use a small holdout from X_tr for quick logging metrics
-                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
-                                model.fit(X_sub_train, y_sub_train)
-                                y_sub_pred = model.predict(X_sub_val)
-                                trial_metrics['val_accuracy'] = accuracy_score(y_sub_val, y_sub_pred)
-                                trial_metrics['val_f1'] = f1_score(y_sub_val, y_sub_pred, average='weighted')
-                                # Re-fit full for the final model artifact
-                                model.fit(X_tr, y_tr)
-                            except: pass
-                        elif self.task_type == 'multi_label' and hasattr(model, 'predict'):
-                            try:
-                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
-                                model.fit(X_sub_train, y_sub_train)
-                                y_sub_pred = model.predict(X_sub_val)
-                                trial_metrics['val_subset_accuracy'] = accuracy_score(y_sub_val, y_sub_pred)
-                                trial_metrics['val_f1_micro'] = f1_score(y_sub_val, y_sub_pred, average='micro', zero_division=0)
-                                model.fit(X_tr, y_tr)
-                            except:
-                                pass
-                        elif self.task_type == 'multi_task' and hasattr(model, 'predict'):
-                            try:
-                                X_sub_train, X_sub_val, y_sub_train, y_sub_val = train_test_split(X_tr, y_tr, test_size=0.2, random_state=42)
-                                model.fit(X_sub_train, y_sub_train)
-                                y_sub_pred = model.predict(X_sub_val)
-                                accuracies_sub = []
-                                f1s_sub = []
-                                y_sub_val_arr = np.asarray(y_sub_val)
-                                y_sub_pred_arr = np.asarray(y_sub_pred)
-                                if y_sub_val_arr.ndim == 1:
-                                    y_sub_val_arr = y_sub_val_arr.reshape(-1, 1)
-                                if y_sub_pred_arr.ndim == 1:
-                                    y_sub_pred_arr = y_sub_pred_arr.reshape(-1, 1)
-                                for col in range(y_sub_val_arr.shape[1]):
-                                    accuracies_sub.append(accuracy_score(y_sub_val_arr[:, col], y_sub_pred_arr[:, col]))
-                                    f1s_sub.append(f1_score(y_sub_val_arr[:, col], y_sub_pred_arr[:, col], average='weighted', zero_division=0))
-                                trial_metrics['val_accuracy'] = float(np.mean(accuracies_sub))
-                                trial_metrics['val_f1'] = float(np.mean(f1s_sub))
-                                model.fit(X_tr, y_tr)
-                            except:
-                                pass
+                        if self.task_type == 'classification':
+                            trial_metrics['val_accuracy'] = trial_metrics.get('accuracy', 0.0)
+                            trial_metrics['val_f1'] = trial_metrics.get('f1', 0.0)
+                        elif self.task_type == 'multi_label':
+                            trial_metrics['val_subset_accuracy'] = trial_metrics.get('subset_accuracy', 0.0)
+                            trial_metrics['val_f1_micro'] = trial_metrics.get('f1_micro', 0.0)
+                        elif self.task_type == 'multi_task':
+                            trial_metrics['val_accuracy'] = trial_metrics.get('accuracy', 0.0)
+                            trial_metrics['val_f1'] = trial_metrics.get('f1', 0.0)
 
                 elif self.task_type == 'association_rules':
                     model.fit(X_tr)
