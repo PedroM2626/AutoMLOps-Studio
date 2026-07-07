@@ -394,7 +394,7 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             # Generate White-Box Notebook
             try:
                 from src.core.notebook_generator import WhiteboxNotebookGenerator
-                gen = WhiteboxNotebookGenerator(config, best_params, feature_names)
+                gen = WhiteboxNotebookGenerator(config, best_params, feature_names, dataset_path=config.get('dataset_path'))
                 nb_path = gen.generate()
                 if run_id:
                     import mlflow

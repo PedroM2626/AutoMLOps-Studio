@@ -1363,9 +1363,11 @@ if current_main_section == "🗄️ Data":
                             df_preview.to_csv(csv_buffer, index=False)
                             path = datalake.save_raw_file(csv_buffer.getvalue().encode('utf-8'), dataset_name, uploaded_file.name.replace(ext, '.csv'))
                             st.session_state['df'] = df_preview
+                            st.session_state['dataset_path'] = os.path.abspath(path)
                         else:
                             uploaded_file.seek(0)
                             path = datalake.save_raw_file(uploaded_file.getvalue(), dataset_name, uploaded_file.name)
+                            st.session_state['dataset_path'] = os.path.abspath(path)
                         st.success(f"Dataset '{dataset_name}' saved to lake!")
             st.markdown("</div>", unsafe_allow_html=True)
 
@@ -1391,6 +1393,9 @@ if current_main_section == "🗄️ Data":
                         if st.button("👁 Load Preview", key="load_ds_ver", type="primary"):
                             df_preview = get_cached_dataframe(selected_ds, selected_ver)
                             st.session_state['data_preview_df'] = df_preview
+                            # Also save the path
+                            ver_path = datalake.get_version_path(selected_ds, selected_ver)
+                            st.session_state['dataset_path'] = os.path.abspath(ver_path)
             st.markdown("</div>", unsafe_allow_html=True)
             
         if 'data_preview_df' in st.session_state:
@@ -3052,6 +3057,7 @@ if current_main_section == "⚙️ AutoML":
                             st.stop()
 
                         job_config = {
+                            'dataset_path': st.session_state.get('dataset_path'),
                             'train_df': st.session_state.get('train_df'),
                             'test_df': st.session_state.get('test_df'),
                             'target': target,
