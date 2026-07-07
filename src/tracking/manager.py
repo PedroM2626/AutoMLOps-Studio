@@ -229,6 +229,7 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             stability_config    = config.get('stability_config')
             data_type           = config.get('data_type', 'tabular')
             semi_supervised     = config.get('semi_supervised', False)
+            is_time_series      = (task == 'time_series')
 
             log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
 
@@ -332,7 +333,6 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 use_deep_learning=use_deep_learning,
                 ensemble_mode=ensemble_mode,
                 n_jobs=config.get('n_jobs', -1),
-                is_time_series=is_time_series,
                 semi_supervised=semi_supervised
             )
             clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
