@@ -254,3 +254,23 @@ def get_run_details(run_id: str) -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+def get_model_signature(model_name, version=None):
+    "\"\"Fetch model signature (input/output schema) from MLflow registry."\"\"
+    try:
+        from mlflow.tracking import MlflowClient
+        import mlflow
+        client = MlflowClient()
+        if version is None:
+            versions = client.search_model_versions(f"name='{model_name}'")
+            if not versions: return None
+            model_version = sorted(versions, key=lambda item: int(item.version), reverse=True)[0]
+        else:
+            model_version = client.get_model_version(model_name, version)
+            
+        model_uri = f"models:/{model_name}/{model_version.version}"
+        mlflow_model = mlflow.models.Model.load(model_uri)
+        return mlflow_model.signature
+    except Exception as e:
+        print(f"Error fetching model signature: {e}")
+        return None

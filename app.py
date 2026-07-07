@@ -683,6 +683,7 @@ with st.sidebar:
         "🧪 Experiments",
         "📦 Registry & Deploy",
         "📉 Monitoring",
+        "🔮 What-If Simulator",
     ]
     nav_default = st.session_state.get('main_nav', NAV_ITEMS[0])
     if nav_default not in NAV_ITEMS:
@@ -4764,5 +4765,86 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                                 st.error(f"Vision Inference Error: {e}")
                             
             st.markdown("</div>", unsafe_allow_html=True)
+
+if current_main_section == "🔮 What-If Simulator":
+    st.markdown('''<div class='hero-header'>
+        <div class='hero-title'>🔮 What-If Simulator</div>
+        <div class='hero-subtitle'>Interactive dashboard to simulate live predictions and explain decisions with SHAP.</div>
+    </div>''', unsafe_allow_html=True)
+    
+    models = get_cached_registered_models()
+    if not models:
+        st.warning("No models registered in MLflow. Please train and register a model first.")
+    else:
+        model_names = [m.name for m in models]
+        selected_model = st.selectbox("Select Model", model_names)
+        
+        from src.tracking.mlflow import get_model_signature, load_registered_model
+        
+        signature = get_model_signature(selected_model)
+        if not signature:
+            st.error("No model signature found. The What-If Simulator requires models logged with input schemas.")
         else:
-            st.info("Deploy a model above to enable the Live Inference Playground.")
+            model = load_registered_model(selected_model)
+            
+            st.markdown("### 🎛️ Dynamic Inputs")
+            st.markdown("Tweak the values below to simulate a prediction in real-time.")
+            
+            inputs = {}
+            cols = st.columns(3)
+            col_idx = 0
+            
+            for input_col in signature.inputs:
+                name = input_col.name
+                type_name = input_col.type.name.lower() if hasattr(input_col.type, 'name') else str(input_col.type).lower()
+                with cols[col_idx % 3]:
+                    if "float" in type_name or "double" in type_name:
+                        inputs[name] = st.number_input(name, value=0.0)
+                    elif "int" in type_name or "long" in type_name:
+                        inputs[name] = st.number_input(name, value=0, step=1)
+                    else:
+                        inputs[name] = st.text_input(name, value="")
+                col_idx += 1
+                
+            if st.button("🔮 Simulate Prediction", type="primary"):
+                input_df = pd.DataFrame([inputs])
+                try:
+                    pred = model.predict(input_df)
+                    prob = None
+                    if hasattr(model, "predict_proba"):
+                        prob = model.predict_proba(input_df)
+                    
+                    st.markdown("---")
+                    st.markdown("### 🎯 Simulation Result")
+                    
+                    r1, r2 = st.columns([1, 2])
+                    with r1:
+                        st.metric("Predicted Value", str(pred[0]))
+                        if prob is not None:
+                            st.write("**Probabilities:**", prob[0])
+                    
+                    with r2:
+                        import shap
+                        import matplotlib.pyplot as plt
+                        st.markdown("#### 💡 SHAP Local Explanation")
+                        try:
+                            if hasattr(model, "predict_proba"):
+                                explainer = shap.TreeExplainer(model)
+                                shap_values = explainer.shap_values(input_df)
+                                if isinstance(shap_values, list):
+                                    sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
+                                else:
+                                    sv = shap_values
+                                ev = explainer.expected_value
+                                if isinstance(ev, list) or isinstance(ev, np.ndarray):
+                                    ev = ev[1] if len(ev) > 1 else ev[0]
+                                
+                                fig, ax = plt.subplots(figsize=(10, 3))
+                                shap.waterfall_plot(shap.Explanation(values=sv[0], base_values=ev, data=input_df.iloc[0], feature_names=input_df.columns), show=False)
+                                st.pyplot(fig)
+                            else:
+                                st.info("SHAP local explanation is currently optimized for Tree-based models.")
+                        except Exception as e:
+                            st.warning(f"Could not generate SHAP explanation: {e}")
+                except Exception as e:
+                    st.error(f"Prediction failed: {e}")
