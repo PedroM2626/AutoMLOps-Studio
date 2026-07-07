@@ -4634,13 +4634,39 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
             
             st.divider()
             st.markdown("##### 📥 Export Format")
-            if st.button("🧊 Download as ONNX", use_container_width=True):
-                with st.spinner("Preparing ONNX binary..."):
-                    try:
-                        # Logic to load model from registry and convert
-                        st.info("ONNX Conversion logic active in Engine. Utility: export_best_model_to_onnx")
-                    except Exception as e:
-                        st.error(f"ONNX conversion failed: {e}")
+            
+            # Layout the buttons in columns
+            exp_col1, exp_col2 = st.columns(2)
+            
+            with exp_col1:
+                if st.button("🧊 Download as ONNX", use_container_width=True):
+                    with st.spinner("Preparing ONNX binary..."):
+                        try:
+                            st.info("ONNX Conversion logic active in Engine. Utility: export_best_model_to_onnx")
+                        except Exception as e:
+                            st.error(f"ONNX conversion failed: {e}")
+                            
+            with exp_col2:
+                if st.button("🐳 Generate API Bundle (Docker + FastAPI)", use_container_width=True):
+                    with st.spinner("Bundling model API..."):
+                        try:
+                            from src.core.api_exporter import export_model_api
+                            zip_path = export_model_api(selected_model_name, selected_version)
+                            st.session_state['api_bundle_path'] = zip_path
+                        except Exception as e:
+                            st.error(f"API Export failed: {e}")
+                            
+            if 'api_bundle_path' in st.session_state:
+                st.markdown("<br/>", unsafe_allow_html=True)
+                with open(st.session_state['api_bundle_path'], "rb") as f:
+                    st.download_button(
+                        label="⬇️ Download API Bundle (.zip)",
+                        data=f,
+                        file_name=f"{selected_model_name}_v{selected_version}_api.zip",
+                        mime="application/zip",
+                        use_container_width=True,
+                        type="primary"
+                    )
             
             st.markdown("</div>", unsafe_allow_html=True)
         
