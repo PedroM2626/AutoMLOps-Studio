@@ -256,7 +256,7 @@ def get_run_details(run_id: str) -> dict:
         return {"error": str(e)}
 
 def get_model_signature(model_name, version=None):
-    "\"\"Fetch model signature (input/output schema) from MLflow registry."\"\"
+    """Fetch model signature (input/output schema) from MLflow registry."""
     try:
         from mlflow.tracking import MlflowClient
         import mlflow
