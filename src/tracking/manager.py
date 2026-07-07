@@ -389,6 +389,18 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 safe_info = {k: v for k, v in info.items() if k not in ('model', 'plots')}
                 safe_summaries[m_name] = safe_info
 
+            # Generate White-Box Notebook
+            try:
+                from src.core.notebook_generator import WhiteboxNotebookGenerator
+                gen = WhiteboxNotebookGenerator(config, best_params, feature_names)
+                nb_path = gen.generate()
+                if run_id:
+                    import mlflow
+                    mlflow.log_artifact(nb_path)
+                log_queue.put(("log", f"[JOB] Whitebox Notebook generated at: {nb_path}"))
+            except Exception as e:
+                log_queue.put(("log", f"[JOB] Notebook generation failed: {e}"))
+
             status_queue.put({
                 "type": "done",
                 "best_score": float(best_score) if best_score is not None else None,
