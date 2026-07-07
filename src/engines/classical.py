@@ -1102,7 +1102,7 @@ class AutoMLTrainer:
 
             # Initialize per-model early-stopping trackers
             if model_name not in model_best_score_so_far:
-                model_best_score_so_far[model_name] = -np.inf
+                model_best_score_so_far[model_name] = -float('inf')
             if model_name not in model_trials_without_improvement:
                 model_trials_without_improvement[model_name] = 0
 
@@ -1330,7 +1330,6 @@ class AutoMLTrainer:
                         if self.strict_cv and getattr(self, 'processor', None) is not None and getattr(self, 'X_raw', None) is not None:
                             logger.info("Using Strict CV (Data Leakage Prevention)")
                             import copy
-                            import numpy as np
                             from sklearn.metrics import get_scorer
                             
                             cv_results = {f'test_{s}': [] for s in scoring_list}
