@@ -355,6 +355,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 stability_config=stability_config,
                 feature_names=feature_names,
                 class_names=class_names,
+                X_test=X_test_proc,
+                y_test=y_test_proc,
             )
 
             best_score = getattr(trainer, 'best_score', None)

@@ -942,7 +942,7 @@ class AutoMLTrainer:
         all_models = self._get_models()
         return self._filter_models(all_models)
 
-    def train(self, X_train, y_train=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
+    def train(self, X_train, y_train=None, X_test=None, y_test=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         self.random_state = random_state
         
         # Ensure optimization metric is compatible with task type
@@ -1678,40 +1678,58 @@ class AutoMLTrainer:
                      # or just do a simple validation split at end
                      pass 
                 else:
-                    # OPTIMIZED: Use a single holdout split for report plots instead of 3-fold CV
-                    # This is much faster, especially for Random Forest
+                    # OPTIMIZED: Use provided X_test/y_test for report plots, 
+                    # OR a single holdout split if not provided
                     try:
                         logger.info(f"📊 Generating predictions for model report {m_name} (Fast Mode)...")
                         
-                        # Sample data if too large to speed up report generation
-                        X_rep_data = effective_X_plot
-                        y_rep_data = y_train
-                        
-                        max_rep_samples = 2000 # Enough for good plots, fast enough for RF
-                        if hasattr(X_rep_data, 'shape') and X_rep_data.shape[0] > max_rep_samples:
-                            logger.info(f"Sampling {max_rep_samples} instances for report of {m_name}")
-                            idx_rep = np.random.choice(X_rep_data.shape[0], max_rep_samples, replace=False)
-                            if isinstance(X_rep_data, pd.DataFrame):
-                                X_rep_data = X_rep_data.iloc[idx_rep]
-                                y_rep_data = y_rep_data.iloc[idx_rep]
-                            else:
-                                X_rep_data = X_rep_data[idx_rep]
-                                y_rep_data = y_rep_data[idx_rep]
-
-                        # Simple 80/20 split for report metrics/plots
-                        X_r_tr, X_r_val, y_r_tr, y_r_val = train_test_split(
-                            X_rep_data, y_rep_data, test_size=0.2, random_state=model_seed
-                        )
-                        
-                        # Re-fit on the 80% to get "clean" predictions on the 20%
-                        # For RF, we can also limit n_estimators slightly for the report if it's still slow
-                        if m_name == 'random_forest' and hasattr(best_model_instance, 'n_estimators'):
-                             orig_estimators = best_model_instance.n_estimators
-                             if orig_estimators > 100:
-                                  best_model_instance.set_params(n_estimators=100)
-                        
                         t_report_fit_start = time.time()
-                        best_model_instance.fit(X_r_tr, y_r_tr)
+                        
+                        if X_test is not None and y_test is not None:
+                            # Bypass redundant split and refit. Use global test set directly.
+                            X_r_val = X_test
+                            y_r_val = y_test
+                            
+                            # Limit sample size for plots if test set is massive
+                            if hasattr(X_r_val, 'shape') and X_r_val.shape[0] > 2000:
+                                idx_rep = np.random.choice(X_r_val.shape[0], 2000, replace=False)
+                                if isinstance(X_r_val, pd.DataFrame):
+                                    X_r_val = X_r_val.iloc[idx_rep]
+                                    y_r_val = y_r_val.iloc[idx_rep] if isinstance(y_r_val, (pd.DataFrame, pd.Series)) else y_r_val[idx_rep]
+                                else:
+                                    X_r_val = X_r_val[idx_rep]
+                                    y_r_val = y_r_val[idx_rep]
+                                    
+                            logger.info("Using global X_test for final report (bypassing redundant refit).")
+                        else:
+                            # Sample data if too large to speed up report generation
+                            X_rep_data = effective_X_plot
+                            y_rep_data = y_train
+                            
+                            max_rep_samples = 2000 # Enough for good plots, fast enough for RF
+                            if hasattr(X_rep_data, 'shape') and X_rep_data.shape[0] > max_rep_samples:
+                                logger.info(f"Sampling {max_rep_samples} instances for report of {m_name}")
+                                idx_rep = np.random.choice(X_rep_data.shape[0], max_rep_samples, replace=False)
+                                if isinstance(X_rep_data, pd.DataFrame):
+                                    X_rep_data = X_rep_data.iloc[idx_rep]
+                                    y_rep_data = y_rep_data.iloc[idx_rep]
+                                else:
+                                    X_rep_data = X_rep_data[idx_rep]
+                                    y_rep_data = y_rep_data[idx_rep]
+    
+                            # Simple 80/20 split for report metrics/plots
+                            X_r_tr, X_r_val, y_r_tr, y_r_val = train_test_split(
+                                X_rep_data, y_rep_data, test_size=0.2, random_state=model_seed
+                            )
+                            
+                            # Re-fit on the 80% to get "clean" predictions on the 20%
+                            if m_name == 'random_forest' and hasattr(best_model_instance, 'n_estimators'):
+                                 orig_estimators = best_model_instance.n_estimators
+                                 if orig_estimators > 100:
+                                      best_model_instance.set_params(n_estimators=100)
+                            
+                            best_model_instance.fit(X_r_tr, y_r_tr)
+                            
                         t_report_fit_dur = time.time() - t_report_fit_start
                         logger.info(f"Report-fit completed for {m_name} (duration={t_report_fit_dur:.2f}s)")
                         y_pred_plot = best_model_instance.predict(X_r_val)
