@@ -30,6 +30,16 @@ class WhiteboxNotebookGenerator:
             "It allows you to inspect, customize, and execute the winning machine learning pipeline independently."
         )
         
+        # Table of Contents
+        self._add_markdown(
+            "## Table of Contents\n"
+            "- [1. Setup & Imports](#1.-Setup-&-Imports)\n"
+            "- [2. Data Loading](#2.-Data-Loading)\n"
+            "- [3. Data Preprocessing (Feature Engineering)](#2.5.-Data-Preprocessing-(Feature-Engineering))\n"
+            "- [4. Model Definition](#3.-Model-Definition)\n"
+            "- [5. Training and Evaluation](#4.-Training-and-Evaluation)"
+        )
+        
         # 2. Experiment Info
         task_type = self.config.get('task', 'Unknown Task')
         target_col = self.config.get('target', 'Unknown Target')
@@ -50,12 +60,22 @@ class WhiteboxNotebookGenerator:
         self._add_code(
             "import pandas as pd\n"
             "import numpy as np\n"
+            "import mlflow\n"
+            "import matplotlib.pyplot as plt\n"
+            "import seaborn as sns\n"
             "from sklearn.model_selection import train_test_split\n"
             "from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error, mean_absolute_percentage_error\n"
+            "from sklearn.metrics import classification_report, confusion_matrix\n"
+            "from src.core.processor import AutoMLDataProcessor\n\n"
+            "# Configure visualization style\n"
+            "sns.set_theme(style='whitegrid')\n"
+            "plt.rcParams['figure.figsize'] = (10, 6)"
         )
         
         # 4. Data Loading
         self._add_markdown("### 2. Data Loading")
+        shuffle = "False" if task_type == 'time_series' else "True"
+        
         if self.dataset_path:
             self._add_markdown("Loading the exact dataset used during the AutoML session.")
             
@@ -67,7 +87,7 @@ class WhiteboxNotebookGenerator:
                 f"target_col = '{target_col}'\n"
                 f"X = df.drop(columns=[target_col])\n"
                 f"y = df[target_col]\n"
-                f"X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)"
+                f"X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle={shuffle})"
             )
         else:
             self._add_markdown("Load your original dataset here. The code below assumes you have loaded it into a pandas DataFrame named `df`.")
@@ -77,8 +97,22 @@ class WhiteboxNotebookGenerator:
                 f"target_col = '{target_col}'\n"
                 "# X = df.drop(columns=[target_col])\n"
                 "# y = df[target_col]\n"
-                "# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)"
+                f"# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle={shuffle})"
             )
+        
+        # 4.5. Data Preprocessing
+        self._add_markdown("### 2.5. Data Preprocessing (Feature Engineering)")
+        self._add_markdown(
+            "Instantiating the exact data processor used during the AutoML session.\n"
+            "This step handles missing values, categorical encoding, NLP embeddings, and Deep Feature Synthesis (DFS)."
+        )
+        self._add_code(
+            f"processor = AutoMLDataProcessor(target_column='{target_col}', task_type='{task_type}')\n\n"
+            "# Fit the processor on training data and transform it\n"
+            "X_train_proc, y_train_proc = processor.fit_transform(X_train, y_train)\n\n"
+            "# Transform the test data using the fitted processor\n"
+            "X_test_proc, y_test_proc = processor.transform(X_test, y_test)"
+        )
         
         # 5. Model Definition
         self._add_markdown("### 3. Model Definition")
@@ -91,6 +125,7 @@ class WhiteboxNotebookGenerator:
         
         # 6. Training & Evaluation
         self._add_markdown("### 4. Training and Evaluation")
+        self._add_markdown("This section trains the model and generates a comprehensive performance report, including visual diagnostics.")
         
         metric_map = {
             'accuracy': ('accuracy_score', ''),
@@ -105,21 +140,116 @@ class WhiteboxNotebookGenerator:
         }
         metric_fn, metric_kwargs = metric_map.get(opt_metric, ('accuracy_score' if task_type == 'classification' else 'mean_squared_error', ''))
         
+        is_classification = task_type == 'classification'
+        
+        eval_code = ""
+        if is_classification:
+            eval_code = (
+                "    # Detailed Classification Report\n"
+                "    print('\\n--- Classification Report ---')\n"
+                "    print(classification_report(y_test_proc, preds))\n\n"
+                "    # Confusion Matrix Plot\n"
+                "    fig_cm, ax_cm = plt.subplots(figsize=(8, 6))\n"
+                "    cm = confusion_matrix(y_test_proc, preds)\n"
+                "    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax_cm)\n"
+                "    ax_cm.set_title('Confusion Matrix')\n"
+                "    ax_cm.set_ylabel('Actual')\n"
+                "    ax_cm.set_xlabel('Predicted')\n"
+                "    plt.tight_layout()\n"
+                "    plt.show()\n"
+                "    mlflow.log_figure(fig_cm, 'confusion_matrix.png')\n"
+            )
+        else:
+            eval_code = (
+                "    # Detailed Regression Metrics\n"
+                "    print('\\n--- Regression Report ---')\n"
+                "    print(f'RMSE: {mean_squared_error(y_test_proc, preds, squared=False):.4f}')\n"
+                "    print(f'MAE:  {mean_absolute_error(y_test_proc, preds):.4f}')\n"
+                "    print(f'R2:   {r2_score(y_test_proc, preds):.4f}')\n\n"
+                "    # Actual vs Predicted Plot\n"
+                "    fig_scatter, ax_scatter = plt.subplots(figsize=(8, 6))\n"
+                "    ax_scatter.scatter(y_test_proc, preds, alpha=0.5, color='blue')\n"
+                "    ax_scatter.plot([y_test_proc.min(), y_test_proc.max()], [y_test_proc.min(), y_test_proc.max()], 'r--', lw=2)\n"
+                "    ax_scatter.set_title('Actual vs Predicted')\n"
+                "    ax_scatter.set_xlabel('Actual Values')\n"
+                "    ax_scatter.set_ylabel('Predicted Values')\n"
+                "    plt.tight_layout()\n"
+                "    plt.show()\n"
+                "    mlflow.log_figure(fig_scatter, 'actual_vs_predicted.png')\n\n"
+                "    # Residuals Plot\n"
+                "    fig_res, ax_res = plt.subplots(figsize=(8, 6))\n"
+                "    residuals = y_test_proc - preds\n"
+                "    sns.histplot(residuals, kde=True, ax=ax_res, color='purple')\n"
+                "    ax_res.set_title('Residuals Distribution')\n"
+                "    plt.tight_layout()\n"
+                "    plt.show()\n"
+                "    mlflow.log_figure(fig_res, 'residuals_distribution.png')\n"
+            )
+
+        feat_imp_code = (
+            "    # Feature Importance Plot (if supported by model)\n"
+            "    if hasattr(model, 'feature_importances_'):\n"
+            "        try:\n"
+            "            importances = model.feature_importances_\n"
+            "            # Try to get feature names\n"
+            "            feat_names = processor.get_feature_names_out() if hasattr(processor, 'get_feature_names_out') else [f'Feature {i}' for i in range(len(importances))]\n"
+            "            if len(feat_names) != len(importances):\n"
+            "                feat_names = [f'Feature {i}' for i in range(len(importances))]\n"
+            "            \n"
+            "            imp_df = pd.DataFrame({'Feature': feat_names, 'Importance': importances})\n"
+            "            imp_df = imp_df.sort_values(by='Importance', ascending=False).head(15)\n\n"
+            "            fig_fi, ax_fi = plt.subplots(figsize=(10, 8))\n"
+            "            sns.barplot(x='Importance', y='Feature', data=imp_df, ax=ax_fi, palette='viridis')\n"
+            "            ax_fi.set_title('Top 15 Feature Importances')\n"
+            "            plt.tight_layout()\n"
+            "            plt.show()\n"
+            "            mlflow.log_figure(fig_fi, 'feature_importance.png')\n"
+            "        except Exception as e:\n"
+            "            print(f'Could not plot feature importance: {e}')\n"
+        )
+
         if self.dataset_path:
             self._add_code(
-                "# Train the model\n"
-                "model.fit(X_train, y_train)\n\n"
-                "# Predict and Evaluate\n"
-                "preds = model.predict(X_test)\n"
-                f"print('{opt_metric.upper()}:', {metric_fn}(y_test, preds{metric_kwargs}))"
+                "mlflow.set_experiment('Whitebox_Notebook_Runs')\n"
+                "with mlflow.start_run(run_name='Manual_Execution'):\n"
+                f"    mlflow.log_param('model', '{model_name}')\n"
+                "    # Train the model\n"
+                "    model.fit(X_train_proc, y_train_proc)\n\n"
+                "    # Predict and Evaluate\n"
+                "    preds = model.predict(X_test_proc)\n"
+                f"    score = {metric_fn}(y_test_proc, preds{metric_kwargs})\n"
+                f"    print('Optimization Target ({opt_metric.upper()}):', score)\n"
+                f"    mlflow.log_metric('{opt_metric}', score)\n\n"
+                f"{eval_code}\n"
+                f"{feat_imp_code}\n"
+                "    # Save Model\n"
+                "    try:\n"
+                "        mlflow.sklearn.log_model(model, 'model')\n"
+                "    except Exception:\n"
+                "        pass # For PyTorch models, custom logging might be required"
             )
         else:
             self._add_code(
-                "# Train the model\n"
-                "# model.fit(X_train, y_train)\n\n"
-                "# Predict and Evaluate\n"
-                "# preds = model.predict(X_test)\n"
-                f"# print('{opt_metric.upper()}:', {metric_fn}(y_test, preds{metric_kwargs}))"
+                "# mlflow.set_experiment('Whitebox_Notebook_Runs')\n"
+                "# with mlflow.start_run(run_name='Manual_Execution'):\n"
+                f"#     mlflow.log_param('model', '{model_name}')\n"
+                "#     # Train the model\n"
+                "#     model.fit(X_train_proc, y_train_proc)\n\n"
+                "#     # Predict and Evaluate\n"
+                "#     preds = model.predict(X_test_proc)\n"
+                f"#     score = {metric_fn}(y_test_proc, preds{metric_kwargs})\n"
+                f"#     print('Optimization Target ({opt_metric.upper()}):', score)\n"
+                f"#     mlflow.log_metric('{opt_metric}', score)\n\n"
+                "#     # ---------------------------------------------------------\n"
+                "#     # NOTE: Uncomment the evaluation logic below when running!\n"
+                "#     # ---------------------------------------------------------\n"
+                f"# {eval_code.replace('    ', '#     ')}\n"
+                f"# {feat_imp_code.replace('    ', '#     ')}\n"
+                "#     # Save Model\n"
+                "#     try:\n"
+                "#         mlflow.sklearn.log_model(model, 'model')\n"
+                "#     except Exception:\n"
+                "#         pass"
             )
         
         # Save to disk
@@ -161,6 +291,9 @@ class WhiteboxNotebookGenerator:
             model_class = "RandomForestClassifier" if self.config.get('task') == 'classification' else "RandomForestRegressor"
         elif "LogisticRegression" in model_name or "Ridge" in model_name or "Lasso" in model_name:
             import_str = "from sklearn.linear_model import LogisticRegression, Ridge, Lasso"
+            model_class = model_name
+        elif "LSTM" in model_name or "TCN" in model_name:
+            import_str = "from src.engines.pytorch_forecast import PyTorchLSTMRegressor, PyTorchTCNRegressor"
             model_class = model_name
         else:
             import_str = "# Import your custom model here"
