@@ -295,6 +295,21 @@ class WhiteboxNotebookGenerator:
         elif "LSTM" in model_name or "TCN" in model_name:
             import_str = "from src.engines.pytorch_forecast import PyTorchLSTMRegressor, PyTorchTCNRegressor"
             model_class = model_name
+        elif "LDA" in model_name or "LinearDiscriminantAnalysis" in model_name:
+            import_str = "from sklearn.discriminant_analysis import LinearDiscriminantAnalysis"
+            model_class = "LinearDiscriminantAnalysis"
+        elif "NCA" in model_name or "NeighborhoodComponentsAnalysis" in model_name:
+            import_str = "from sklearn.neighbors import NeighborhoodComponentsAnalysis"
+            model_class = "NeighborhoodComponentsAnalysis"
+        elif "PLS" in model_name or "PLSRegression" in model_name:
+            import_str = "from sklearn.cross_decomposition import PLSRegression"
+            model_class = "PLSRegression"
+        elif "PCA" in model_name:
+            import_str = "from sklearn.decomposition import PCA"
+            model_class = "PCA"
+        elif "SVD" in model_name or "TruncatedSVD" in model_name:
+            import_str = "from sklearn.decomposition import TruncatedSVD"
+            model_class = "TruncatedSVD"
         else:
             import_str = "# Import your custom model here"
             model_class = model_name or "YourModelClass"

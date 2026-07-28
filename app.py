@@ -2804,7 +2804,7 @@ if current_main_section == "⚙️ AutoML":
                     'clustering': ['silhouette'],
                     'time_series': ['rmse', 'mae', 'mape'],
                     'anomaly_detection': ['f1'],
-                    'dimensionality_reduction': ['explained_variance'],
+                    'dimensionality_reduction': ['explained_variance', 'supervised_separability'],
                     'association_rules': ['rule_score', 'rule_count', 'avg_lift']
                 }
                 metric_list = metric_options.get(task, ['accuracy'])
@@ -3030,7 +3030,7 @@ if current_main_section == "⚙️ AutoML":
             target = None
             if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
                 train_df = st.session_state['train_df']
-                if task not in ["clustering", "anomaly_detection", "dimensionality_reduction", "association_rules"]:
+                if task not in ["clustering", "anomaly_detection", "association_rules"]:
                     act_target = st.session_state.get('target_active')
                     if task == "multi_label":
                         if isinstance(act_target, list) and all(c in train_df.columns for c in act_target) and len(act_target) >= 2:

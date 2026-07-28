@@ -42,5 +42,32 @@ def test_classical_models():
         except Exception as e:
             logger.error(f"FAIL: {m}: {e}")
 
+def test_supervised_dimensionality_reduction():
+    logger.info("--- Testing Supervised Dimensionality Reduction ---")
+    X, y = make_classification(n_samples=60, n_features=8, n_classes=3, n_informative=5, random_state=42)
+    trainer_dr = AutoMLTrainer(task_type="dimensionality_reduction", preset="test")
+    
+    models = ['pca', 'truncated_svd', 'lda', 'nca', 'pls']
+    class MockTrial:
+        def suggest_float(self, *args, **kwargs): return 0.1
+        def suggest_int(self, name, low, high, *args, **kwargs): return min(2, high)
+        def suggest_categorical(self, name, choices): return choices[0]
+
+    for m in models:
+        try:
+            model = trainer_dr._get_models(trial=MockTrial(), name=m, random_state=42)
+            assert model is not None, f"Model {m} should not be None"
+            if m in ['lda', 'nca', 'pls']:
+                model.fit(X, y)
+            else:
+                model.fit(X)
+            X_trans = model.transform(X)
+            assert X_trans.shape[0] == 60, f"Transformed shape mismatch for {m}"
+            logger.info(f"OK (Supervised DR): {m} -> Transformed shape: {X_trans.shape}")
+        except Exception as e:
+            logger.error(f"FAIL (Supervised DR) {m}: {e}")
+            raise e
+
 if __name__ == "__main__":
     test_classical_models()
+    test_supervised_dimensionality_reduction()

@@ -35,6 +35,9 @@ from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighbo
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.covariance import EllipticEnvelope
 from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+from sklearn.neighbors import NeighborhoodComponentsAnalysis
+from sklearn.cross_decomposition import PLSRegression
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, 
     mean_squared_error, mean_absolute_error, r2_score, confusion_matrix,
@@ -301,6 +304,9 @@ class AutoMLTrainer:
         elif self.task_type == 'dimensionality_reduction':
             if name == 'pca': return PCA(random_state=random_state)
             if name == 'truncated_svd': return TruncatedSVD(random_state=random_state)
+            if name == 'lda': return LinearDiscriminantAnalysis()
+            if name == 'nca': return NeighborhoodComponentsAnalysis(random_state=random_state)
+            if name == 'pls': return PLSRegression()
             
         return None
 
@@ -895,9 +901,43 @@ class AutoMLTrainer:
                     import traceback; traceback.print_exc()
                     return None
 
+            def get_lda(t):
+                try:
+                    solver = t.suggest_categorical('lda_solver', ['svd', 'lsqr']) if hasattr(t, 'suggest_categorical') else 'svd'
+                    return LinearDiscriminantAnalysis(
+                        n_components=t.suggest_int('lda_n_components', 1, min(max_comp, 5)) if hasattr(t, 'suggest_int') else 1,
+                        solver=solver
+                    )
+                except Exception as e:
+                    logger.error(f'Error creating LDA: {e}')
+                    return None
+
+            def get_nca(t):
+                try:
+                    return NeighborhoodComponentsAnalysis(
+                        n_components=t.suggest_int('nca_n_components', 2, max_comp) if hasattr(t, 'suggest_int') else 2,
+                        init=t.suggest_categorical('nca_init', ['auto', 'pca', 'random']) if hasattr(t, 'suggest_categorical') else 'auto',
+                        random_state=42
+                    )
+                except Exception as e:
+                    logger.error(f'Error creating NCA: {e}')
+                    return None
+
+            def get_pls(t):
+                try:
+                    return PLSRegression(
+                        n_components=t.suggest_int('pls_n_components', 2, max_comp) if hasattr(t, 'suggest_int') else 2
+                    )
+                except Exception as e:
+                    logger.error(f'Error creating PLS: {e}')
+                    return None
+
             models_config = {
                 'pca': get_pca,
-                'truncated_svd': get_svd
+                'truncated_svd': get_svd,
+                'lda': get_lda,
+                'nca': get_nca,
+                'pls': get_pls
             }
             logger.info(f"DEBUG _get_models: task_type={self.task_type}, name requested={name}, returning keys={list(models_config.keys())}")
         else:
@@ -1428,12 +1468,27 @@ class AutoMLTrainer:
                         score = 0
                     trial_metrics['decision_score'] = score
                 elif self.task_type == 'dimensionality_reduction':
-                    model.fit(X_tr)
-                    if hasattr(model, 'explained_variance_ratio_'):
-                        score = model.explained_variance_ratio_.sum()
+                    if y_tr is not None:
+                        try:
+                            model.fit(X_tr, y_tr)
+                        except Exception:
+                            model.fit(X_tr)
                     else:
-                        score = 0
+                        model.fit(X_tr)
+
+                    if hasattr(model, 'explained_variance_ratio_'):
+                        score = float(model.explained_variance_ratio_.sum())
+                    else:
+                        try:
+                            X_trans = model.transform(X_tr)
+                            if y_tr is not None and len(np.unique(y_tr)) > 1:
+                                score = float(silhouette_score(X_trans, y_tr))
+                            else:
+                                score = float(np.var(X_trans, axis=0).sum())
+                        except Exception:
+                            score = 0.0
                     trial_metrics['explained_variance'] = score
+                    trial_metrics['supervised_separability'] = score
                 else: # clustering
                     model.fit(X_tr)
                     labels = model.labels_ if hasattr(model, 'labels_') else model.predict(X_tr)
