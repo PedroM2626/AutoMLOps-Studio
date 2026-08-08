@@ -94,7 +94,9 @@ class AutoMLDataProcessor:
                 
                 df[f'rolling_mean_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).mean()
                 df[f'rolling_std_{self.forecast_horizon}'] = target_vals.shift(self.forecast_horizon).rolling(window=3).std()
-                df = df.dropna()
+                lag_rolling_cols = [c for c in df.columns if c.startswith(('lag_', 'rolling_'))]
+                if lag_rolling_cols:
+                    df = df.dropna(subset=lag_rolling_cols)
             
         return df
 
@@ -326,7 +328,10 @@ class AutoMLDataProcessor:
             if not isinstance(y, pd.DataFrame) and hasattr(self, 'label_encoder') and self.label_encoder:
                 try:
                     y = self.label_encoder.transform(y)
-                except:
+                except ValueError as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Label encoder transform failed (unseen labels?): {e}. Returning raw labels.")
+                except Exception:
                     pass
             elif isinstance(y, pd.DataFrame):
                 y = y.to_numpy()

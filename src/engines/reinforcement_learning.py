@@ -399,7 +399,7 @@ class RLTrainer:
         
         model.learn(total_timesteps=min(50000, self.total_timesteps // 2), callback=eval_callback)
         
-        mean_reward = np.mean(eval_callback.best_mean_reward) if eval_callback.best_mean_reward.size > 0 else -np.inf
+        mean_reward = eval_callback.best_mean_reward if eval_callback.best_mean_reward != -np.inf else -np.inf
         
         return mean_reward
     

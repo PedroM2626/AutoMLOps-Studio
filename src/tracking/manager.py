@@ -245,6 +245,9 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
 
             if test_df is not None:
+                # Check that test_df contains the target column before transforming
+                if target and target not in test_df.columns:
+                    test_df[target] = float('nan')
                 X_test_proc, y_test_proc = processor.transform(test_df)
             else:
                 X_test_proc, y_test_proc = None, None

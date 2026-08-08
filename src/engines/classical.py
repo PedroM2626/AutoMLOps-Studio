@@ -49,7 +49,8 @@ from sklearn.metrics import (
 from sklearn.linear_model import (
     LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet, 
     SGDClassifier, SGDRegressor, RidgeClassifier, PassiveAggressiveClassifier,
-    LassoLars, TweedieRegressor, HuberRegressor, RANSACRegressor, TheilSenRegressor
+    LassoLars, TweedieRegressor, HuberRegressor, RANSACRegressor, TheilSenRegressor,
+    PoissonRegressor, GammaRegressor
 )
 from sklearn.svm import SVC, SVR, OneClassSVM, LinearSVC, NuSVC, NuSVR
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, MeanShift, Birch, SpectralClustering
@@ -57,6 +58,49 @@ from sklearn.mixture import GaussianMixture
 from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_val_predict
+
+def calculate_c_index(event_indicator, event_time, risk_scores):
+    """Calculates Concordance Index (C-Index) for Survival Analysis."""
+    try:
+        e = np.asarray(event_indicator, dtype=bool)
+        t = np.asarray(event_time, dtype=float)
+        r = np.asarray(risk_scores, dtype=float)
+        n = len(t)
+        if n < 2 or e.sum() == 0:
+            return 0.5
+        concordant = 0.0
+        permissible = 0.0
+        for i in range(n):
+            if not e[i]:
+                continue
+            for j in range(n):
+                if t[i] < t[j]:
+                    permissible += 1.0
+                    if r[i] > r[j]:
+                        concordant += 1.0
+                    elif r[i] == r[j]:
+                        concordant += 0.5
+        return float(concordant / permissible) if permissible > 0 else 0.5
+    except Exception:
+        return 0.5
+
+def calculate_qini_score(treatment, outcome, uplift_scores):
+    """Calculates Qini Score for Uplift Modeling."""
+    try:
+        df = pd.DataFrame({'t': treatment, 'y': outcome, 's': uplift_scores})
+        df = df.sort_values(by='s', ascending=False).reset_index(drop=True)
+        n_t = (df['t'] == 1).sum()
+        n_c = (df['t'] == 0).sum()
+        if n_t == 0 or n_c == 0:
+            return 0.0
+        df['cum_yt'] = (df['y'] * df['t']).cumsum()
+        df['cum_yc'] = (df['y'] * (1 - df['t'])).cumsum()
+        df['cum_nt'] = df['t'].cumsum()
+        df['cum_nc'] = (1 - df['t']).cumsum()
+        qini_curve = df['cum_yt'] - df['cum_yc'] * (df['cum_nt'] / np.maximum(df['cum_nc'], 1))
+        return float(np.clip(qini_curve.sum() / len(df), -1.0, 1.0))
+    except Exception:
+        return 0.0
 
 from src.engines.pytorch_forecast import PyTorchTimeSeriesRegressor
 import xgboost as xgb
@@ -282,8 +326,15 @@ class AutoMLTrainer:
             if name == 'sgd_regressor': return SGDRegressor(max_iter=1000, random_state=random_state)
             if name == 'adaboost': return AdaBoostRegressor(random_state=random_state)
             if name == 'bagging': return BaggingRegressor(random_state=random_state)
+            if name == 'poisson': return PoissonRegressor(max_iter=300)
+            if name == 'gamma': return GammaRegressor(max_iter=300)
             if name == 'hist_gradient_boosting': return HistGradientBoostingRegressor(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=self.n_jobs, random_seed=random_state)
+        elif self.task_type == 'survival_analysis':
+            if name == 'survival_cox_ph' or name == 'survival_gradient_boosting': return HistGradientBoostingRegressor(loss='poisson', random_state=random_state)
+            if name == 'survival_random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
+        elif self.task_type == 'uplift_modeling':
+            if name == 's_learner' or name == 't_learner': return GradientBoostingRegressor(random_state=random_state)
         elif self.task_type == 'ranking':
             if name == 'ranking_linear_regression': return LinearRegression()
             if name == 'ranking_random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
@@ -691,6 +742,14 @@ class AutoMLTrainer:
                     power=t.suggest_float('tweedie_power', 0.0, 3.0),
                     alpha=t.suggest_float('tweedie_alpha', 1e-4, 10.0, log=True)
                 ),
+                'poisson': lambda t: PoissonRegressor(
+                    alpha=t.suggest_float('poisson_alpha', 1e-4, 10.0, log=True) if t else 1.0,
+                    max_iter=300
+                ),
+                'gamma': lambda t: GammaRegressor(
+                    alpha=t.suggest_float('gamma_alpha', 1e-4, 10.0, log=True) if t else 1.0,
+                    max_iter=300
+                ),
                 'ransac': lambda t: RANSACRegressor(random_state=random_state),
                 'theil_sen': lambda t: TheilSenRegressor(random_state=random_state),
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
@@ -940,6 +999,38 @@ class AutoMLTrainer:
                 'pls': get_pls
             }
             logger.info(f"DEBUG _get_models: task_type={self.task_type}, name requested={name}, returning keys={list(models_config.keys())}")
+        elif self.task_type == 'survival_analysis':
+            models_config = {
+                'survival_cox_ph': lambda t: HistGradientBoostingRegressor(
+                    loss='poisson',
+                    max_iter=t.suggest_int('surv_cox_max_iter', 50, 300) if t else 100,
+                    learning_rate=t.suggest_float('surv_cox_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    random_state=random_state
+                ),
+                'survival_random_forest': lambda t: RandomForestRegressor(
+                    n_estimators=t.suggest_int('surv_rf_n_estimators', 50, 200) if t else 100,
+                    max_depth=t.suggest_int('surv_rf_max_depth', 3, 15) if t else 10,
+                    random_state=random_state
+                ),
+                'survival_gradient_boosting': lambda t: GradientBoostingRegressor(
+                    n_estimators=t.suggest_int('surv_gb_n_estimators', 50, 200) if t else 100,
+                    learning_rate=t.suggest_float('surv_gb_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    random_state=random_state
+                )
+            }
+        elif self.task_type == 'uplift_modeling':
+            models_config = {
+                's_learner': lambda t: GradientBoostingRegressor(
+                    n_estimators=t.suggest_int('s_learner_n_est', 50, 200) if t else 100,
+                    learning_rate=t.suggest_float('s_learner_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    random_state=random_state
+                ),
+                't_learner': lambda t: GradientBoostingRegressor(
+                    n_estimators=t.suggest_int('t_learner_n_est', 50, 200) if t else 100,
+                    learning_rate=t.suggest_float('t_learner_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    random_state=random_state
+                )
+            }
         else:
             return {}
 
@@ -1012,10 +1103,14 @@ class AutoMLTrainer:
         self.random_state = random_state
         
         # Ensure optimization metric is compatible with task type
-        if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
+        if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape', 'poisson_deviance', 'gamma_deviance']:
             optimization_metric = 'r2'
         elif self.task_type in ['classification', 'multi_label', 'multi_task'] and optimization_metric not in ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']:
             optimization_metric = 'accuracy'
+        elif self.task_type == 'survival_analysis' and optimization_metric not in ['c_index']:
+            optimization_metric = 'c_index'
+        elif self.task_type == 'uplift_modeling' and optimization_metric not in ['qini_score']:
+            optimization_metric = 'qini_score'
 
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
@@ -1082,7 +1177,7 @@ class AutoMLTrainer:
                     logger.info(f"Automatic Validation: Cross-Validation chosen (N={n_samples} < 1000).")
                 else:
                     validation_strategy = 'holdout'
-                    logger.info(f"Validacao Automatica: Escolhido Holdout/Train-Test Split (N={n_samples} >= 1000).")
+                    logger.info(f"Automatic Validation: Holdout/Train-Test Split chosen (N={n_samples} >= 1000).")
 
         if validation_params is None:
             validation_params = {}
@@ -1275,7 +1370,10 @@ class AutoMLTrainer:
                             elif optimization_metric == 'roc_auc':
                                 try:
                                     y_prob_val = model.predict_proba(X_val)
-                                    score = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
+                                    if y_prob_val.ndim == 2 and y_prob_val.shape[1] == 2:
+                                        score = roc_auc_score(y_val, y_prob_val[:, 1])
+                                    else:
+                                        score = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
                                 except:
                                     score = 0.5 # Fail-safe
                             else:
@@ -1287,7 +1385,10 @@ class AutoMLTrainer:
                             trial_metrics['recall'] = recall_score(y_val, y_pred_val, average='weighted')
                             try:
                                 y_prob_val = model.predict_proba(X_val)
-                                trial_metrics['roc_auc'] = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
+                                if y_prob_val.ndim == 2 and y_prob_val.shape[1] == 2:
+                                    trial_metrics['roc_auc'] = roc_auc_score(y_val, y_prob_val[:, 1])
+                                else:
+                                    trial_metrics['roc_auc'] = roc_auc_score(y_val, y_prob_val, multi_class='ovr')
                             except: pass
                         elif self.task_type == 'multi_label':
                             trial_metrics['subset_accuracy'] = accuracy_score(y_val, y_pred_val)
@@ -1463,10 +1564,70 @@ class AutoMLTrainer:
                 elif self.task_type == 'anomaly_detection':
                     model.fit(X_tr)
                     if hasattr(model, 'decision_function'):
-                        score = model.decision_function(X_tr).mean()
+                        score = model.decision_function(X_val).mean() if X_val is not None and len(X_val) > 0 else model.decision_function(X_tr).mean()
                     else:
                         score = 0
                     trial_metrics['decision_score'] = score
+                elif self.task_type == 'survival_analysis':
+                    # y_tr: col 0 = duration, col 1 = event_observed
+                    if isinstance(y_tr, pd.DataFrame) and y_tr.shape[1] >= 2:
+                        duration = y_tr.iloc[:, 0]
+                        event = y_tr.iloc[:, 1]
+                    else:
+                        duration = y_tr
+                        event = np.ones(len(y_tr))
+                    model.fit(X_tr, duration)
+                    
+                    if isinstance(y_val, pd.DataFrame) and y_val.shape[1] >= 2:
+                        duration_val = y_val.iloc[:, 0]
+                        event_val = y_val.iloc[:, 1]
+                    else:
+                        duration_val = y_val
+                        event_val = np.ones(len(y_val))
+                        
+                    preds = model.predict(X_val)
+                    c_idx = calculate_c_index(event_val, duration_val, preds)
+                    trial_metrics['c_index'] = c_idx
+                    score = c_idx
+
+                elif self.task_type == 'uplift_modeling':
+                    # y_tr: col 0 = treatment, col 1 = outcome
+                    if isinstance(y_tr, pd.DataFrame) and y_tr.shape[1] >= 2:
+                        treatment = y_tr.iloc[:, 0]
+                        outcome = y_tr.iloc[:, 1]
+                    else:
+                        treatment = np.random.randint(0, 2, size=len(y_tr))
+                        outcome = y_tr
+                        
+                    if isinstance(y_val, pd.DataFrame) and y_val.shape[1] >= 2:
+                        treatment_val = y_val.iloc[:, 0]
+                        outcome_val = y_val.iloc[:, 1]
+                    else:
+                        treatment_val = np.random.randint(0, 2, size=len(y_val))
+                        outcome_val = y_val
+                    
+                    if 't_learner' in model_name:
+                        m1 = GradientBoostingRegressor(random_state=random_state)
+                        m0 = GradientBoostingRegressor(random_state=random_state)
+                        mask1 = (treatment == 1)
+                        mask0 = (treatment == 0)
+                        if mask1.sum() > 0: m1.fit(X_tr[mask1], outcome[mask1])
+                        if mask0.sum() > 0: m0.fit(X_tr[mask0], outcome[mask0])
+                        uplift = m1.predict(X_val) - m0.predict(X_val)
+                    else: # S-Learner
+                        X_with_t = X_tr.copy()
+                        X_with_t['treatment'] = treatment
+                        model.fit(X_with_t, outcome)
+                        X_t1 = X_val.copy()
+                        X_t1['treatment'] = 1
+                        X_t0 = X_val.copy()
+                        X_t0['treatment'] = 0
+                        uplift = model.predict(X_t1) - model.predict(X_t0)
+                        
+                    qini = calculate_qini_score(treatment_val, outcome_val, uplift)
+                    trial_metrics['qini_score'] = qini
+                    score = qini
+
                 elif self.task_type == 'dimensionality_reduction':
                     if y_tr is not None:
                         try:
@@ -1480,9 +1641,10 @@ class AutoMLTrainer:
                         score = float(model.explained_variance_ratio_.sum())
                     else:
                         try:
-                            X_trans = model.transform(X_tr)
-                            if y_tr is not None and len(np.unique(y_tr)) > 1:
-                                score = float(silhouette_score(X_trans, y_tr))
+                            X_trans = model.transform(X_val) if X_val is not None and len(X_val) > 0 else model.transform(X_tr)
+                            y_eval = y_val if X_val is not None and len(X_val) > 0 else y_tr
+                            if y_eval is not None and len(np.unique(y_eval)) > 1:
+                                score = float(silhouette_score(X_trans, y_eval))
                             else:
                                 score = float(np.var(X_trans, axis=0).sum())
                         except Exception:

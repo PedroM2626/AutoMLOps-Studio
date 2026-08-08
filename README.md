@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-v5.6.0-blue)](https://github.com/PedroM2626/automlops-studio)
+[![Version](https://img.shields.io/badge/Version-v5.7.0-blue)](https://github.com/PedroM2626/automlops-studio)
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/PedroM2626/AutoMLOps-Studio)
@@ -63,24 +63,48 @@ Models degrade over time. By serving the model via the FastAPI endpoint, all inc
 
 ---
 
-## 📋 Supported Task Types
+## 📋 Supported Task Types & Business Objectives
 
-| Modality | Task Type | Brief Description | Main Metrics |
-|---|---|---|---|
-| **Tabular** | `classification` | Predict a discrete class label. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
-| **Tabular** | `regression` | Predict a continuous numeric target. | `r2`, `rmse`, `mae` |
-| **Tabular** | `forecast` | Predict future values using historical temporal data. | `r2`, `rmse`, `mae` |
-| **Tabular** | `clustering` | Group samples by similarity without labels. | `silhouette` |
-| **Tabular** | `anomaly_detection` | Detect outliers or rare abnormal patterns. | `f1`, anomaly ratio |
-| **Tabular** | `ranking` | Score items for ordered relevance. | `ndcg` |
-| **Tabular** | `multi_label` | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy` |
-| **Tabular** | `multi_task` | Predict multiple disparate classification targets concurrently. | `f1_micro`, `subset_accuracy` |
-| **Tabular** | `association_rules` | Discover co-occurrence rules. | `rule_score`, `lift` |
-| **Computer Vision** | `image_classification` | Assign one class to each image. | `val_acc`, `val_loss` |
-| **Computer Vision** | `image_segmentation` | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
-| **Computer Vision** | `object_detection` | Detect objects and bounding boxes. | Benchmark metrics |
-| **Computer Vision** | `pose_estimation` | Estimate keypoints/body joints. | Keypoint accuracy |
-| **Reinforcement Learning** | `rl_agent` | Train an agent to maximize reward. | `episode_reward`, `mean_reward` |
+**AutoMLOps Studio** adopts the formal taxonomy from the **Machine Learning Mind Map**, distinguishing between:
+1. **Genuine Task Types (Output Structure)**: Strictly defined by the mathematical format of the generated target data (e.g., discrete class label, continuous scalar value, time-to-event pair $(T, E)$, counterfactual vector).
+2. **Business Objectives / Applications (Cross-Paradigm)**: Operational business needs that can be addressed through multiple statistical paradigms and different underlying models.
+
+> **Practical Example - Anomaly Detection (`anomaly_detection`)**: It is a **Business Objective**, not a rigid *Task Type*. The platform supports solving it via 4 distinct mathematical avenues:
+> - **Spatial Isolation:** `IsolationForest` (random feature splits).
+> - **Local Density:** `LocalOutlierFactor` ($k$-NN density comparison).
+> - **Gaussian Statistical Envelope:** `EllipticEnvelope` (Mahalanobis Distance).
+> - **Support Boundary:** `OneClassSVM` (Support hyperplane in Hilbert space).
+> - **Supervised Classification:** Via `classification` when historical anomaly labels exist ($y \in \{0, 1\}$).
+
+| Modality | Type / Objective | Classification | Brief Description | Main Metrics |
+|---|---|---|---|---|
+| **Tabular** | `classification` | **Task Type** | Predict a discrete class label (Binary or Multiclass). | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
+| **Tabular** | `regression` | **Task Type** | Predict a continuous numeric target (Gaussian, Poisson, Gamma, Tweedie GLM). | `r2`, `rmse`, `mae`, `poisson_deviance`, `gamma_deviance` |
+| **Tabular** | `survival_analysis` | **Task Type** | Predict time-to-event with right-censoring $(T, E)$ via Cox / Survival models. | `c_index` (Concordance Index) |
+| **Tabular** | `uplift_modeling` | **Task Type** | Estimate Individual Treatment Effect (ITE / Causal Inference) via S/T-Learners. | `qini_score` / AUUC |
+| **Tabular** | `forecast` | **Objective** | Predict future values using historical temporal data (Lags, Rolling, PyTorch TCN/LSTM). | `r2`, `rmse`, `mae` |
+| **Tabular** | `anomaly_detection` | **Objective** | Detect outliers or rare abnormal patterns (Isolation, LOF, Envelope, OneClassSVM). | `f1`, `decision_score` |
+| **Tabular** | `clustering` | **Task Type** | Group samples by similarity without labels. | `silhouette` |
+| **Tabular** | `ranking` | **Task Type** | Score items for ordered relevance. | `ndcg` |
+| **Tabular** | `multi_label` | **Task Type** | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy` |
+| **Tabular** | `multi_task` | **Task Type** | Predict multiple disparate classification targets concurrently. | `f1_micro`, `subset_accuracy` |
+| **Tabular** | `association_rules` | **Task Type** | Discover co-occurrence rules (Apriori/FP-Growth). | `rule_score`, `lift` |
+| **Computer Vision** | `image_classification` | **Task Type** | Assign one class to each image. | `val_acc`, `val_loss` |
+| **Computer Vision** | `image_segmentation` | **Task Type** | Pixel-wise semantic segmentation. | `val_score`, `val_loss` |
+| **Computer Vision** | `object_detection` | **Task Type** | Detect objects and bounding boxes. | Benchmark metrics |
+| **Computer Vision** | `pose_estimation` | **Task Type** | Estimate keypoints/body joints. | Keypoint accuracy |
+| **Reinforcement Learning** | `rl_agent` | **Task Type** | Train an agent to maximize reward signal via PPO, A2C, DQN, SAC. | `episode_reward`, `mean_reward` |
+
+---
+
+## 🏛️ Architecture: The 5 Pillars of ML
+
+Every model trained in **AutoMLOps Studio** undergoes an anatomical profile analysis based on the **5 Pillars of ML**:
+1. **Pillar 1 (Structure / Skeleton)**: White-box (Linear/Tree/GLM) vs Black-box (Ensemble/Neural Nets).
+2. **Pillar 2 (Signal Source)**: Supervised (SL), GLM (Poisson/Gamma), Censored (Survival), Counterfactual (Uplift), Reward (RL), Self-Supervised.
+3. **Pillar 3 (Criterion / Loss & Assumed Distribution)**: Mathematical loss derived from the distribution family (Gaussian, Bernoulli, Poisson, Gamma, Tweedie, Cox Likelihood, Qini).
+4. **Pillar 4 (Regularization)**: Explicit (L1, L2, ElasticNet, tree max depth) vs Implicit (SGD optimizer bias).
+5. **Pillar 5 (Optimizer Engine)**: L-BFGS, Adam, SGD, Optuna TPE, Tree Splitter.
 
 ---
 

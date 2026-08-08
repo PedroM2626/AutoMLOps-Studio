@@ -30,7 +30,7 @@ def load_latest_model():
         files = [f for f in os.listdir(model_dir) if f.endswith(".pkl")]
         if files:
             # Load the most recent one
-            latest_file = sorted(files)[-1]
+            latest_file = max(files, key=lambda f: os.path.getmtime(os.path.join(model_dir, f)))
             path = os.path.join(model_dir, latest_file)
             processor, model = load_pipeline(path)
             model_assets["processor"] = processor
@@ -84,9 +84,13 @@ def predict(request: PredictionRequest):
         predictions = model_assets["model"].predict(X_proc)
         
         # If classifier and label encoder exists, inverse transform
-        if hasattr(model_assets["processor"], "label_encoder") and model_assets["processor"].label_encoder:
-            pred_classes = model_assets["processor"].label_encoder.inverse_transform(predictions)
-            result = pred_classes.tolist()
+        if (hasattr(model_assets["processor"], "label_encoder") and model_assets["processor"].label_encoder
+                and hasattr(model_assets["processor"], "task_type") and model_assets["processor"].task_type == "classification"):
+            try:
+                pred_classes = model_assets["processor"].label_encoder.inverse_transform(predictions)
+                result = pred_classes.tolist()
+            except (ValueError, IndexError):
+                result = predictions.tolist()
         else:
             result = predictions.tolist()
             

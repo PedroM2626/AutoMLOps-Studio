@@ -113,10 +113,19 @@ class PyTorchTimeSeriesRegressor(BaseEstimator, RegressorMixin):
         X_scaled = self.scaler_X.fit_transform(X)
         y_scaled = self.scaler_y.fit_transform(y.reshape(-1, 1)).flatten()
 
-        # Reshape to (batch, seq_len, features)
+        # Reshape to (batch, seq_len, features) using sliding window
         input_size = X_scaled.shape[1]
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).unsqueeze(1)
-        y_tensor = torch.tensor(y_scaled, dtype=torch.float32).unsqueeze(1)
+        if self.seq_len > 1 and len(X_scaled) > self.seq_len:
+            X_windows = []
+            y_windows = []
+            for i in range(len(X_scaled) - self.seq_len + 1):
+                X_windows.append(X_scaled[i:i + self.seq_len])
+                y_windows.append(y_scaled[i + self.seq_len - 1])
+            X_tensor = torch.tensor(np.array(X_windows), dtype=torch.float32)
+            y_tensor = torch.tensor(np.array(y_windows), dtype=torch.float32).unsqueeze(1)
+        else:
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32).unsqueeze(1)
+            y_tensor = torch.tensor(y_scaled, dtype=torch.float32).unsqueeze(1)
 
         dataset = TensorDataset(X_tensor, y_tensor)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -154,10 +163,21 @@ class PyTorchTimeSeriesRegressor(BaseEstimator, RegressorMixin):
 
         self.model.eval()
         X_scaled = self.scaler_X.transform(X)
-        X_tensor = torch.tensor(X_scaled, dtype=torch.float32).unsqueeze(1).to(self.device)
+        if self.seq_len > 1 and len(X_scaled) > self.seq_len:
+            X_windows = []
+            for i in range(len(X_scaled) - self.seq_len + 1):
+                X_windows.append(X_scaled[i:i + self.seq_len])
+            X_tensor = torch.tensor(np.array(X_windows), dtype=torch.float32).to(self.device)
+        else:
+            X_tensor = torch.tensor(X_scaled, dtype=torch.float32).unsqueeze(1).to(self.device)
 
         with torch.no_grad():
             preds = self.model(X_tensor).cpu().numpy()
+            
+        if self.seq_len > 1 and len(X_scaled) > self.seq_len:
+            # Pad predictions to match original input length
+            pad = np.tile(preds[0], (self.seq_len - 1, 1)) if preds.ndim == 2 else np.full(self.seq_len - 1, preds[0])
+            preds = np.concatenate([pad, preds])
 
         preds_inv = self.scaler_y.inverse_transform(preds).flatten()
         return preds_inv

@@ -1184,7 +1184,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         elif split_ratio <= 0.0:
             test_dfs.append(df_ds)
         else:
-            if strat == 'Cronológico (Chronological)' or ((task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
+            if strat == 'Chronological' or ((task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
                 # Temporal split
                 time_col = config.get('time_column', date_col)
                 if time_col and time_col in df_ds.columns:
@@ -1701,7 +1701,7 @@ if current_main_section == "📉 Monitoring":
                                     y_raw = df_stab_ref[target_col]
                                     
                                     # Process Data using AutoMLDataProcessor
-                                    from automl_engine import AutoMLDataProcessor
+                                    from src.core.processor import AutoMLDataProcessor
                                     from sklearn.pipeline import Pipeline
                                     is_pipeline = isinstance(actual_model, Pipeline)
                                     
@@ -1714,7 +1714,7 @@ if current_main_section == "📉 Monitoring":
                                         processor = st.session_state.get('processor')
                                         if not processor:
                                             st.info("⚠️ Active preprocessor not found in session (model loaded from registry). Fitting a temporary encoder for the stability test.")
-                                            processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel, enable_dfs=cfg.get('enable_dfs', False), dfs_depth=cfg.get('dfs_depth', 1))
+                                            processor = AutoMLDataProcessor(target_column=target_col, task_type=task_type_sel, enable_dfs=False, dfs_depth=1)
                                             X_stab, y_stab = processor.fit_transform(df_stab_ref)
                                         else:
                                             old_target = processor.target_column
@@ -2225,12 +2225,12 @@ if current_main_section == "⚙️ AutoML":
                               
                               if split_strategy == "Chronological":
                                   time_col = st.selectbox(f"Time Column for {ds_name}", sample_df.columns, key=f"wiz_time_{ds_name}")
-                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'time_column': time_col})
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'time_column': time_col, 'split_strategy': split_strategy})
                               elif split_strategy == "Manual (Pre-defined split column)":
                                   manual_col = st.selectbox(f"Split Flag Column for {ds_name}", sample_df.columns, key=f"wiz_manual_{ds_name}")
-                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'manual_split_column': manual_col})
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'manual_split_column': manual_col, 'split_strategy': split_strategy})
                               else:
-                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split})
+                                  new_configs.append({'name': ds_name, 'version': ver, 'split': split, 'split_strategy': split_strategy})
                       cfg['selected_configs'] = new_configs
                       st.markdown('<br>', unsafe_allow_html=True)
                       
@@ -2261,17 +2261,19 @@ if current_main_section == "⚙️ AutoML":
               )
 
             SUPERVISED_TASKS = [
-                ("classification", "🎯", "Classification", "Predict a category or label"),
-                ("regression",     "📈", "Regression",     "Predict a continuous value"),
-                ("forecast",       "⏳", "Forecast",       "Forecast future values from historical sequences"),
-                ("ranking",        "🥇", "Ranking",        "Score items to optimize ordering relevance"),
-                ("multi_label",    "🏷️", "Multi-Label",    "Predict multiple target labels per row"),
-                ("multi_task",     "🔗", "Multi-Task",     "Predict multiple multi-class target columns simultaneously"),
+                ("classification",    "🎯", "Classification",    "Predict a category or label"),
+                ("regression",        "📈", "Regression",        "Predict a continuous value (Gaussian, Poisson, Gamma, Tweedie)"),
+                ("survival_analysis", "⏱️", "Survival Analysis",  "Predict time-to-event with right-censoring (Cox C-Index)"),
+                ("uplift_modeling",   "📊", "Uplift Modeling",    "Predict Individual Treatment Effect (ITE / Qini Score)"),
+                ("forecast",          "⏳", "Forecast",          "Forecast future values from historical sequences"),
+                ("ranking",           "🥇", "Ranking",           "Score items to optimize ordering relevance"),
+                ("multi_label",       "🏷️", "Multi-Label",       "Predict multiple target labels per row"),
+                ("multi_task",        "🔗", "Multi-Task",        "Predict multiple multi-class target columns simultaneously"),
             ]
             UNSUP_TASKS = [
                 ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
-                ("anomaly_detection",        "🚨", "Anomaly Detection",        "Identify unusual data points"),
-                ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently"),
+                ("anomaly_detection",        "🚨", "Anomaly Detection",        "Cross-Paradigma Objective: Isolation, LOF, Gaussian Envelope, and OneClassSVM"),
+                ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently (PCA, SVD, LDA, NCA, PLS)"),
                 ("association_rules",        "🧩", "Association Rules",        "Discover co-occurrence patterns and rules"),
             ]
 
@@ -2798,7 +2800,9 @@ if current_main_section == "⚙️ AutoML":
             with col_metric:
                 metric_options = {
                     'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
-                    'regression': ['r2', 'rmse', 'mae'],
+                    'regression': ['r2', 'rmse', 'mae', 'poisson_deviance', 'gamma_deviance'],
+                    'survival_analysis': ['c_index'],
+                    'uplift_modeling': ['qini_score'],
                     'ranking': ['ndcg', 'rmse', 'mae'],
                     'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
                     'clustering': ['silhouette'],
@@ -3438,44 +3442,44 @@ if current_main_section == "🤖 Reinforcement Learning":
         if 'rl_training_history' not in st.session_state:
             st.session_state['rl_training_history'] = []
             
-        rl_tab1, rl_tab2, rl_tab3 = st.tabs(["🤖 Online RL", "📦 Offline RL", "📊 Visualizar Trajetórias"])
+        rl_tab1, rl_tab2, rl_tab3 = st.tabs(["🤖 Online RL", "📦 Offline RL", "📊 Visualize Trajectories"])
         
         with rl_tab1:
             col_config, col_visuals = st.columns([1, 1])
             
             with col_config:
                 st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-                st.subheader("⚙️ Configuração do Agente")
+                st.subheader("⚙️ Agent Configuration")
                 
-                use_custom_env = st.checkbox("Usar ambiente customizado", value=False)
+                use_custom_env = st.checkbox("Use custom environment", value=False)
                 custom_env_path = None
                 
                 if use_custom_env:
-                    uploaded_file = st.file_uploader("Upload arquivo .py com classe gym.Env", type=['py'])
+                    uploaded_file = st.file_uploader("Upload .py file with gym.Env class", type=['py'])
                     if uploaded_file:
                         custom_env_dir = os.path.join(ROOT_DIR, "tmp")
                         os.makedirs(custom_env_dir, exist_ok=True)
                         custom_env_path = os.path.join(custom_env_dir, uploaded_file.name)
                         with open(custom_env_path, "wb") as f:
                             f.write(uploaded_file.getbuffer())
-                        st.success(f"✅ Arquivo salvo em: {custom_env_path}")
+                        st.success(f"✅ File saved to: {custom_env_path}")
                 
                 available_envs = get_available_rl_environments()
                 env_id = st.selectbox(
-                    "🌍 Ambiente",
+                    "🌍 Environment",
                     available_envs,
                     index=0,
                     disabled=use_custom_env
                 )
                 
                 algorithm = st.selectbox(
-                    "🤖 Algoritmo",
+                    "🤖 Algorithm",
                     list(RLTrainer.ALGORITHM_DISPLAY_NAMES.keys()),
                     format_func=lambda x: RLTrainer.ALGORITHM_DISPLAY_NAMES[x]
                 )
                 
                 total_timesteps = st.number_input(
-                    "⏱️ Timesteps Totais",
+                    "⏱️ Total Timesteps",
                     min_value=1000,
                     max_value=10_000_000,
                     value=10_000,
@@ -3483,22 +3487,22 @@ if current_main_section == "🤖 Reinforcement Learning":
                 )
                 
                 policy = st.selectbox(
-                    "🧠 Política (Rede Neural)",
+                    "🧠 Policy (Neural Network)",
                     ["MlpPolicy", "CnnPolicy"],
                     index=0
                 )
                 
-                use_optuna = st.checkbox("Usar Optuna para otimização de hiperparâmetros", value=False)
+                use_optuna = st.checkbox("Use Optuna for hyperparameter optimization", value=False)
                 if use_optuna:
                     optuna_trials = st.number_input(
-                        "Número de trials Optuna",
+                        "Number of Optuna trials",
                         min_value=5,
                         max_value=100,
                         value=20,
                         step=5
                     )
                     
-                save_trajectories = st.checkbox("Salvar trajetórias no Data Lake", value=False)
+                save_trajectories = st.checkbox("Save trajectories to Data Lake", value=False)
             
             st.divider()
             st.subheader("📦 Wrappers")
@@ -3506,7 +3510,7 @@ if current_main_section == "🤖 Reinforcement Learning":
             wrappers = []
             use_framestack = st.checkbox("FrameStack", value=False)
             if use_framestack:
-                n_stack = st.number_input("Número de quadros", min_value=2, max_value=8, value=4, step=1)
+                n_stack = st.number_input("Number of frames", min_value=2, max_value=8, value=4, step=1)
                 wrappers.append({"name": "FrameStack", "params": {"n_stack": n_stack}})
                 
             use_grayscale = st.checkbox("GrayScaleObservation", value=False)
@@ -3515,7 +3519,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                 
             use_resize = st.checkbox("ResizeObservation", value=False)
             if use_resize:
-                resize_shape = st.number_input("Tamanho da imagem", min_value=32, max_value=256, value=84, step=4)
+                resize_shape = st.number_input("Image size", min_value=32, max_value=256, value=84, step=4)
                 wrappers.append({"name": "ResizeObservation", "params": {"shape": resize_shape}})
                 
             use_norm_obs = st.checkbox("NormalizeObservation", value=False)
@@ -3527,7 +3531,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                 wrappers.append({"name": "NormalizeReward", "params": {}})
             
             st.divider()
-            st.subheader("📊 Hiperparâmetros")
+            st.subheader("📊 Hyperparameters")
             
             if algorithm == "ppo":
                 lr = st.number_input("Learning Rate", value=3e-4, format="%.6f")
@@ -3567,7 +3571,7 @@ if current_main_section == "🤖 Reinforcement Learning":
             
             col_train, col_eval, col_save, col_job = st.columns(4)
             with col_train:
-                if st.button("🚀 Iniciar Treinamento", type="primary", use_container_width=True):
+                if st.button("🚀 Start Training", type="primary", use_container_width=True):
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
@@ -3582,10 +3586,11 @@ if current_main_section == "🤖 Reinforcement Learning":
                             'use_optuna': use_optuna,
                             'optuna_trials': optuna_trials if use_optuna else 20,
                             'save_trajectories': save_trajectories,
+                            'hyperparams': hyperparams,
                             'data_lake_base_path': os.path.join(ROOT_DIR, "data_lake")
                         })
                         
-                        status_text.text("Treinando...")
+                        status_text.text("Training...")
                         trainer, model, eval_results = orchestrator.run_rl_training()
                         
                         st.session_state['rl_trainer'] = trainer
@@ -3601,34 +3606,34 @@ if current_main_section == "🤖 Reinforcement Learning":
                             st.session_state['rl_training_history'].append(history_entry)
                         
                         progress_bar.progress(100)
-                        status_text.text("Treinamento concluído!")
-                        st.success("✅ Treinamento concluído!")
+                        status_text.text("Training completed!")
+                        st.success("✅ Training completed!")
                     except Exception as e:
-                        st.error(f"Erro durante o treinamento: {str(e)}")
+                        st.error(f"Error during training: {str(e)}")
                         import traceback
                         traceback.print_exc()
             
             with col_eval:
                 if 'rl_trainer' in st.session_state:
-                    if st.button("📊 Avaliar Agente", use_container_width=True):
+                    if st.button("📊 Evaluate Agent", use_container_width=True):
                         trainer = st.session_state['rl_trainer']
-                        with st.spinner("Avaliando o agente..."):
+                        with st.spinner("Evaluating agent..."):
                             results = trainer.evaluate(n_eval_episodes=5)
                             st.session_state['rl_eval_results'] = results
-                            st.success("✅ Avaliação concluída!")
+                            st.success("✅ Evaluation completed!")
             
             with col_save:
                 if 'rl_trainer' in st.session_state:
-                    if st.button("💾 Salvar Agente", use_container_width=True):
+                    if st.button("💾 Save Agent", use_container_width=True):
                         trainer = st.session_state['rl_trainer']
                         save_path = os.path.join(ROOT_DIR, "models", f"rl_agent_{env_id}_{algorithm}")
                         try:
                             trainer.save(save_path)
-                            st.success(f"✅ Agente salvo em: {save_path}")
+                            st.success(f"✅ Agent saved to: {save_path}")
                         except Exception as e:
-                            st.error(f"Erro ao salvar: {str(e)}")
+                            st.error(f"Error saving agent: {str(e)}")
             with col_job:
-                if st.button("🧪 Enviar para Job Manager", use_container_width=True):
+                if st.button("🧪 Send to Job Manager", use_container_width=True):
                     jm: TrainingJobManager = st.session_state['job_manager']
                     
                     job_config = {
@@ -3653,15 +3658,15 @@ if current_main_section == "🤖 Reinforcement Learning":
                         name=f"RL_{env_id}_{algorithm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                     )
                     
-                    st.success(f"✅ Job de RL enviado com sucesso! Job ID: {job_id}")
-                    st.info("Vá para a página 'Experiments' para acompanhar o progresso!")
+                    st.success(f"✅ RL Job submitted successfully! Job ID: {job_id}")
+                    st.info("Go to 'Experiments' page to monitor progress!")
         
         with col_visuals:
-            tab1, tab2 = st.tabs(["📊 Monitoramento", "📜 Histórico"])
+            tab1, tab2 = st.tabs(["📊 Monitoring", "📜 History"])
             
             with tab1:
                 st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-                st.subheader("📈 Resultados em Tempo Real")
+                st.subheader("📈 Real-Time Results")
                 
                 if 'rl_trainer' in st.session_state and st.session_state['rl_trainer'].callback:
                     callback = st.session_state['rl_trainer'].callback
@@ -3676,7 +3681,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                         st.markdown(f"""
                         <div class='ui-metric' style='border-left-color:#27ae60;'>
                             <div class='metric-value'>{val:.2f}</div>
-                            <div class='metric-label'>Recompensa Média (100)</div>
+                            <div class='metric-label'>Mean Reward (100)</div>
                         </div>""", unsafe_allow_html=True)
                     with m2:
                         if metrics['timesteps']:
@@ -3696,7 +3701,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                         st.markdown(f"""
                         <div class='ui-metric' style='border-left-color:#8b5cf6;'>
                             <div class='metric-value'>{val:.1f} MB</div>
-                            <div class='metric-label'>Memória Usada</div>
+                            <div class='metric-label'>Memory Used</div>
                         </div>""", unsafe_allow_html=True)
                     
                     st.divider()
@@ -3704,15 +3709,15 @@ if current_main_section == "🤖 Reinforcement Learning":
                     if metrics['episode_reward']:
                         df = pd.DataFrame({
                             "Timestep": metrics['timesteps'],
-                            "Recompensa": metrics['episode_reward'],
-                            "Média Móvel (100)": metrics['mean_reward_100']
+                            "Reward": metrics['episode_reward'],
+                            "Moving Average (100)": metrics['mean_reward_100']
                         })
                         
                         fig = px.line(
                             df,
                             x="Timestep",
-                            y=["Recompensa", "Média Móvel (100)"],
-                            title="Curva de Aprendizado",
+                            y=["Reward", "Moving Average (100)"],
+                            title="Learning Curve",
                             color_discrete_sequence=['#2f80ed', '#27ae60']
                         )
                         
@@ -3729,34 +3734,34 @@ if current_main_section == "🤖 Reinforcement Learning":
                     st.divider()
                     
                     if 'rl_eval_results' in st.session_state:
-                        st.subheader("📋 Resultados de Avaliação")
+                        st.subheader("📋 Evaluation Results")
                         results = st.session_state['rl_eval_results']
                         
                         eval_m1, eval_m2, eval_m3, eval_m4 = st.columns(4)
                         with eval_m1:
-                            st.metric("Média", f"{results['mean_reward']:.2f}")
+                            st.metric("Mean", f"{results['mean_reward']:.2f}")
                         with eval_m2:
-                            st.metric("Desvio Padrão", f"{results['std_reward']:.2f}")
+                            st.metric("Std Dev", f"{results['std_reward']:.2f}")
                         with eval_m3:
-                            st.metric("Mínima", f"{results['min_reward']:.2f}")
+                            st.metric("Min", f"{results['min_reward']:.2f}")
                         with eval_m4:
-                            st.metric("Máxima", f"{results['max_reward']:.2f}")
+                            st.metric("Max", f"{results['max_reward']:.2f}")
                         
                         st.divider()
                         
-                        eval_tab1, eval_tab2 = st.tabs(["Gráfico de Barras", "Histograma de Recompensas"])
+                        eval_tab1, eval_tab2 = st.tabs(["Bar Chart", "Reward Histogram"])
                         
                         with eval_tab1:
                             eval_df = pd.DataFrame({
-                                "Episódio": list(range(1, len(results['rewards']) + 1)),
-                                "Recompensa": results['rewards']
+                                "Episode": list(range(1, len(results['rewards']) + 1)),
+                                "Reward": results['rewards']
                             })
                             
                             eval_fig = px.bar(
                                 eval_df,
-                                x="Episódio",
-                                y="Recompensa",
-                                title="Recompensa por Episódio de Avaliação",
+                                x="Episode",
+                                y="Reward",
+                                title="Reward per Evaluation Episode",
                                 color_discrete_sequence=['#2f80ed']
                             )
                             
@@ -3774,7 +3779,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                             hist_fig = px.histogram(
                                 results['rewards'],
                                 nbins=10,
-                                title="Distribuição de Recompensas",
+                                title="Reward Distribution",
                                 color_discrete_sequence=['#8b5cf6']
                             )
                             
@@ -3783,19 +3788,19 @@ if current_main_section == "🤖 Reinforcement Learning":
                                 plot_bgcolor='rgba(0,0,0,0)',
                                 font_color='#e6edf3',
                                 title_font_size=14,
-                                xaxis_title="Recompensa",
-                                yaxis_title="Contagem",
+                                xaxis_title="Reward",
+                                yaxis_title="Count",
                                 margin=dict(t=30, b=10, l=10, r=10)
                             )
                             
                             st.plotly_chart(hist_fig, use_container_width=True)
                 else:
-                    st.info("Treine um agente para ver os resultados em tempo real!")
+                    st.info("Train an agent to view real-time results!")
                 st.markdown("</div>", unsafe_allow_html=True)
             
             with tab2:
                 st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-                st.subheader("📜 Histórico de Treinamentos")
+                st.subheader("📜 Training History")
                 
                 if st.session_state['rl_training_history']:
                     history_df = pd.DataFrame(st.session_state['rl_training_history'])
@@ -3803,10 +3808,10 @@ if current_main_section == "🤖 Reinforcement Learning":
                     
                     if len(st.session_state['rl_training_history']) > 1:
                         st.divider()
-                        st.subheader("📊 Comparar Treinamentos")
+                        st.subheader("📊 Compare Trainings")
                         
                         selected_indices = st.multiselect(
-                            "Selecione treinamentos para comparar",
+                            "Select trainings to compare",
                             list(range(len(st.session_state['rl_training_history']))),
                             default=[0, 1] if len(st.session_state['rl_training_history']) > 1 else [0]
                         )
@@ -3818,8 +3823,8 @@ if current_main_section == "🤖 Reinforcement Learning":
                                 metrics = entry['metrics']
                                 temp_df = pd.DataFrame({
                                     "Timestep": metrics['timesteps'],
-                                    "Recompensa": metrics['episode_reward'],
-                                    "Treinamento": f"{entry['algorithm']} - {entry['env_id']} ({i+1})"
+                                    "Reward": metrics['episode_reward'],
+                                    "Training": f"{entry['algorithm']} - {entry['env_id']} ({i+1})"
                                 })
                                 dfs.append(temp_df)
                             
@@ -3827,9 +3832,9 @@ if current_main_section == "🤖 Reinforcement Learning":
                             comp_fig = px.line(
                                 comp_df,
                                 x="Timestep",
-                                y="Recompensa",
-                                color="Treinamento",
-                                title="Comparação de Treinamentos"
+                                y="Reward",
+                                color="Training",
+                                title="Training Comparison"
                             )
                             comp_fig.update_layout(
                                 paper_bgcolor='rgba(0,0,0,0)',
@@ -3839,7 +3844,7 @@ if current_main_section == "🤖 Reinforcement Learning":
                             )
                             st.plotly_chart(comp_fig, use_container_width=True)
                 else:
-                    st.info("Nenhum treinamento registrado ainda!")
+                    st.info("No training runs recorded yet!")
                 st.markdown("</div>", unsafe_allow_html=True)
         
         with rl_tab2:
@@ -3871,18 +3876,18 @@ if current_main_section == "🤖 Reinforcement Learning":
                                         available_datasets.append(f"{dataset_dir.name}/{file.name}")
                     
                     if not available_datasets:
-                        st.info("Nenhuma trajetória encontrada no Data Lake! Treine um agente Online com 'Salvar trajetórias' habilitado.")
+                        st.info("No trajectories found in Data Lake! Train an Online agent with 'Save trajectories' enabled.")
                     else:
-                        selected_dataset = st.selectbox("📊 Dataset de Trajetórias", available_datasets, index=0)
-                        off_algorithm = st.selectbox("🤖 Algoritmo Offline", list(OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES.keys()), format_func=lambda x: OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES[x])
-                        n_epochs = st.number_input("⏱️ Épocas de Treinamento", min_value=1, max_value=1000, value=100, step=10)
-                        n_steps_per_epoch = st.number_input("Passos por Época", min_value=100, max_value=10000, value=1000, step=100)
+                        selected_dataset = st.selectbox("📊 Trajectories Dataset", available_datasets, index=0)
+                        off_algorithm = st.selectbox("🤖 Offline Algorithm", list(OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES.keys()), format_func=lambda x: OfflineRLTrainer.ALGORITHM_DISPLAY_NAMES[x])
+                        n_epochs = st.number_input("⏱️ Training Epochs", min_value=1, max_value=1000, value=100, step=10)
+                        n_steps_per_epoch = st.number_input("Steps per Epoch", min_value=100, max_value=10000, value=1000, step=100)
                         
-                        if st.button("🚀 Treinar Offline", type="primary"):
+                        if st.button("🚀 Train Offline Agent", type="primary"):
                             dataset_path = dataset_root / selected_dataset
                             df_trajectories = pd.read_csv(dataset_path)
                             
-                            with st.spinner("Treinando agente offline..."):
+                            with st.spinner("Training offline agent..."):
                                 trainer = OfflineRLTrainer(algorithm=off_algorithm)
                                 model = trainer.train(df_trajectories, n_epochs=n_epochs, n_steps_per_epoch=n_steps_per_epoch)
                                 
@@ -3891,19 +3896,19 @@ if current_main_section == "🤖 Reinforcement Learning":
                                 save_path = os.path.join(save_dir, f"offline_agent_{off_algorithm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
                                 trainer.save(save_path)
                                 
-                                st.success(f"✅ Agente Offline treinado e salvo em {save_path}!")
+                                st.success(f"✅ Offline Agent trained and saved to {save_path}!")
                     st.markdown("</div>", unsafe_allow_html=True)
                     
                 with col_off_results:
                     st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-                    st.info("Treine um agente offline para ver os resultados!")
+                    st.info("Train an offline agent to view results!")
                     st.markdown("</div>", unsafe_allow_html=True)
             
             st.markdown("</div>", unsafe_allow_html=True)
         
         with rl_tab3:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-            st.subheader("📊 Visualizar Trajetórias")
+            st.subheader("📊 Visualize Trajectories")
             
             data_lake = DataLake(base_path=os.path.join(ROOT_DIR, "data_lake"))
             dataset_root = data_lake.base_path
@@ -3917,44 +3922,44 @@ if current_main_section == "🤖 Reinforcement Learning":
                                 available_datasets.append(f"{dataset_dir.name}/{file.name}")
             
             if not available_datasets:
-                st.info("Nenhuma trajetória encontrada no Data Lake!")
+                st.info("No trajectories found in Data Lake!")
             else:
-                selected_dataset = st.selectbox("Selecionar Dataset", available_datasets, index=0, key="traj_select")
+                selected_dataset = st.selectbox("Select Dataset", available_datasets, index=0, key="traj_select")
                 dataset_path = dataset_root / selected_dataset
                 df_trajectories = pd.read_csv(dataset_path)
                 
                 st.divider()
-                st.subheader("📈 Estatísticas Básicas")
+                st.subheader("📈 Summary Statistics")
                 t1, t2, t3, t4 = st.columns(4)
                 with t1:
-                    st.metric("Total de Timesteps", len(df_trajectories))
+                    st.metric("Total Timesteps", len(df_trajectories))
                 with t2:
-                    st.metric("Recompensa Total", f"{df_trajectories['reward'].sum():.2f}")
+                    st.metric("Total Reward", f"{df_trajectories['reward'].sum():.2f}")
                 with t3:
-                    st.metric("Recompensa Média", f"{df_trajectories['reward'].mean():.2f}")
+                    st.metric("Mean Reward", f"{df_trajectories['reward'].mean():.2f}")
                 with t4:
-                    st.metric("Episódios", df_trajectories['done'].sum())
+                    st.metric("Episodes", df_trajectories['done'].sum())
                 
                 st.divider()
                 
-                traj_tab1, traj_tab2, traj_tab3 = st.tabs(["📋 Tabela de Dados", "📊 Gráficos", "ℹ️ Info do Dataset"])
+                traj_tab1, traj_tab2, traj_tab3 = st.tabs(["📋 Data Table", "📊 Charts", "ℹ️ Dataset Info"])
                 
                 with traj_tab1:
                     st.dataframe(df_trajectories, use_container_width=True)
                     
                 with traj_tab2:
-                    fig_reward = px.line(df_trajectories, x='timestep', y='reward', title='Recompensa por Timestep', color_discrete_sequence=['#2f80ed'])
+                    fig_reward = px.line(df_trajectories, x='timestep', y='reward', title='Reward per Timestep', color_discrete_sequence=['#2f80ed'])
                     fig_reward.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#e6edf3')
                     st.plotly_chart(fig_reward, use_container_width=True)
                     
-                    fig_done = px.histogram(df_trajectories, x='done', title='Distribuição de Done', color_discrete_sequence=['#8b5cf6'])
+                    fig_done = px.histogram(df_trajectories, x='done', title='Done Distribution', color_discrete_sequence=['#8b5cf6'])
                     fig_done.update_layout(paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', font_color='#e6edf3')
                     st.plotly_chart(fig_done, use_container_width=True)
                 
                 with traj_tab3:
-                    st.markdown(f"**Caminho do Dataset**: {dataset_path}")
-                    st.markdown(f"**Tamanho**: {dataset_path.stat().st_size / 1024:.2f} KB")
-                    st.markdown(f"**Colunas**: {list(df_trajectories.columns)}")
+                    st.markdown(f"**Dataset Path**: {dataset_path}")
+                    st.markdown(f"**Size**: {dataset_path.stat().st_size / 1024:.2f} KB")
+                    st.markdown(f"**Columns**: {list(df_trajectories.columns)}")
                     st.dataframe(df_trajectories.describe(), use_container_width=True)
             
             st.markdown("</div>", unsafe_allow_html=True)
@@ -4494,8 +4499,8 @@ if current_main_section == "🧪 Experiments":
                                         t_onnx.best_model = skl_model
                                         
                                         # Use 1 row sample for shape inference
-                                        if 'current_df' in st.session_state:
-                                            sample_x = st.session_state['current_df'].drop(columns=[job.config.get('target', '')]).head(1).values
+                                        if 'train_df' in st.session_state:
+                                            sample_x = st.session_state['train_df'].drop(columns=[job.config.get('target', '')]).head(1).values
                                             out_path = f"exported_model_{job.job_id}.onnx"
                                             t_onnx.export_best_model_to_onnx(X_sample=sample_x, path=out_path)
                                             with open(out_path, "rb") as f:

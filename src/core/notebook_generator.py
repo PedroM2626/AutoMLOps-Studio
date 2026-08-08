@@ -46,11 +46,24 @@ class WhiteboxNotebookGenerator:
         model_name = self.best_params.get('model_name', 'Unknown Model')
         opt_metric = self.config.get('optimization_metric', 'accuracy')
         
+        from src.utils.pillars import get_model_pillars_profile
+        pillars = get_model_pillars_profile(model_name, task_type=task_type, params=self.best_params)
+        
         self._add_markdown(
             f"**Task Type:** {task_type.capitalize()}\n"
             f"**Target Column:** {target_col}\n"
             f"**Selected Model:** {model_name}\n"
             f"**Optimization Metric:** `{opt_metric.upper()}`"
+        )
+        
+        self._add_markdown(
+            f"### 🏛️ The 5 Pillars of ML (Anatomical Profile of the Winning Model)\n"
+            f"- **Pillar 1 (Structure):** `{pillars['pillar_1_structure']['interpretability']}` ({pillars['pillar_1_structure']['type']})\n"
+            f"- **Pillar 2 (Signal Source):** `{pillars['pillar_2_signal_source']['signal_source']}`\n"
+            f"- **Pillar 3 (Criterion / Loss):** `{pillars['pillar_3_criterion_loss']['loss_function']}` — *Assumed Distribution:* `{pillars['pillar_3_criterion_loss']['assumed_distribution']}`\n"
+            f"- **Pillar 4 (Regularization):** `{pillars['pillar_4_regularization']['regularization']}`\n"
+            f"- **Pillar 5 (Optimizer Engine):** `{pillars['pillar_5_optimizer']['engine']}` (`{pillars['pillar_5_optimizer']['hyperparameter_tuner']}`)\n\n"
+            f"**Training Classification Axes:** {pillars['training_axes']['eager_vs_lazy']} | {pillars['training_axes']['parametric_vs_non_parametric']} | {pillars['training_axes']['convexity']}"
         )
         
         self._add_markdown(f"> **Optimization Target:** This pipeline was automatically tuned by AutoMLOps-Studio to optimize the **{opt_metric.upper()}** metric.")
@@ -192,7 +205,7 @@ class WhiteboxNotebookGenerator:
             "        try:\n"
             "            importances = model.feature_importances_\n"
             "            # Try to get feature names\n"
-            "            feat_names = processor.get_feature_names_out() if hasattr(processor, 'get_feature_names_out') else [f'Feature {i}' for i in range(len(importances))]\n"
+            "            feat_names = processor.get_feature_names() if hasattr(processor, 'get_feature_names') else [f'Feature {i}' for i in range(len(importances))]\n"
             "            if len(feat_names) != len(importances):\n"
             "                feat_names = [f'Feature {i}' for i in range(len(importances))]\n"
             "            \n"
