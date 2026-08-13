@@ -1,6 +1,6 @@
 {
   "name": "automlops-studio-desktop",
-  "version": "1.0.0",
+  "version": "5.7.1",
   "description": "Desktop wrapper for AutoMLOps Studio",
   "main": "electron-main.js",
   "scripts": {

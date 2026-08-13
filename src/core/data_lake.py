@@ -48,6 +48,10 @@ class DataLake:
             modified_at=datetime.fromtimestamp(stat.st_mtime),
         )
 
+    def get_version_path(self, dataset_name: str, version: str) -> str:
+        version_path = self._resolve_version_path(dataset_name, version)
+        return str(version_path)
+
     def load_version(self, dataset_name: str, version: str, nrows: int | None = None) -> pd.DataFrame:
         version_path = self._resolve_version_path(dataset_name, version)
         suffix = version_path.suffix.lower()

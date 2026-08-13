@@ -1,4 +1,4 @@
-# Usar uma imagem base leve com Python 3.11
+# Usar uma imagem base leve com Python 3.13
 FROM python:3.13-slim
 
 # Definir diretório de trabalho
