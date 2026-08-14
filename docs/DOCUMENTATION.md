@@ -343,12 +343,24 @@ present in the repository. No code signing is configured.
   `ColumnTransformer` / `Pipeline`.
 - **Constructor:** `AutoMLDataProcessor(target_column, task_type, data_type,
   date_col, forecast_horizon, nlp_config, scaler_type, semi_supervised,
-  enable_dfs, dfs_depth)`.
+  enable_dfs, dfs_depth, impute_strategy, impute_fill_value, encoding_mode,
+  onehot_cardinality_threshold, clip_outliers, outlier_lower_q,
+  outlier_upper_q, ts_clustering_config)`.
 - **Methods:** `fit_transform(df, nlp_cols)` and `transform(df)`.
-- **Capabilities:** scalers (standard / minmax / robust), OneHot/Ordinal
-  encoders, imputation; Deepchecks data-integrity HTML report; temporal
-  feature engineering (hour, day-of-week, etc., plus lags and rolling
-  mean/std); text cleaning + TF-IDF; semi-supervised label handling
+- **Capabilities:** configurable scalers (`auto`/`standard`, `none`,
+  `minmax`, `robust`, `maxabs`, `quantile`, `power` — see
+  `build_scaler()`), OneHot/Ordinal encoders with selectable encoding
+  mode and cardinality threshold, selectable imputation strategy,
+  optional Winsorization (`Winsorizer`); Deepchecks data-integrity HTML
+  report; temporal feature engineering (hour, day-of-week, etc., plus
+  lags and rolling mean/std — including lags derived from encoded
+  categorical targets for Forecast/TS Classification); **TS Clustering
+  windowing** (`_apply_ts_windows`: sliding-window summary features);
+  configurable **NLP text vectorization** (`nlp_config`: TF-IDF,
+  Bag-of-Words counts, binary Bag-of-Words, feature hashing, contextual
+  embeddings, or raw passthrough; cleaning modes standard / god_mode /
+  none; n-gram range, vocabulary cap, stop words); semi-supervised
+  label handling
   (`-1` / NaN treated as unlabeled); optional featuretools DFS.
 
 #### `trainer.py` — `TransformersWrapper`
@@ -561,13 +573,16 @@ engine) and the specialized engines:
 
 | Task type | Engine | Models / algorithms | Metric notes |
 |---|---|---|---|
-| `classification` | classical | logistic_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, linear_svc, knn, mlp, sgd_classifier, passive_aggressive, naive_bayes, ridge_classifier, adaboost, bagging, hist_gradient_boosting, catboost; transformers (bert, distilbert, roberta, deberta); ensembles (voting / stacking) | — |
-| `regression` | classical | linear_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, knn, mlp, ridge, lasso, elastic_net, sgd_regressor, adaboost, bagging, poisson, gamma (GLMs), hist_gradient_boosting, catboost; transformers (-reg variants) | — |
-| `forecast` | classical + pytorch_forecast | random_forest, xgboost, extra_trees, catboost, **lstm**, **tcn** (via `PyTorchTimeSeriesRegressor`) | — |
+| `classification` | classical | logistic_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, linear_svc, knn, mlp, sgd_classifier, passive_aggressive, naive_bayes, ridge_classifier, adaboost, bagging, hist_gradient_boosting, catboost; transformers (bert, distilbert, roberta, deberta); ensembles (voting / stacking) | Also used for **Time-Series Classification** when `data_type='sequential'` (chronological holdout + `TimeSeriesSplit` CV) |
+| `regression` | classical | linear_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, knn, mlp, ridge, lasso, elastic_net, sgd_regressor, adaboost, bagging, poisson, gamma (GLMs), hist_gradient_boosting, catboost; transformers (-reg variants for **NLP regression**: bert-base-uncased-reg, distilbert-base-uncased-reg) | — |
+| `forecast` | classical + pytorch_forecast | random_forest, xgboost, extra_trees, catboost, **lstm**, **tcn** (via `PyTorchTimeSeriesRegressor`) | `r2`, `rmse`, `mae`, `mape` |
+| `forecast_classification` | classical | Full classification catalog; internally mapped to `classification` with forced temporal behavior: lag features derived from the (encoded) categorical target, chronological holdout splits, and `TimeSeriesSplit` validation | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
 | `survival_analysis` | classical | survival estimators | c-index (`calculate_c_index`) |
 | `uplift_modeling` | classical | s_learner, t_learner | Qini score (`calculate_qini_score`) |
-| `clustering` | classical | kmeans, agglomerative, dbscan (MeanShift, Birch, Spectral, GaussianMixture also imported) | — |
-| `anomaly_detection` | classical | isolation_forest, local_outlier_factor, elliptic_envelope, one-class SVM | — |
+| `clustering` | classical | kmeans, agglomerative, dbscan, gaussian_mixture, mean_shift, birch, spectral | `silhouette`, `calinski_harabasz`, `davies_bouldin` |
+| `ts_clustering` | classical (processor windowing) | Same clustering catalog. `AutoMLDataProcessor` segments the chosen numeric series into sliding windows (configurable `window_size` / `step`) and extracts per-window summary features (`mean`, `std`, `min`, `max`, `median`, `skew`, `trend`) before clustering | `silhouette` |
+| `anomaly_detection` | classical | **11 detectors:** isolation_forest, local_outlier_factor, elliptic_envelope, one_class_svm, zscore_detector, modified_zscore (MAD), mahalanobis (empirical or robust MCD covariance), hbos (Histogram-Based Outlier Score), knn_outlier, pca_residual, rolling_residual (time-series oriented) | `decision_score`; semi-supervised `f1`/`precision`/`recall` when labels (1 = anomaly) are provided |
+| `density_estimation` | classical | kernel_density (`KernelDensity` wrapper: bandwidth + kernel search), gaussian_mixture_density (`GaussianMixture` wrapper), histogram_density (independent per-feature histograms) | Held-out `log_likelihood` (maximized); high-dimensional NLP features are first projected with TruncatedSVD |
 | `multi_label` | classical | MultiOutputClassifier wrappers over base classifiers | — |
 | `multi_task` | classical | MultiOutputClassifier orchestration | — |
 | `ranking` | classical | ranking-aware training | — |
@@ -588,7 +603,43 @@ Additional cross-cutting capabilities:
 - **Ensembles:** voting and stacking.
 - **Semi-supervised learning:** `SelfTrainingClassifier` wrapping for
   partially labeled data.
-- **Text NLP:** TF-IDF pipelines and transformer fine-tuning.
+- **Text NLP:** selectable text vectorization (TF-IDF, Bag-of-Words,
+  binary Bag-of-Words, feature hashing, Sentence-Transformer embeddings
+  or raw-text passthrough) and transformer fine-tuning
+  (classification *and* regression heads).
+- **Customizable preprocessing** (`AutoMLDataProcessor`):
+  - *Feature scaling* (`scaler_type`): `auto` / `standard` (default),
+    `none`, `minmax`, `robust`, `maxabs`, `quantile`, `power`
+    (Yeo-Johnson). Exposed through `build_scaler()` with sparse-safe
+    fallbacks.
+  - *Imputation* (`impute_strategy`): `median` (default), `mean`,
+    `most_frequent`, `constant` (`impute_fill_value`).
+  - *Categorical encoding* (`encoding_mode`): `auto` (one-hot for low
+    cardinality, ordinal for high cardinality), `onehot`, or `ordinal`,
+    with a configurable `onehot_cardinality_threshold`.
+  - *Outlier treatment*: optional Winsorization (`clip_outliers`) that
+    clips numeric features to `[outlier_lower_q, outlier_upper_q]`
+    quantile bounds before scaling.
+  - *Per-model scaling overrides*: `train(..., scaler_overrides={model:
+    scaler})` wraps individual models in a
+    `Pipeline(model_scaler -> model)` so each algorithm can receive a
+    different scaling of the same preprocessed features (also available
+    in the GUI Model Selection step).
+  - *NLP text preprocessing* (`nlp_config`, GUI panel "📝 NLP Text
+    Preprocessing" in wizard Step 5):
+    - `vectorizer`: `tfidf` (default), `count` (Bag-of-Words with raw
+      term counts), `binary` (Bag-of-Words presence flags), `hashing`
+      (stateless feature hashing with fixed width — suited to huge
+      vocabularies), `embeddings` (Sentence-Transformers, configurable
+      via `embedding_model`, falls back to TF-IDF if unavailable), or
+      `passthrough` (raw text kept for Transformer models).
+    - `cleaning_mode`: `standard` (lowercase, strip URLs/mentions/
+      punctuation), `god_mode` (aggressive normalization + accent
+      stripping), or `none` (raw text untouched).
+    - `ngram_range` (e.g. `(1,1)`, `(1,2)`, `(1,3)`, `(2,2)`),
+      `max_features` vocabulary cap (auto-reduced when several text
+      columns are present), `stop_words` toggle with `language`
+      selection, and `sublinear_tf` for TF-IDF.
 
 ---
 

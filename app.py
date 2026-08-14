@@ -671,7 +671,7 @@ with st.sidebar:
     st.markdown("""
     <div style='text-align:center; padding:10px 0;'>
         <h1 style='font-size:1.5rem; margin-bottom:0;'>🚀 AutoMLOps</h1>
-        <p style='color:#8b949e; font-size:0.8rem;'>Studio v4.8.0</p>
+        <p style='color:#8b949e; font-size:0.8rem;'>Studio v5.8.0</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1184,7 +1184,7 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         elif split_ratio <= 0.0:
             test_dfs.append(df_ds)
         else:
-            if strat == 'Chronological' or ((task_type == 'forecast' or is_time_series) and date_col and date_col in df_ds.columns):
+            if strat == 'Chronological' or ((task_type in ('forecast', 'forecast_classification', 'ts_clustering') or is_time_series) and date_col and date_col in df_ds.columns):
                 # Temporal split
                 time_col = config.get('time_column', date_col)
                 if time_col and time_col in df_ds.columns:
@@ -2111,7 +2111,7 @@ if current_main_section == "⚙️ AutoML":
                           col_ta, col_dc = st.columns(2)
                           with col_ta:
                               task_tmp = cfg.get('task', 'classification')
-                              unsup_targetless_tasks = ["clustering", "anomaly_detection", "dimensionality_reduction", "association_rules"]
+                              unsup_targetless_tasks = ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction", "association_rules"]
                               if task_tmp not in unsup_targetless_tasks:
                                   if task_tmp in ["multi_label", "multi_task"]:
                                       default_targets = [c for c in sample_df.columns[-2:] if c in sample_df.columns]
@@ -2138,7 +2138,7 @@ if current_main_section == "⚙️ AutoML":
                           with col_char_ts:
                               is_ts = st.checkbox(
                                   "📅 Contains Temporal / Time Series Data",
-                                  value=cfg.get('is_time_series', False) or task_tmp == 'forecast',
+                                  value=cfg.get('is_time_series', False) or task_tmp in ('forecast', 'forecast_classification', 'ts_clustering'),
                                   help="Enable to extract date features and apply chronological validation.",
                                   key="wiz_is_ts"
                               )
@@ -2154,12 +2154,25 @@ if current_main_section == "⚙️ AutoML":
 
                           col_opts1, col_opts2 = st.columns(2)
                           with col_opts1:
-                              if cfg.get('is_time_series', False) or task_tmp == 'forecast':
+                              if cfg.get('is_time_series', False) or task_tmp in ('forecast', 'forecast_classification', 'ts_clustering'):
                                   date_col_pre_w = st.selectbox("📅 Date Column", sample_df.columns, key="wizard_date")
                                   cfg['date_col'] = date_col_pre_w
-                                  if task_tmp == 'forecast':
+                                  if task_tmp in ('forecast', 'forecast_classification'):
                                       horizon_pre_w = st.number_input("⏳ Forecast Horizon", min_value=1, value=cfg.get('forecast_horizon', 1), key="wizard_horizon")
                                       cfg['forecast_horizon'] = horizon_pre_w
+                                  if task_tmp == 'ts_clustering':
+                                      ts_cluster_cfg = cfg.get('ts_clustering_config', {}) or {}
+                                      numeric_cols_pre = sample_df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns.tolist()
+                                      ts_series_col = st.selectbox(
+                                          "🌀 Series Column to Window",
+                                          numeric_cols_pre if numeric_cols_pre else sample_df.columns.tolist(),
+                                          index=0 if numeric_cols_pre else None,
+                                          help="The numeric series that will be segmented into sliding windows for clustering.",
+                                          key="wizard_ts_series_col"
+                                      )
+                                      ts_window = st.number_input("🪟 Window Size", min_value=2, max_value=500, value=int(ts_cluster_cfg.get('window_size', 12)), key="wizard_ts_window")
+                                      ts_step = st.number_input("👣 Window Step (stride)", min_value=1, max_value=100, value=int(ts_cluster_cfg.get('step', 1)), key="wizard_ts_step")
+                                      cfg['ts_clustering_config'] = {'series_col': ts_series_col, 'window_size': ts_window, 'step': ts_step}
                           with col_opts2:
                               if cfg.get('is_nlp', False):
                                   nlp_cols_w = st.multiselect(
@@ -2266,13 +2279,16 @@ if current_main_section == "⚙️ AutoML":
                 ("survival_analysis", "⏱️", "Survival Analysis",  "Predict time-to-event with right-censoring (Cox C-Index)"),
                 ("uplift_modeling",   "📊", "Uplift Modeling",    "Predict Individual Treatment Effect (ITE / Qini Score)"),
                 ("forecast",          "⏳", "Forecast",          "Forecast future values from historical sequences"),
+                ("forecast_classification", "🔮", "Forecast Classification", "Predict the future class/state of a sequence (e.g. up/down, regime)"),
                 ("ranking",           "🥇", "Ranking",           "Score items to optimize ordering relevance"),
                 ("multi_label",       "🏷️", "Multi-Label",       "Predict multiple target labels per row"),
                 ("multi_task",        "🔗", "Multi-Task",        "Predict multiple multi-class target columns simultaneously"),
             ]
             UNSUP_TASKS = [
                 ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
-                ("anomaly_detection",        "🚨", "Anomaly Detection",        "Cross-Paradigma Objective: Isolation, LOF, Gaussian Envelope, and OneClassSVM"),
+                ("ts_clustering",            "🌀", "TS Clustering",            "Cluster time-series windows/regimes by temporal behavior"),
+                ("anomaly_detection",        "🚨", "Anomaly Detection",        "Cross-Paradigm Objective: Isolation, LOF, Gaussian Envelope, OneClassSVM, Z-Score, MAD, Mahalanobis, HBOS, KNN, PCA and Rolling Residuals"),
+                ("density_estimation",       "🌫️", "Density Estimation",       "Model the probability density of data (KDE, Gaussian Mixture, Histogram) — works for tabular, time series and NLP"),
                 ("dimensionality_reduction", "🔻", "Dimensionality Reduction", "Compress features intelligently (PCA, SVD, LDA, NCA, PLS)"),
                 ("association_rules",        "🧩", "Association Rules",        "Discover co-occurrence patterns and rules"),
             ]
@@ -2465,7 +2481,7 @@ if current_main_section == "⚙️ AutoML":
                 # ── Training Focus selector (shown for both modes) ────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                task_supports_ensembles = task not in ["ranking", "multi_label", "association_rules"]
+                task_supports_ensembles = task not in ["ranking", "multi_label", "association_rules", "clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction"]
                 if task_supports_ensembles:
                     FOCUS_OPTIONS = [
                         ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
@@ -2526,6 +2542,34 @@ if current_main_section == "⚙️ AutoML":
                             st.session_state["automl_config"] = cfg
                             st.rerun()
                 cfg["use_deep_learning"] = (cur_dl == "deep")
+
+                # ── Per-Model Preprocessing (Scaling Overrides) ─────────────
+                st.markdown("<br>", unsafe_allow_html=True)
+                with st.expander("🧰 Per-Model Feature Scaling (Advanced)", expanded=False):
+                    st.caption(
+                        "Override the global numeric scaling applied to individual models. "
+                        "'inherit (global)' keeps the scaling defined in Advanced Settings → Preprocessing."
+                    )
+                    _scale_opts = ["inherit (global)", "none", "standard", "minmax", "robust", "maxabs", "quantile", "power"]
+                    _cur_overrides = cfg.get("scaler_overrides", {}) or {}
+                    _ov_models = [m for m in (cfg.get("selected_models") or available_models) if m not in _ENSEMBLE_METHODS]
+                    if _ov_models:
+                        new_overrides = {}
+                        _ov_cols = st.columns(2)
+                        for oi, om in enumerate(_ov_models):
+                            with _ov_cols[oi % 2]:
+                                cur_val = _cur_overrides.get(om, "inherit (global)")
+                                sel_val = st.selectbox(
+                                    f"Scaling — {om}",
+                                    _scale_opts,
+                                    index=_scale_opts.index(cur_val) if cur_val in _scale_opts else 0,
+                                    key=f"wiz_scale_ov_{om}"
+                                )
+                                if sel_val != "inherit (global)":
+                                    new_overrides[om] = sel_val
+                        cfg["scaler_overrides"] = new_overrides
+                    else:
+                        st.info("Select models first to configure per-model scaling.")
 
                 # ── Custom Ensemble Builder — only in Manual mode + when focus involves ensembles ──
                 # In Automatic (Preset) mode, ensembles are configured automatically by the engine.
@@ -2803,11 +2847,15 @@ if current_main_section == "⚙️ AutoML":
                     'regression': ['r2', 'rmse', 'mae', 'poisson_deviance', 'gamma_deviance'],
                     'survival_analysis': ['c_index'],
                     'uplift_modeling': ['qini_score'],
+                    'forecast': ['r2', 'rmse', 'mae', 'mape'],
+                    'forecast_classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
                     'ranking': ['ndcg', 'rmse', 'mae'],
                     'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
                     'clustering': ['silhouette'],
+                    'ts_clustering': ['silhouette'],
                     'time_series': ['rmse', 'mae', 'mape'],
-                    'anomaly_detection': ['f1'],
+                    'anomaly_detection': ['decision_score', 'f1'],
+                    'density_estimation': ['log_likelihood'],
                     'dimensionality_reduction': ['explained_variance', 'supervised_separability'],
                     'association_rules': ['rule_score', 'rule_count', 'avg_lift']
                 }
@@ -2857,7 +2905,7 @@ if current_main_section == "⚙️ AutoML":
                 "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"
             ]
 
-            if task == "time_series":
+            if task in ("time_series", "forecast", "forecast_classification", "ts_clustering") or cfg.get('is_time_series', False):
                 val_strategy_ui = "Time Series Split"
                 st.info("⏳ Time series must use temporal splitting.")
             elif task == "classification":
@@ -2962,6 +3010,183 @@ if current_main_section == "⚙️ AutoML":
                     dfs_depth = st.slider("Max Synthesis Depth", 1, 3, cfg.get('dfs_depth', 1), help="Depth 1 = Pairwise interactions. Depth 2+ can consume massive RAM.", key="wiz_dfs_depth")
                     cfg['dfs_depth'] = dfs_depth
 
+            with st.expander("🧰 Preprocessing Customization", expanded=False):
+                st.info(
+                    "Fine-tune how numeric/categorical features are treated. "
+                    "The defaults ('Automatic') reproduce the classic pipeline: median imputation + standard scaling + automatic encoding."
+                )
+                pre_cfg = dict(cfg.get('preprocessing', {}) or {})
+
+                _pc1, _pc2 = st.columns(2)
+                with _pc1:
+                    scaler_labels = {
+                        'auto': "Automatic (Standard)",
+                        'none': "None (no scaling)",
+                        'standard': "Standard (Z-Score)",
+                        'minmax': "MinMax [0, 1]",
+                        'robust': "Robust (Median/IQR)",
+                        'maxabs': "MaxAbs [-1, 1]",
+                        'quantile': "Quantile (Normal)",
+                        'power': "Power (Yeo-Johnson)"
+                    }
+                    cur_scaler = pre_cfg.get('scaler_type', 'auto')
+                    scaler_ui = st.selectbox(
+                        "📏 Feature Scaling (numeric)",
+                        list(scaler_labels.values()),
+                        index=list(scaler_labels.keys()).index(cur_scaler) if cur_scaler in scaler_labels else 0,
+                        help="Global scaling applied to numeric features. Can be overridden per model in Step 3.",
+                        key="wiz_pre_scaler"
+                    )
+                    pre_cfg['scaler_type'] = list(scaler_labels.keys())[list(scaler_labels.values()).index(scaler_ui)]
+
+                    impute_labels = {'median': "Median", 'mean': "Mean", 'most_frequent': "Most Frequent", 'constant': "Constant (fill value)"}
+                    cur_impute = pre_cfg.get('impute_strategy', 'median')
+                    impute_ui = st.selectbox(
+                        "🩹 Missing Value Imputation",
+                        list(impute_labels.values()),
+                        index=list(impute_labels.keys()).index(cur_impute) if cur_impute in impute_labels else 0,
+                        key="wiz_pre_impute"
+                    )
+                    pre_cfg['impute_strategy'] = list(impute_labels.keys())[list(impute_labels.values()).index(impute_ui)]
+                    if pre_cfg['impute_strategy'] == 'constant':
+                        pre_cfg['impute_fill_value'] = st.number_input(
+                            "Fill Value (constant imputation)", value=float(pre_cfg.get('impute_fill_value', 0.0)), key="wiz_pre_fill"
+                        )
+
+                with _pc2:
+                    enc_labels = {'auto': "Automatic (One-Hot low card. / Ordinal high card.)", 'onehot': "One-Hot (all categoricals)", 'ordinal': "Ordinal (all categoricals)"}
+                    cur_enc = pre_cfg.get('encoding_mode', 'auto')
+                    enc_ui = st.selectbox(
+                        "🔤 Categorical Encoding",
+                        list(enc_labels.values()),
+                        index=list(enc_labels.keys()).index(cur_enc) if cur_enc in enc_labels else 0,
+                        key="wiz_pre_enc"
+                    )
+                    pre_cfg['encoding_mode'] = list(enc_labels.keys())[list(enc_labels.values()).index(enc_ui)]
+
+                    pre_cfg['onehot_cardinality_threshold'] = st.slider(
+                        "One-Hot Cardinality Threshold",
+                        2, 50, int(pre_cfg.get('onehot_cardinality_threshold', 15)),
+                        help="Categoricals with more unique values than this are ordinal-encoded instead of one-hot encoded (Automatic mode).",
+                        key="wiz_pre_card"
+                    )
+
+                clip_out = st.checkbox(
+                    "✂️ Winsorize Outliers (clip numeric features to quantile bounds)",
+                    value=bool(pre_cfg.get('clip_outliers', False)),
+                    help="Clips extreme values before scaling. Useful for heavy-tailed distributions.",
+                    key="wiz_pre_clip"
+                )
+                pre_cfg['clip_outliers'] = clip_out
+                if clip_out:
+                    _cq1, _cq2 = st.columns(2)
+                    with _cq1:
+                        lower_pct = st.slider("Lower Quantile (%)", 0.1, 10.0, float(pre_cfg.get('outlier_lower_q', 0.01)) * 100, key="wiz_pre_clip_lo")
+                    with _cq2:
+                        upper_pct = st.slider("Upper Quantile (%)", 90.0, 99.9, float(pre_cfg.get('outlier_upper_q', 0.99)) * 100, key="wiz_pre_clip_hi")
+                    pre_cfg['outlier_lower_q'] = round(lower_pct / 100, 4)
+                    pre_cfg['outlier_upper_q'] = round(upper_pct / 100, 4)
+
+                cfg['preprocessing'] = pre_cfg
+
+            if cfg.get('selected_nlp_cols'):
+                with st.expander("📝 NLP Text Preprocessing", expanded=False):
+                    st.info(
+                        "Choose how text columns are converted into numeric features. "
+                        "TF-IDF (default) weights rare terms higher; Bag-of-Words uses raw term counts."
+                    )
+                    nlp_cfg = dict(cfg.get('nlp_config', {}) or {})
+
+                    vec_labels = {
+                        'tfidf': "TF-IDF (term frequency–inverse document frequency)",
+                        'count': "Bag-of-Words (raw term counts)",
+                        'binary': "Binary Bag-of-Words (presence flags)",
+                        'hashing': "Feature Hashing (fixed-width, huge vocabularies)",
+                        'embeddings': "Contextual Embeddings (Sentence-Transformers)",
+                        'passthrough': "Raw Text (passthrough for Transformer models)"
+                    }
+                    cur_vec = nlp_cfg.get('vectorizer', 'tfidf')
+                    vec_ui = st.selectbox(
+                        "🔡 Text Vectorizer",
+                        list(vec_labels.values()),
+                        index=list(vec_labels.keys()).index(cur_vec) if cur_vec in vec_labels else 0,
+                        help="Bag-of-Words variants and TF-IDF produce sparse word-count matrices. Embeddings use a pre-trained sentence encoder.",
+                        key="wiz_nlp_vec"
+                    )
+                    nlp_cfg['vectorizer'] = list(vec_labels.keys())[list(vec_labels.values()).index(vec_ui)]
+
+                    _nc1, _nc2 = st.columns(2)
+                    with _nc1:
+                        clean_labels = {
+                            'standard': "Standard (lowercase, strip URLs/punctuation)",
+                            'god_mode': "God Mode (aggressive normalization + accent stripping)",
+                            'none': "None (keep raw text)"
+                        }
+                        cur_clean = nlp_cfg.get('cleaning_mode', 'standard')
+                        clean_ui = st.selectbox(
+                            "🧼 Text Cleaning",
+                            list(clean_labels.values()),
+                            index=list(clean_labels.keys()).index(cur_clean) if cur_clean in clean_labels else 0,
+                            help="Use 'None' when the downstream model does its own tokenization (e.g., Transformer passthrough).",
+                            key="wiz_nlp_clean"
+                        )
+                        nlp_cfg['cleaning_mode'] = list(clean_labels.keys())[list(clean_labels.values()).index(clean_ui)]
+
+                        ngram_labels = {
+                            (1, 1): "Unigrams only (1,1)",
+                            (1, 2): "Uni + Bigrams (1,2)",
+                            (1, 3): "Uni → Trigrams (1,3)",
+                            (2, 2): "Bigrams only (2,2)"
+                        }
+                        cur_ngram = tuple(nlp_cfg.get('ngram_range', (1, 3)))
+                        ngram_ui = st.selectbox(
+                            "🔗 N-Gram Range",
+                            list(ngram_labels.values()),
+                            index=list(ngram_labels.keys()).index(cur_ngram) if cur_ngram in ngram_labels else 3,
+                            help="Higher n-grams capture short phrases but explode the vocabulary size.",
+                            key="wiz_nlp_ngram"
+                        )
+                        nlp_cfg['ngram_range'] = list(ngram_labels.keys())[list(ngram_labels.values()).index(ngram_ui)]
+
+                    with _nc2:
+                        nlp_cfg['max_features'] = st.slider(
+                            "📚 Vocabulary Size (max features)",
+                            500, 20000, int(nlp_cfg.get('max_features', 5000)), step=500,
+                            help="Only the most frequent terms are kept. Automatically reduced when multiple text columns are used.",
+                            key="wiz_nlp_maxfeat"
+                        )
+                        nlp_cfg['stop_words'] = st.checkbox(
+                            "🚫 Remove Stop Words",
+                            value=bool(nlp_cfg.get('stop_words', True)),
+                            key="wiz_nlp_stop"
+                        )
+                        if nlp_cfg['stop_words']:
+                            nlp_cfg['language'] = st.selectbox(
+                                "🌍 Stop Words Language",
+                                ['english', 'portuguese', 'spanish', 'french', 'german', 'italian', 'dutch', 'russian'],
+                                index=0 if nlp_cfg.get('language', 'english') not in ['english', 'portuguese', 'spanish', 'french', 'german', 'italian', 'dutch', 'russian']
+                                else ['english', 'portuguese', 'spanish', 'french', 'german', 'italian', 'dutch', 'russian'].index(nlp_cfg.get('language', 'english')),
+                                key="wiz_nlp_lang"
+                            )
+
+                    if nlp_cfg['vectorizer'] == 'tfidf':
+                        nlp_cfg['sublinear_tf'] = st.checkbox(
+                            "📉 Sublinear TF Scaling (1 + log(tf))",
+                            value=bool(nlp_cfg.get('sublinear_tf', True)),
+                            help="Dampens the effect of very frequent terms. Recommended for most text tasks.",
+                            key="wiz_nlp_sublinear"
+                        )
+                    if nlp_cfg['vectorizer'] == 'embeddings':
+                        nlp_cfg['embedding_model'] = st.text_input(
+                            "🤖 Sentence-Transformers Model",
+                            value=nlp_cfg.get('embedding_model', 'all-MiniLM-L6-v2'),
+                            help="Any model from the sentence-transformers hub. Falls back to TF-IDF if unavailable.",
+                            key="wiz_nlp_emb_model"
+                        )
+
+                    cfg['nlp_config'] = nlp_cfg
+
+
             st.markdown('<br>', unsafe_allow_html=True)
             col_back, col_fwd, _ = st.columns([1, 1, 5])
             with col_back:
@@ -3034,7 +3259,7 @@ if current_main_section == "⚙️ AutoML":
             target = None
             if 'train_df' in st.session_state and st.session_state.get('current_task') == task:
                 train_df = st.session_state['train_df']
-                if task not in ["clustering", "anomaly_detection", "association_rules"]:
+                if task not in ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "association_rules"]:
                     act_target = st.session_state.get('target_active')
                     if task == "multi_label":
                         if isinstance(act_target, list) and all(c in train_df.columns for c in act_target) and len(act_target) >= 2:
@@ -3097,6 +3322,10 @@ if current_main_section == "⚙️ AutoML":
                             'target_metric_name': cfg.get('optimization_metric', 'accuracy').upper(),
                             'early_stopping': cfg.get('early_stopping', 10),
                             'stability_config': {'tests': cfg.get('stability_tests', []), 'n_iterations': 3} if cfg.get('enable_stability') else None,
+                            'data_type': cfg.get('data_type', 'tabular'),
+                            'preprocessing': cfg.get('preprocessing', {}),
+                            'scaler_overrides': cfg.get('scaler_overrides', {}),
+                            'ts_clustering_config': cfg.get('ts_clustering_config', {}),
                             'mlflow_tracking_uri': mlflow.get_tracking_uri(),
                             'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
                             'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),

@@ -31,9 +31,9 @@ from sklearn.ensemble import (
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.naive_bayes import GaussianNB, BernoulliNB
-from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor
+from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor, KernelDensity, NearestNeighbors
 from sklearn.multioutput import MultiOutputClassifier
-from sklearn.covariance import EllipticEnvelope
+from sklearn.covariance import EllipticEnvelope, EmpiricalCovariance, MinCovDet
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.neighbors import NeighborhoodComponentsAnalysis
@@ -143,6 +143,18 @@ warnings.filterwarnings("ignore", category=UserWarning)
 logger = logging.getLogger(__name__)
 
 
+def _is_transformer_model(model):
+    """Robust isinstance check for TransformersWrapper.
+
+    Test suites may monkeypatch the wrapper class with non-type mocks;
+    in that case isinstance raises TypeError, and we simply report False.
+    """
+    try:
+        return isinstance(model, TransformersWrapper)
+    except TypeError:
+        return False
+
+
 class AssociationRuleMiner(BaseEstimator):
     """Simple pairwise association-rule miner for binary tabular features."""
 
@@ -229,10 +241,320 @@ class AssociationRuleMiner(BaseEstimator):
         n = len(X) if hasattr(X, "__len__") else 1
         return np.zeros(n, dtype=int)
 
+# ──────────────────────────────────────────────────────────────────────────
+# Extra Anomaly Detection estimators (cross-paradigm objective)
+# All detectors follow the sklearn convention:
+#   predict(): -1 = anomaly, 1 = normal
+#   decision_function(): higher = more normal
+# ──────────────────────────────────────────────────────────────────────────
+
+def _to_dense_array(X):
+    """Converts sparse/pandas inputs into a dense float numpy array."""
+    if hasattr(X, 'toarray'):
+        X = X.toarray()
+    if isinstance(X, (pd.DataFrame, pd.Series)):
+        X = X.values
+    return np.asarray(X, dtype=float)
+
+
+class StatisticalZScoreDetector(BaseEstimator):
+    """Classic Z-Score detector: flags points whose feature deviates more than
+    `threshold` standard deviations from the training mean."""
+
+    def __init__(self, threshold=3.0):
+        self.threshold = threshold
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        self.mean_ = np.nanmean(X_arr, axis=0)
+        self.std_ = np.nanstd(X_arr, axis=0)
+        self.std_[self.std_ < 1e-12] = 1.0
+        return self
+
+    def _max_abs_z(self, X):
+        X_arr = _to_dense_array(X)
+        z = np.abs((X_arr - self.mean_) / self.std_)
+        return np.nanmax(z, axis=1)
+
+    def decision_function(self, X):
+        return -self._max_abs_z(X)
+
+    def predict(self, X):
+        return np.where(self._max_abs_z(X) > self.threshold, -1, 1)
+
+
+class ModifiedZScoreDetector(BaseEstimator):
+    """Robust detector based on Median Absolute Deviation (MAD), less sensitive
+    to the presence of anomalies inside the training set than the classic Z-Score."""
+
+    def __init__(self, threshold=3.5):
+        self.threshold = threshold
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        self.median_ = np.nanmedian(X_arr, axis=0)
+        self.mad_ = np.nanmedian(np.abs(X_arr - self.median_), axis=0)
+        self.mad_[self.mad_ < 1e-12] = 1.0
+        return self
+
+    def _max_mod_z(self, X):
+        X_arr = _to_dense_array(X)
+        mz = np.abs(0.6745 * (X_arr - self.median_) / self.mad_)
+        return np.nanmax(mz, axis=1)
+
+    def decision_function(self, X):
+        return -self._max_mod_z(X)
+
+    def predict(self, X):
+        return np.where(self._max_mod_z(X) > self.threshold, -1, 1)
+
+
+class MahalanobisDetector(BaseEstimator):
+    """Detects anomalies through the Mahalanobis distance, taking feature
+    correlation into account. Optionally uses a robust covariance (MCD)."""
+
+    def __init__(self, robust=False, contamination=0.1):
+        self.robust = robust
+        self.contamination = contamination
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        try:
+            self.cov_ = MinCovDet(random_state=42).fit(X_arr) if self.robust else EmpiricalCovariance().fit(X_arr)
+        except Exception:
+            # Singular covariance fallback
+            self.cov_ = EmpiricalCovariance(store_precision=False).fit(X_arr + np.random.normal(0, 1e-6, X_arr.shape))
+        dist = self.cov_.mahalanobis(X_arr)
+        self.threshold_ = float(np.quantile(dist, 1.0 - self.contamination))
+        return self
+
+    def decision_function(self, X):
+        return -self.cov_.mahalanobis(_to_dense_array(X))
+
+    def predict(self, X):
+        dist = self.cov_.mahalanobis(_to_dense_array(X))
+        return np.where(dist > self.threshold_, -1, 1)
+
+
+class HBOSDetector(BaseEstimator):
+    """Histogram-Based Outlier Score: estimates univariate densities through
+    histograms and combines them via the product of densities (log-sum)."""
+
+    def __init__(self, n_bins=20, contamination=0.1):
+        self.n_bins = n_bins
+        self.contamination = contamination
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        n = X_arr.shape[0]
+        self.hist_ = []
+        for j in range(X_arr.shape[1]):
+            col = X_arr[:, j]
+            counts, edges = np.histogram(col, bins=self.n_bins)
+            widths = np.diff(edges)
+            widths[widths <= 0] = 1.0
+            density = counts / (n * widths)
+            self.hist_.append((edges, density))
+        scores = self._log_density(X_arr)
+        self.threshold_ = float(np.quantile(scores, self.contamination))
+        return self
+
+    def _log_density(self, X_arr):
+        total = np.zeros(X_arr.shape[0])
+        for j, (edges, density) in enumerate(self.hist_):
+            idx = np.clip(np.searchsorted(edges, X_arr[:, j], side='right') - 1, 0, len(density) - 1)
+            total += np.log(np.maximum(density[idx], 1e-12))
+        return total
+
+    def decision_function(self, X):
+        return self._log_density(_to_dense_array(X))
+
+    def predict(self, X):
+        scores = self._log_density(_to_dense_array(X))
+        return np.where(scores < self.threshold_, -1, 1)
+
+
+class KNNOutlierDetector(BaseEstimator):
+    """Distance-based detector: points far from their k nearest neighbors
+    (average distance) are considered anomalies."""
+
+    def __init__(self, n_neighbors=20, contamination=0.1):
+        self.n_neighbors = n_neighbors
+        self.contamination = contamination
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        k = min(max(1, self.n_neighbors), max(1, X_arr.shape[0] - 1))
+        self.nn_ = NearestNeighbors(n_neighbors=k).fit(X_arr)
+        dist, _ = self.nn_.kneighbors(X_arr)
+        scores = dist.mean(axis=1)
+        self.threshold_ = float(np.quantile(scores, 1.0 - self.contamination))
+        return self
+
+    def _scores(self, X):
+        dist, _ = self.nn_.kneighbors(_to_dense_array(X))
+        return dist.mean(axis=1)
+
+    def decision_function(self, X):
+        return -self._scores(X)
+
+    def predict(self, X):
+        return np.where(self._scores(X) > self.threshold_, -1, 1)
+
+
+class PCAResidualDetector(BaseEstimator):
+    """Detects anomalies through the reconstruction error of a low-rank PCA
+    projection: anomalous points do not lie on the principal subspace."""
+
+    def __init__(self, n_components=2, contamination=0.1):
+        self.n_components = n_components
+        self.contamination = contamination
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        n_comp = min(max(1, self.n_components), max(1, X_arr.shape[1] - 1))
+        self.pca_ = PCA(n_components=n_comp, random_state=42)
+        self.pca_.fit(X_arr)
+        errors = self._errors(X_arr)
+        self.threshold_ = float(np.quantile(errors, 1.0 - self.contamination))
+        return self
+
+    def _errors(self, X_arr):
+        projected = self.pca_.transform(X_arr)
+        reconstructed = self.pca_.inverse_transform(projected)
+        return np.sum((X_arr - reconstructed) ** 2, axis=1)
+
+    def decision_function(self, X):
+        return -self._errors(_to_dense_array(X))
+
+    def predict(self, X):
+        return np.where(self._errors(_to_dense_array(X)) > self.threshold_, -1, 1)
+
+
+class RollingResidualDetector(BaseEstimator):
+    """Time-series oriented detector: measures deviations from a rolling median
+    baseline, normalized by the MAD of the residuals (temporal Modified Z-Score)."""
+
+    def __init__(self, window=12, threshold=3.0):
+        self.window = window
+        self.threshold = threshold
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        n, m = X_arr.shape
+        w = min(max(2, self.window), max(2, n))
+        self.window_ = w
+        residuals = X_arr.copy()
+        for j in range(m):
+            s = pd.Series(X_arr[:, j]).rolling(window=w, min_periods=1).median()
+            residuals[:, j] = X_arr[:, j] - s.values
+        self.residual_med_ = np.nanmedian(residuals, axis=0)
+        self.residual_mad_ = np.nanmedian(np.abs(residuals - self.residual_med_), axis=0)
+        self.residual_mad_[self.residual_mad_ < 1e-12] = 1.0
+        return self
+
+    def _max_score(self, X):
+        X_arr = _to_dense_array(X)
+        n, m = X_arr.shape
+        residuals = X_arr.copy()
+        for j in range(m):
+            s = pd.Series(X_arr[:, j]).rolling(window=self.window_, min_periods=1).median()
+            residuals[:, j] = X_arr[:, j] - s.values
+        mz = np.abs(0.6745 * (residuals - self.residual_med_) / self.residual_mad_)
+        return np.nanmax(mz, axis=1)
+
+    def decision_function(self, X):
+        return -self._max_score(X)
+
+    def predict(self, X):
+        return np.where(self._max_score(X) > self.threshold, -1, 1)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Density Estimation estimators (tabular, time series and vectorized text)
+# ──────────────────────────────────────────────────────────────────────────
+
+class DensityKDEWrapper(BaseEstimator):
+    """Kernel Density Estimation wrapper exposing predict/score_samples."""
+
+    def __init__(self, bandwidth=1.0, kernel='gaussian'):
+        self.bandwidth = bandwidth
+        self.kernel = kernel
+
+    def fit(self, X, y=None):
+        self.kde_ = KernelDensity(bandwidth=self.bandwidth, kernel=self.kernel)
+        self.kde_.fit(_to_dense_array(X))
+        return self
+
+    def score_samples(self, X):
+        return self.kde_.score_samples(_to_dense_array(X))
+
+    def predict(self, X):
+        return np.exp(np.clip(self.score_samples(X), -700, 700))
+
+
+class DensityGMMWrapper(BaseEstimator):
+    """Gaussian Mixture used as a flexible parametric density estimator."""
+
+    def __init__(self, n_components=5, covariance_type='full'):
+        self.n_components = n_components
+        self.covariance_type = covariance_type
+
+    def fit(self, X, y=None):
+        self.gmm_ = GaussianMixture(
+            n_components=self.n_components, covariance_type=self.covariance_type, random_state=42
+        )
+        self.gmm_.fit(_to_dense_array(X))
+        return self
+
+    def score_samples(self, X):
+        return self.gmm_.score_samples(_to_dense_array(X))
+
+    def predict(self, X):
+        return np.exp(np.clip(self.score_samples(X), -700, 700))
+
+
+class DensityHistogram(BaseEstimator):
+    """Naive Bayes-style density: product of independent per-feature histograms."""
+
+    def __init__(self, n_bins=30):
+        self.n_bins = n_bins
+
+    def fit(self, X, y=None):
+        X_arr = _to_dense_array(X)
+        n = X_arr.shape[0]
+        self.hist_ = []
+        for j in range(X_arr.shape[1]):
+            counts, edges = np.histogram(X_arr[:, j], bins=self.n_bins)
+            widths = np.diff(edges)
+            widths[widths <= 0] = 1.0
+            self.hist_.append((edges, counts / (n * widths)))
+        return self
+
+    def score_samples(self, X):
+        X_arr = _to_dense_array(X)
+        total = np.zeros(X_arr.shape[0])
+        for j, (edges, density) in enumerate(self.hist_):
+            idx = np.clip(np.searchsorted(edges, X_arr[:, j], side='right') - 1, 0, len(density) - 1)
+            total += np.log(np.maximum(density[idx], 1e-12))
+        return total
+
+    def predict(self, X):
+        return np.exp(np.clip(self.score_samples(X), -700, 700))
+
+
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
                  use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1,
                  data_type='tabular', semi_supervised=False):
+        # Keep the original task for tracking/UI, and map composite tasks to
+        # their base family: forecast_classification -> classification with
+        # temporal validation, ts_clustering -> clustering over windows.
+        self.original_task_type = task_type
+        if task_type == 'forecast_classification':
+            task_type = 'classification'
+        elif task_type == 'ts_clustering':
+            task_type = 'clustering'
         self.task_type = task_type
         self.preset = preset
         self.ensemble_config = ensemble_config or {}
@@ -241,7 +563,7 @@ class AutoMLTrainer:
         self.ensemble_mode = ensemble_mode
         self.n_jobs = n_jobs
         self.data_type = data_type
-        self.is_time_series = (data_type == 'sequential')
+        self.is_time_series = (data_type == 'sequential') or (self.original_task_type in ('forecast', 'forecast_classification'))
         self.semi_supervised = semi_supervised
         self.best_model = None
         self.best_params = None
@@ -928,6 +1250,46 @@ class AutoMLTrainer:
                 'one_class_svm': lambda t: OneClassSVM(
                     nu=t.suggest_float('oc_nu', 0.01, 0.2),
                     kernel=t.suggest_categorical('oc_kernel', ['rbf', 'poly', 'sigmoid'])
+                ),
+                'zscore_detector': lambda t: StatisticalZScoreDetector(
+                    threshold=t.suggest_float('zs_threshold', 2.0, 5.0)
+                ),
+                'modified_zscore': lambda t: ModifiedZScoreDetector(
+                    threshold=t.suggest_float('mzs_threshold', 2.5, 6.0)
+                ),
+                'mahalanobis': lambda t: MahalanobisDetector(
+                    robust=t.suggest_categorical('maha_robust', [True, False]),
+                    contamination=t.suggest_float('maha_contamination', 0.01, 0.2)
+                ),
+                'hbos': lambda t: HBOSDetector(
+                    n_bins=t.suggest_int('hbos_bins', 10, 50),
+                    contamination=t.suggest_float('hbos_contamination', 0.01, 0.2)
+                ),
+                'knn_outlier': lambda t: KNNOutlierDetector(
+                    n_neighbors=t.suggest_int('knno_neighbors', 5, 50),
+                    contamination=t.suggest_float('knno_contamination', 0.01, 0.2)
+                ),
+                'pca_residual': lambda t: PCAResidualDetector(
+                    n_components=t.suggest_int('pcar_components', 2, max(2, min(10, ((self._n_features if hasattr(self, '_n_features') else 10) or 10) - 1))),
+                    contamination=t.suggest_float('pcar_contamination', 0.01, 0.2)
+                ),
+                'rolling_residual': lambda t: RollingResidualDetector(
+                    window=t.suggest_int('roll_window', 5, 30),
+                    threshold=t.suggest_float('roll_threshold', 2.0, 5.0)
+                )
+            }
+        elif self.task_type == 'density_estimation':
+            models_config = {
+                'kernel_density': lambda t: DensityKDEWrapper(
+                    bandwidth=t.suggest_float('kde_bandwidth', 0.05, 5.0, log=True),
+                    kernel=t.suggest_categorical('kde_kernel', ['gaussian', 'tophat', 'exponential'])
+                ),
+                'gaussian_mixture_density': lambda t: DensityGMMWrapper(
+                    n_components=t.suggest_int('gm_d_components', 2, 12),
+                    covariance_type=t.suggest_categorical('gm_d_cov', ['full', 'diag', 'tied'])
+                ),
+                'histogram_density': lambda t: DensityHistogram(
+                    n_bins=t.suggest_int('hist_bins', 10, 60)
                 )
             }
         elif self.task_type == 'dimensionality_reduction':
@@ -1099,6 +1461,39 @@ class AutoMLTrainer:
         all_models = self._get_models()
         return self._filter_models(all_models)
 
+    def _densify_for_density(self, X):
+        """Converts input to a dense float matrix for density estimators,
+        subsampling rows when the dense footprint would be excessive."""
+        if X is None:
+            return None
+        if hasattr(X, 'toarray'):
+            n_elements = X.shape[0] * X.shape[1]
+            if n_elements > 25_000_000 and X.shape[0] > 20000:
+                idx = np.random.choice(X.shape[0], 20000, replace=False)
+                X = X[idx]
+            X = X.toarray()
+        elif isinstance(X, pd.DataFrame):
+            X = X.values
+        return np.asarray(X, dtype=float)
+
+    def _wrap_with_scaler(self, model, scaler_type):
+        """Wraps a model in a Pipeline that applies a model-specific scaler.
+
+        Used by the per-model scaling overrides so each algorithm can receive
+        data rescaled independently of the global preprocessing pipeline.
+        """
+        from src.core.processor import build_scaler
+        sparse_input = hasattr(getattr(self, '_train_X_ref', None), 'toarray')
+        try:
+            scaler = build_scaler(scaler_type, sparse_input=sparse_input)
+        except Exception as e:
+            logger.warning(f"Could not build scaler '{scaler_type}': {e}")
+            return model
+        if scaler is None:
+            return model
+        logger.info(f"Applying per-model scaler '{scaler_type}' to model.")
+        return Pipeline(steps=[('model_scaler', scaler), ('model', model)])
+
     def train(self, X_train, y_train=None, X_test=None, y_test=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         self.random_state = random_state
         
@@ -1111,6 +1506,10 @@ class AutoMLTrainer:
             optimization_metric = 'c_index'
         elif self.task_type == 'uplift_modeling' and optimization_metric not in ['qini_score']:
             optimization_metric = 'qini_score'
+        elif self.task_type == 'density_estimation' and optimization_metric not in ['log_likelihood']:
+            optimization_metric = 'log_likelihood'
+        elif self.task_type == 'anomaly_detection' and optimization_metric not in ['decision_score', 'f1']:
+            optimization_metric = 'decision_score'
 
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
@@ -1129,7 +1528,24 @@ class AutoMLTrainer:
         self.custom_models = custom_models if custom_models else {}
         self.feature_names = feature_names
         self.class_names = class_names
+        # Per-model scaling overrides (model_name -> scaler identifier)
+        self.scaler_overrides = kwargs.get('scaler_overrides') or {}
+        # Keep a reference to the raw training matrix to detect sparsity when wrapping models
+        self._train_X_ref = X_train
         self._n_features = X_train.shape[1] if hasattr(X_train, 'shape') else (len(X_train[0]) if X_train is not None and len(X_train) > 0 else 2)
+
+        # Density estimators need dense numeric input. For high-dimensional data
+        # (e.g. TF-IDF vectors from NLP) we project into a compact latent space
+        # first so KDE/GMM remain tractable and meaningful.
+        self._density_svd = None
+        if self.task_type == 'density_estimation':
+            X_train = self._densify_for_density(X_train)
+            if X_train.shape[1] > 50:
+                n_comp = max(2, min(16, X_train.shape[1] - 1, X_train.shape[0] - 1))
+                self._density_svd = TruncatedSVD(n_components=n_comp, random_state=42)
+                X_train = self._density_svd.fit_transform(X_train)
+                logger.info(f"Density Estimation: reduced features to {n_comp} latent dimensions (TruncatedSVD).")
+
         available_task_models = self._get_models()
         
         # If selected_models is not provided, use the preset list
@@ -1272,12 +1688,17 @@ class AutoMLTrainer:
             if model is None:
                 return -1.0
             
+            # Per-model scaling override: rescale features specifically for this model
+            scaler_override = self.scaler_overrides.get(model_name)
+            if scaler_override and scaler_override not in ('inherit', 'none') and not _is_transformer_model(model):
+                model = self._wrap_with_scaler(model, scaler_override)
+
             # Determine which input data to use (Vectorized or Raw)
             effective_X = X_train
-            if X_raw is not None and isinstance(model, TransformersWrapper):
+            if X_raw is not None and _is_transformer_model(model):
                 effective_X = X_raw
                 logger.info(f"Model {model_name} uses Transformers: Using RAW TEXT input.")
-            elif isinstance(model, TransformersWrapper):
+            elif _is_transformer_model(model):
                 logger.warning(f"Model {model_name} is a Transformer but X_raw was not provided. Expect failure if input is vectorized.")
 
             # Validation Logic and Data Split
@@ -1285,11 +1706,11 @@ class AutoMLTrainer:
             
             # Only for methods using explicit holdout (auto_split or manual holdout)
             use_explicit_validation = validation_strategy in ['auto_split', 'holdout']
-            if self.task_type in ['ranking', 'multi_label', 'association_rules']:
+            if self.task_type in ['ranking', 'multi_label', 'association_rules', 'density_estimation']:
                 # These task types currently use explicit validation for robust and simple scoring.
                 use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules', 'density_estimation']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -1345,7 +1766,7 @@ class AutoMLTrainer:
             logger.info(f"Training {full_trial_name}...")
             trial_metrics = {}
             trial_params = trial.params.copy()
-            trial_params['task_type'] = self.task_type
+            trial_params['task_type'] = getattr(self, 'original_task_type', self.task_type)
             
             try:
                 if self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task']:
@@ -1468,6 +1889,10 @@ class AutoMLTrainer:
                                     shuffle=shuffle_splits,
                                     random_state=current_seed if shuffle_splits else None,
                                 )
+                            elif validation_strategy == 'time_series_cv':
+                                # Temporal classification (TS Classification / Forecast Classification):
+                                # folds must respect chronological order.
+                                cv = TimeSeriesSplit(n_splits=n_splits, gap=gap, max_train_size=max_train_size)
                             else:
                                 cv = KFold(
                                     n_splits=n_splits,
@@ -1566,8 +1991,35 @@ class AutoMLTrainer:
                     if hasattr(model, 'decision_function'):
                         score = model.decision_function(X_val).mean() if X_val is not None and len(X_val) > 0 else model.decision_function(X_tr).mean()
                     else:
-                        score = 0
-                    trial_metrics['decision_score'] = score
+                        score = 0.0
+                    trial_metrics['decision_score'] = float(score)
+
+                    # Semi-supervised scoring when ground-truth labels are available (1 = anomaly)
+                    y_anom, X_anom = None, None
+                    if y_val is not None and len(np.unique(np.asarray(y_val))) > 1:
+                        y_anom, X_anom = y_val, X_val
+                    elif y_tr is not None and len(np.unique(np.asarray(y_tr))) > 1:
+                        y_anom, X_anom = y_tr, X_tr
+                    if y_anom is not None and X_anom is not None:
+                        try:
+                            y_true_anom = (np.asarray(y_anom).ravel() == 1)
+                            y_pred_anom = (np.asarray(model.predict(X_anom)).ravel() == -1)
+                            trial_metrics['f1'] = f1_score(y_true_anom, y_pred_anom, zero_division=0)
+                            trial_metrics['precision'] = precision_score(y_true_anom, y_pred_anom, zero_division=0)
+                            trial_metrics['recall'] = recall_score(y_true_anom, y_pred_anom, zero_division=0)
+                        except Exception as anom_eval_err:
+                            logger.warning(f"Anomaly label-based scoring failed: {anom_eval_err}")
+                    if optimization_metric == 'f1' and 'f1' in trial_metrics:
+                        score = trial_metrics['f1']
+
+                elif self.task_type == 'density_estimation':
+                    model.fit(X_tr)
+                    X_eval_d = X_val if X_val is not None and len(X_val) > 0 else X_tr
+                    log_likelihoods = model.score_samples(X_eval_d)
+                    trial_metrics['log_likelihood'] = float(np.mean(log_likelihoods))
+                    trial_metrics['density_std'] = float(np.std(log_likelihoods))
+                    score = trial_metrics['log_likelihood']
+
                 elif self.task_type == 'survival_analysis':
                     # y_tr: col 0 = duration, col 1 = event_observed
                     if isinstance(y_tr, pd.DataFrame) and y_tr.shape[1] >= 2:
@@ -1696,7 +2148,8 @@ class AutoMLTrainer:
             
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
-            if self.task_type in ['classification', 'clustering', 'anomaly_detection', 'dimensionality_reduction']:
+            # Anomaly decision scores and density log-likelihoods can legitimately be negative.
+            if self.task_type in ['classification', 'clustering', 'dimensionality_reduction']:
                 score = max(0.0, score)
             
             # Enrich trial metrics with parameters for easy access in callbacks
@@ -1897,7 +2350,7 @@ class AutoMLTrainer:
                 
                 # Handle Data Input (Raw vs Vectorized)
                 effective_X_plot = X_train
-                if X_raw is not None and isinstance(best_model_instance, TransformersWrapper):
+                if X_raw is not None and _is_transformer_model(best_model_instance):
                     effective_X_plot = X_raw
                 
                 # Generate predictions using cross_val_predict or holdout split
@@ -2386,10 +2839,15 @@ class AutoMLTrainer:
         logger.info(f"Best global model found: {best_model_name}")
         logger.info(f"Best parameters: {self.best_params}")
         
-        if self.task_type == 'forecast':
+        if self.original_task_type in ('forecast', 'forecast_classification'):
             self.best_params.update(self.ts_metadata)
         
         self.best_model = self._instantiate_model(best_model_name, self.best_params)
+
+        # Apply per-model scaling override to the final champion model as well
+        final_scaler_override = self.scaler_overrides.get(best_model_name)
+        if final_scaler_override and final_scaler_override not in ('inherit', 'none') and not _is_transformer_model(self.best_model):
+            self.best_model = self._wrap_with_scaler(self.best_model, final_scaler_override)
         
         # Reactivate probability for the final model if it is SVM
         if best_model_name == 'svm' and hasattr(self.best_model, 'probability'):
@@ -2408,7 +2866,7 @@ class AutoMLTrainer:
 
         # Check for Transformers input
         final_X = X_train
-        if isinstance(self.best_model, TransformersWrapper):
+        if _is_transformer_model(self.best_model):
             if X_raw is not None:
                 final_X = X_raw
                 logger.info(f"Final Fit: Model {best_model_name} is a Transformer. Using RAW TEXT input.")
@@ -2513,9 +2971,14 @@ class AutoMLTrainer:
 
         # 2. Transformers
         if TRANSFORMERS_AVAILABLE and (name.startswith('bert') or name.startswith('roberta') or name.startswith('distilbert') or name.startswith('albert') or name.startswith('xlnet') or '/' in name):
+             # NLP regression models are exposed with a '-reg' suffix; strip it to
+             # recover the real Hugging Face checkpoint name.
+             is_reg_variant = name.endswith('-reg')
+             hf_model_name = name[:-len('-reg')] if is_reg_variant else name
+             wrapper_task = 'regression' if (is_reg_variant or self.task_type == 'regression') else self.task_type
              epochs = params.get('num_train_epochs', 3)
              lr = params.get('learning_rate', 2e-5)
-             return TransformersWrapper(model_name=name, task=self.task_type, epochs=epochs, learning_rate=lr)
+             return TransformersWrapper(model_name=hf_model_name, task=wrapper_task, epochs=epochs, learning_rate=lr)
 
         if self.task_type == 'classification':
             if name == 'custom_voting':
@@ -2781,6 +3244,15 @@ class AutoMLTrainer:
                 if not cb_params:
                     cb_params = {k.replace('cb_', ''): v for k, v in params.items() if k.startswith('cb_')}
                 return cb.CatBoostRegressor(verbose=0, thread_count=-1, **cb_params)
+            if name in ('lstm', 'tcn'):
+                return PyTorchTimeSeriesRegressor(
+                    model_type=name,
+                    hidden_size=params.get(f'{name}_hidden', 32),
+                    num_layers=params.get(f'{name}_layers', 1),
+                    epochs=params.get(f'{name}_epochs', 20),
+                    lr=params.get(f'{name}_lr', 1e-3),
+                    random_state=42
+                )
         elif self.task_type == 'anomaly_detection':
             if name == 'isolation_forest':
                 if_params = {k.replace('if_', ''): v for k, v in params.items() if k.startswith('if_')}
@@ -2795,8 +3267,64 @@ class AutoMLTrainer:
             if name == 'one_class_svm':
                 oc_params = {k.replace('oc_', ''): v for k, v in params.items() if k.startswith('oc_')}
                 return OneClassSVM(**oc_params)
+            if name == 'zscore_detector':
+                return StatisticalZScoreDetector(threshold=params.get('zs_threshold', 3.0))
+            if name == 'modified_zscore':
+                return ModifiedZScoreDetector(threshold=params.get('mzs_threshold', 3.5))
+            if name == 'mahalanobis':
+                return MahalanobisDetector(
+                    robust=params.get('maha_robust', False),
+                    contamination=params.get('maha_contamination', 0.1)
+                )
+            if name == 'hbos':
+                return HBOSDetector(
+                    n_bins=params.get('hbos_bins', 20),
+                    contamination=params.get('hbos_contamination', 0.1)
+                )
+            if name == 'knn_outlier':
+                return KNNOutlierDetector(
+                    n_neighbors=params.get('knno_neighbors', 20),
+                    contamination=params.get('knno_contamination', 0.1)
+                )
+            if name == 'pca_residual':
+                return PCAResidualDetector(
+                    n_components=params.get('pcar_components', 2),
+                    contamination=params.get('pcar_contamination', 0.1)
+                )
+            if name == 'rolling_residual':
+                return RollingResidualDetector(
+                    window=params.get('roll_window', 12),
+                    threshold=params.get('roll_threshold', 3.0)
+                )
+        elif self.task_type == 'density_estimation':
+            if name == 'kernel_density':
+                return DensityKDEWrapper(
+                    bandwidth=params.get('kde_bandwidth', 1.0),
+                    kernel=params.get('kde_kernel', 'gaussian')
+                )
+            if name == 'gaussian_mixture_density':
+                return DensityGMMWrapper(
+                    n_components=params.get('gm_d_components', 5),
+                    covariance_type=params.get('gm_d_cov', 'full')
+                )
+            if name == 'histogram_density':
+                return DensityHistogram(n_bins=params.get('hist_bins', 30))
 
     def evaluate(self, X_test, y_test=None):
+        # Density Estimation: evaluate log-likelihood of the held-out data
+        if self.task_type == 'density_estimation':
+            X_d = self._densify_for_density(X_test)
+            if getattr(self, '_density_svd', None) is not None:
+                X_d = self._density_svd.transform(X_d)
+            scores = self.best_model.score_samples(X_d)
+            metrics = {
+                'mean_log_likelihood': float(np.mean(scores)),
+                'std_log_likelihood': float(np.std(scores)),
+                'min_log_likelihood': float(np.min(scores)),
+                'max_log_likelihood': float(np.max(scores)),
+            }
+            return metrics, np.exp(np.clip(scores, -700, 700))
+
         if y_test is not None:
             if self.task_type == 'association_rules':
                 self.best_model.fit(X_test)
@@ -2868,13 +3396,20 @@ class AutoMLTrainer:
                     metrics['msle'] = 0.0
             
             elif self.task_type == 'anomaly_detection':
-                # For anomaly detection, -1 is anomaly, 1 is normal
-                # If y_test is provided, we assume it has labels (0 for normal, 1 for anomaly)
-                # and map predictions accordingly
-                y_pred_mapped = np.where(y_pred == -1, 1, 0)
-                metrics['accuracy'] = accuracy_score(y_test, y_pred_mapped)
-                metrics['f1'] = f1_score(y_test, y_pred_mapped)
-                metrics['n_anomalies'] = int(np.sum(y_pred == -1))
+                # Predictions: -1 = anomaly, 1 = normal.
+                # Labels: accept both {0 normal, 1 anomaly} and {-1 anomaly, 1 normal} conventions.
+                y_pred_mapped = np.where(np.asarray(y_pred).ravel() == -1, 1, 0)
+                y_true_arr = np.asarray(y_test).ravel()
+                unique_labels = set(np.unique(y_true_arr).tolist())
+                if unique_labels.issubset({-1, 1}):
+                    y_true_mapped = np.where(y_true_arr == -1, 1, 0)
+                else:
+                    y_true_mapped = y_true_arr.astype(int)
+                metrics['accuracy'] = accuracy_score(y_true_mapped, y_pred_mapped)
+                metrics['f1'] = f1_score(y_true_mapped, y_pred_mapped, zero_division=0)
+                metrics['precision'] = precision_score(y_true_mapped, y_pred_mapped, zero_division=0)
+                metrics['recall'] = recall_score(y_true_mapped, y_pred_mapped, zero_division=0)
+                metrics['n_anomalies'] = int(np.sum(y_pred_mapped == 1))
             return metrics, y_pred
         else:
             # Clustering or Anomaly Detection without y_test
@@ -3087,6 +3622,43 @@ class AutoMLTrainer:
                 'oc_nu': ('float', 0.01, 0.2, 0.1),
                 'oc_kernel': ('list', ['rbf', 'poly', 'sigmoid'], 'rbf')
             },
+            'zscore_detector': {
+                'zs_threshold': ('float', 2.0, 5.0, 3.0)
+            },
+            'modified_zscore': {
+                'mzs_threshold': ('float', 2.5, 6.0, 3.5)
+            },
+            'mahalanobis': {
+                'maha_robust': ('list', [True, False], False),
+                'maha_contamination': ('float', 0.01, 0.2, 0.1)
+            },
+            'hbos': {
+                'hbos_bins': ('int', 10, 50, 20),
+                'hbos_contamination': ('float', 0.01, 0.2, 0.1)
+            },
+            'knn_outlier': {
+                'knno_neighbors': ('int', 5, 50, 20),
+                'knno_contamination': ('float', 0.01, 0.2, 0.1)
+            },
+            'pca_residual': {
+                'pcar_components': ('int', 2, 10, 2),
+                'pcar_contamination': ('float', 0.01, 0.2, 0.1)
+            },
+            'rolling_residual': {
+                'roll_window': ('int', 5, 30, 12),
+                'roll_threshold': ('float', 2.0, 5.0, 3.0)
+            },
+            'kernel_density': {
+                'kde_bandwidth': ('float', 0.05, 5.0, 1.0),
+                'kde_kernel': ('list', ['gaussian', 'tophat', 'exponential', 'epanechnikov', 'linear'], 'gaussian')
+            },
+            'gaussian_mixture_density': {
+                'gm_d_components': ('int', 2, 12, 5),
+                'gm_d_cov': ('list', ['full', 'diag', 'tied', 'spherical'], 'full')
+            },
+            'histogram_density': {
+                'hist_bins': ('int', 10, 60, 30)
+            },
             'kmeans': {
                 'km_n_clusters': ('int', 2, 20, 8)
             },
@@ -3231,7 +3803,19 @@ def get_technical_explanation(model_name, params, task_type):
             'isolation_forest': "Isolation Forest isolates anomalies by randomly selecting a feature and a split value.",
             'local_outlier_factor': "LOF compares the local density of a point with that of its neighbors to identify outliers.",
             'elliptic_envelope': "Assumes that normal data comes from a Gaussian distribution and detects what is outside the ellipsoid.",
-            'one_class_svm': "Learns a boundary that encloses the majority of normal data, classifying what is outside as an anomaly."
+            'one_class_svm': "Learns a boundary that encloses the majority of normal data, classifying what is outside as an anomaly.",
+            'zscore_detector': "Classic statistical detector: flags any point whose feature value lies beyond N standard deviations from the mean.",
+            'modified_zscore': "Robust variant of the Z-Score based on Median/MAD, resistant to contamination of the training set by outliers.",
+            'mahalanobis': "Measures the Mahalanobis distance to the (optionally robust MCD) data distribution, accounting for feature correlation.",
+            'hbos': "Histogram-Based Outlier Score: fast univariate density estimation through histograms combined across features.",
+            'knn_outlier': "Distance-based detector: points with a large average distance to their k nearest neighbors are considered anomalies.",
+            'pca_residual': "Flags points with high reconstruction error after projection onto the principal component subspace.",
+            'rolling_residual': "Time-series oriented detector: measures deviation from a rolling-median baseline normalized by the residual MAD."
+        },
+        'density_estimation': {
+            'kernel_density': "Kernel Density Estimation places a smooth kernel over every training point and sums them to model the full probability density.",
+            'gaussian_mixture_density': "Models the density as a weighted sum of Gaussian components, capturing multimodal and correlated structures.",
+            'histogram_density': "Non-parametric density built from independent per-feature histograms; fast and fully interpretable."
         },
         'ranking': {
             'ranking_linear_regression': "Linear baseline for ranking signals; useful for fast, interpretable ordering.",

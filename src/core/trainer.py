@@ -145,7 +145,9 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
                     batch_labels = y[start:start + batch_size]
                     if hasattr(batch_labels, 'tolist'):
                         batch_labels = batch_labels.tolist()
-                    labels_batch = torch.tensor(batch_labels, dtype=torch.long).to(self.device)
+                    # Regression heads expect float targets; classification expects long indices
+                    label_dtype = torch.float if self.task == 'regression' else torch.long
+                    labels_batch = torch.tensor(batch_labels, dtype=label_dtype).to(self.device)
 
                 optimizer.zero_grad()
                 outputs = self.model(

@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-5.7.1-blue)](https://github.com/PedroM2626/AutoMLOps-Studio)
+[![Version](https://img.shields.io/badge/Version-5.8.0-blue)](https://github.com/PedroM2626/AutoMLOps-Studio)
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit%20Cloud-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://automlops-studio.streamlit.app/)
@@ -53,7 +53,8 @@ The entire interface is a single Streamlit application (`app.py`) organized into
 **Overview**, **Data**, **AutoML**, **Reinforcement Learning**, **Experiments**, **Registry & Deploy**, **Monitoring**, and **What-If Simulator**.
 
 ### 2. 🤖 Multi-Domain Machine Learning
-- **Tabular Data**: An Optuna-driven AutoML engine covering Classification, Regression, Forecasting (including LSTM/TCN deep models), Survival Analysis, Uplift Modeling, Clustering, Anomaly Detection, Ranking, Multi-Label & Multi-Task, Association Rules, and Dimensionality Reduction — with presets, early stopping, and time budgets.
+- **Tabular Data**: An Optuna-driven AutoML engine covering Classification, Regression (including NLP regression via fine-tuned Transformers), Forecasting (including LSTM/TCN deep models), **Forecast Classification**, Survival Analysis, Uplift Modeling, Clustering, **Time-Series Clustering**, Anomaly Detection (**11 detectors**), **Density Estimation**, Ranking, Multi-Label & Multi-Task, Association Rules, and Dimensionality Reduction — with presets, early stopping, and time budgets.
+- **Customizable Preprocessing**: Choose the numeric scaler (Automatic/Standard, None, MinMax, Robust, MaxAbs, Quantile, Power/Yeo-Johnson), the imputation strategy (median, mean, most frequent, constant), the categorical encoding mode (automatic, One-Hot only, Ordinal only) with a configurable cardinality threshold, and optional Winsorization (quantile clipping) of outliers. Scaling can also be **overridden per model** in the Model Selection step. For text columns, the **NLP Text Preprocessing** panel lets you choose the vectorizer — **TF-IDF, Bag-of-Words (counts), Binary Bag-of-Words, Feature Hashing, Contextual Embeddings (Sentence-Transformers) or raw-text passthrough** — plus cleaning mode (standard / god mode / none), n-gram range, vocabulary size, stop-word removal with language selection, and sublinear TF scaling.
 - **Computer Vision**: Train models for Image Classification, Image Multi-Label, Semantic Segmentation (DeepLabV3), Object Detection (Faster R-CNN), and Pose Estimation (Keypoint R-CNN), with selectable backbones (ResNet, MobileNetV2, EfficientNet, DenseNet, VGG). `image_anomaly_detection` is also accepted by the CV trainer but is routed through the classification branch.
 - **Reinforcement Learning**: A complete module for training agents with **PPO, DQN, A2C, SAC, and TD3** (stable-baselines3) on 9 Gymnasium environments (CartPole, LunarLander, BipedalWalker, …), plus **offline RL via d3rlpy**, custom Gymnasium environment upload, training wrappers, Optuna hyperparameter tuning, and live reward visualization.
 
@@ -80,22 +81,31 @@ The entire interface is a single Streamlit application (`app.py`) organized into
 1. **Genuine Task Types (Output Structure)**: Strictly defined by the mathematical format of the generated target data (e.g., discrete class label, continuous scalar value, time-to-event pair \((T, E)\), counterfactual vector).
 2. **Business Objectives / Applications (Cross-Paradigm)**: Operational business needs that can be addressed through multiple statistical paradigms and different underlying models.
 
-> **Practical Example - Anomaly Detection (`anomaly_detection`)**: It is a **Business Objective**, not a rigid *Task Type*. The platform supports solving it via 4 unsupervised mathematical avenues (plus supervised classification when labels exist):
+> **Practical Example - Anomaly Detection (`anomaly_detection`)**: It is a **Business Objective**, not a rigid *Task Type*. The platform supports solving it through multiple mathematical avenues across tabular, time-series, and NLP data (11 built-in detectors, plus supervised classification when labels exist):
 > - **Spatial Isolation:** `IsolationForest` (random feature splits).
 > - **Local Density:** `LocalOutlierFactor` (\(k\)-NN density comparison).
 > - **Gaussian Statistical Envelope:** `EllipticEnvelope` (Mahalanobis Distance).
 > - **Support Boundary:** `OneClassSVM` (Support hyperplane in Hilbert space).
-> - **Supervised Classification:** Via `classification` when historical anomaly labels exist (\(y \in \{0, 1\}\)).
+> - **Statistical Tests:** `zscore_detector` (classic Z-Score) and `modified_zscore` (robust Median/MAD).
+> - **Correlation-Aware Distance:** `mahalanobis` (empirical or robust MCD covariance).
+> - **Histogram Density:** `hbos` (Histogram-Based Outlier Score).
+> - **Distance-Based:** `knn_outlier` (average distance to \(k\) nearest neighbors).
+> - **Subspace Reconstruction:** `pca_residual` (PCA reconstruction error).
+> - **Temporal Residuals:** `rolling_residual` (rolling-median baseline + MAD) for time series.
+> - **Supervised Classification:** Via `classification` when historical anomaly labels exist (\(y \in \{0, 1\}\)); when labels are provided to the detectors, semi-supervised F1 scoring is used during optimization.
 
 | Modality | Type / Objective | Classification | Brief Description | Main Metrics |
 |---|---|---|---|---|
-| **Tabular** | `classification` | **Task Type** | Predict a discrete class label (Binary or Multiclass). | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
-| **Tabular** | `regression` | **Task Type** | Predict a continuous numeric target (Gaussian, Poisson, Gamma GLMs). | `r2`, `rmse`, `mae`, `poisson_deviance`, `gamma_deviance` |
+| **Tabular** | `classification` | **Task Type** | Predict a discrete class label (Binary or Multiclass). Also covers **Time-Series Classification** when Sequential data is enabled (chronological splits + TimeSeriesSplit validation). | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
+| **Tabular** | `regression` | **Task Type** | Predict a continuous numeric target (Gaussian, Poisson, Gamma GLMs). Supports **NLP regression** via fine-tuned Transformers (BERT/DistilBERT regression heads) on text columns. | `r2`, `rmse`, `mae`, `poisson_deviance`, `gamma_deviance` |
 | **Tabular** | `survival_analysis` | **Task Type** | Predict time-to-event with right-censoring \((T, E)\). | `c_index` (Concordance Index) |
 | **Tabular** | `uplift_modeling` | **Task Type** | Estimate Individual Treatment Effect (ITE / Causal Inference) via S/T-Learners. | `qini_score` / AUUC |
-| **Tabular** | `forecast` | **Objective** | Predict future values from historical temporal data (Lags, Rolling, PyTorch LSTM/TCN). | `r2`, `rmse`, `mae` |
-| **Tabular** | `anomaly_detection` | **Objective** | Detect outliers or rare abnormal patterns (IsolationForest, LOF, EllipticEnvelope, OneClassSVM). | `f1`, `decision_score` |
+| **Tabular** | `forecast` | **Objective** | Predict future values from historical temporal data (Lags, Rolling, PyTorch LSTM/TCN). | `r2`, `rmse`, `mae`, `mape` |
+| **Tabular** | `forecast_classification` | **Task Type** | Predict the future **class/state** of a sequence (e.g. up/down, regime change) using lag features derived from the categorical target and chronological validation. | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
+| **Tabular** | `anomaly_detection` | **Objective** | Detect outliers or rare abnormal patterns with 11 detectors: IsolationForest, LOF, EllipticEnvelope, OneClassSVM, Z-Score, Modified Z-Score (MAD), Mahalanobis, HBOS, KNN distance, PCA residual, and Rolling Residual (time series). | `decision_score`, `f1` |
 | **Tabular** | `clustering` | **Task Type** | Group samples by similarity without labels. | `silhouette` |
+| **Tabular** | `ts_clustering` | **Task Type** | **Time-Series Clustering**: segments a series into sliding windows (configurable size/step), extracts summary features (mean, std, min, max, median, skew, trend) and clusters temporal regimes with the standard clustering algorithms. | `silhouette` |
+| **Tabular** | `density_estimation` | **Task Type** | Model the probability density of the data via Kernel Density Estimation, Gaussian Mixture models, or Histograms. Works on tabular, time-series, and vectorized text (latent SVD projection for high-dimensional NLP features). | `log_likelihood` |
 | **Tabular** | `ranking` | **Task Type** | Score items for ordered relevance. | `ndcg` |
 | **Tabular** | `multi_label` | **Task Type** | Predict multiple labels per row (multi-target). | `f1_micro`, `subset_accuracy` |
 | **Tabular** | `multi_task` | **Task Type** | Predict multiple disparate classification targets concurrently. | `f1_micro`, `subset_accuracy` |
@@ -123,7 +133,15 @@ Every model trained in **AutoMLOps Studio** undergoes an anatomical profile anal
 
 ## 🆕 What's New (Recent)
 
-- **Temporal & Text Characteristics**: Tabular datasets support "Contains Temporal Data" (automatic chronological validation splits plus lag/rolling-window features) and "Contains Text / NLP Data" (automatic TF-IDF vectorization of text columns).
+- **Forecast Classification (`forecast_classification`)**: Predict future classes/states of sequences (e.g. up/down movement, regime labels) — the full classification model catalog with lag features derived from the categorical target, chronological holdouts, and TimeSeriesSplit validation.
+- **Time-Series Classification**: Enabling *Sequential* data on a `classification` task now automatically applies chronological splits and temporal cross-validation.
+- **TS Clustering (`ts_clustering`)**: Window-based time-series clustering — configurable window size/step, 7 summary features per series (mean, std, min, max, median, skew, trend), clustered with K-Means, DBSCAN, GMM, and friends.
+- **Density Estimation (`density_estimation`)**: KDE, Gaussian Mixture, and Histogram density models optimized by held-out log-likelihood — for tabular data, time series, and NLP (TF-IDF features are projected to a compact latent space automatically).
+- **Extended Anomaly Detection**: 11 detectors now available (IsolationForest, LOF, EllipticEnvelope, OneClassSVM, Z-Score, Modified Z-Score/MAD, Mahalanobis (incl. robust MCD), HBOS, KNN distance, PCA residual, and Rolling Residual for time series), with semi-supervised F1 optimization when labels exist.
+- **NLP Regression**: Regression targets on text data via fine-tuned Transformer heads (BERT / DistilBERT `-reg` variants).
+- **Preprocessing Customization**: User-selectable scaling (Auto/Standard, None, MinMax, Robust, MaxAbs, Quantile, Power), imputation strategy, categorical encoding mode, one-hot cardinality threshold, and Winsorization — plus **per-model scaling overrides** in the Model Selection step.
+- **NLP Preprocessing Customization**: Selectable text vectorization — TF-IDF, Bag-of-Words (raw counts), Binary Bag-of-Words, Feature Hashing (fixed-width, for huge vocabularies), Contextual Embeddings (Sentence-Transformers), or raw-text passthrough for Transformer models — with cleaning modes (standard, god mode, none), n-gram ranges (1,1 → 2,2), vocabulary size control, multilingual stop-word removal, and sublinear TF scaling.
+- **Temporal & Text Characteristics**: Tabular datasets support "Contains Temporal Data" (automatic chronological validation splits plus lag/rolling-window features) and "Contains Text / NLP Data" (vectorization of text columns with the chosen strategy).
 - **Forecast Task Type**: A dedicated forecasting engine (including LSTM and TCN models implemented in pure PyTorch) integrated across all frameworks.
 - **Multi-Task Classification**: Predict multiple target columns concurrently; the interface automatically orchestrates separate training runs per target when needed.
 - **Semi-Supervised Learning**: Self-Training classification for targets containing unlabeled samples (`-1` or `NaN`), dynamically wrapping base classifiers in a `SelfTrainingClassifier`.

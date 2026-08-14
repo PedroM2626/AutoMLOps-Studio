@@ -4,29 +4,100 @@ import logging
 import re
 import warnings
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
+from sklearn.preprocessing import (
+    StandardScaler, MinMaxScaler, RobustScaler, MaxAbsScaler, QuantileTransformer,
+    PowerTransformer, OneHotEncoder, LabelEncoder, OrdinalEncoder
+)
 from sklearn.impute import SimpleImputer
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import FunctionTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 
 logger = logging.getLogger(__name__)
 
+# Map of user-facing scaler identifiers to sklearn scaler factories.
+# 'auto' keeps the historical default (StandardScaler).
+SCALER_REGISTRY = {
+    'auto': lambda: StandardScaler(),
+    'standard': lambda: StandardScaler(),
+    'minmax': lambda: MinMaxScaler(),
+    'robust': lambda: RobustScaler(),
+    'maxabs': lambda: MaxAbsScaler(),
+    'quantile': lambda: QuantileTransformer(output_distribution='normal', random_state=42),
+    'power': lambda: PowerTransformer(method='yeo-johnson'),
+}
+
+
+def build_scaler(scaler_type, sparse_input=False):
+    """Builds a scaler instance from a string identifier.
+
+    When the input is a sparse matrix, scalers that require densification or
+    centering (standard/quantile/power) are swapped for sparse-safe variants.
+    Returns None when scaling is disabled.
+    """
+    key = (scaler_type or 'auto').lower()
+    if key in ('none', 'off', 'disabled'):
+        return None
+    if sparse_input and key in ('standard', 'auto'):
+        return StandardScaler(with_mean=False)
+    if sparse_input and key in ('quantile', 'power'):
+        # These estimators do not support sparse input; fall back gracefully.
+        logger.warning(f"Scaler '{key}' does not support sparse matrices. Falling back to MaxAbsScaler.")
+        return MaxAbsScaler()
+    factory = SCALER_REGISTRY.get(key, SCALER_REGISTRY['auto'])
+    return factory()
+
+
+class Winsorizer(BaseEstimator, TransformerMixin):
+    """Clips numeric features to [lower_quantile, upper_quantile] bounds learned at fit time."""
+
+    def __init__(self, lower_q=0.01, upper_q=0.99):
+        self.lower_q = lower_q
+        self.upper_q = upper_q
+
+    def fit(self, X, y=None):
+        X_arr = X.toarray() if hasattr(X, 'toarray') else np.asarray(X, dtype=float)
+        self.lower_bounds_ = np.nanquantile(X_arr, self.lower_q, axis=0)
+        self.upper_bounds_ = np.nanquantile(X_arr, self.upper_q, axis=0)
+        return self
+
+    def transform(self, X):
+        if hasattr(X, 'toarray'):
+            X = X.toarray()
+        X_arr = np.asarray(X, dtype=float)
+        return np.clip(X_arr, self.lower_bounds_, self.upper_bounds_)
+
+    def get_feature_names_out(self, input_features=None):
+        # Clipping does not change the feature set — passthrough names.
+        return np.asarray(input_features)
+
+
 class AutoMLDataProcessor:
-    def __init__(self, target_column=None, task_type=None, data_type='tabular', date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='standard', semi_supervised=False, enable_dfs=False, dfs_depth=1):
+    def __init__(self, target_column=None, task_type=None, data_type='tabular', date_col=None, forecast_horizon=1, nlp_config=None, scaler_type='auto', semi_supervised=False, enable_dfs=False, dfs_depth=1, impute_strategy='median', impute_fill_value=0.0, encoding_mode='auto', onehot_cardinality_threshold=15, clip_outliers=False, outlier_lower_q=0.01, outlier_upper_q=0.99, ts_clustering_config=None):
         self.target_column = target_column
         self.task_type = task_type
         self.data_type = data_type
         self.date_col = date_col
         self.forecast_horizon = forecast_horizon
         self.nlp_config = nlp_config if nlp_config else {}
-        self.scaler_type = scaler_type
+        self.scaler_type = scaler_type or 'auto'
         self.preprocessor = None
         self.nlp_cols = []
         self.is_time_series = (data_type == 'sequential')
         self.semi_supervised = semi_supervised
         self.enable_dfs = enable_dfs
         self.dfs_depth = dfs_depth
+        # Customizable preprocessing knobs
+        self.impute_strategy = impute_strategy or 'median'
+        self.impute_fill_value = impute_fill_value
+        self.encoding_mode = (encoding_mode or 'auto').lower()
+        self.onehot_cardinality_threshold = int(onehot_cardinality_threshold or 15)
+        self.clip_outliers = bool(clip_outliers)
+        self.outlier_lower_q = float(outlier_lower_q)
+        self.outlier_upper_q = float(outlier_upper_q)
+        self.ts_clustering_config = ts_clustering_config or {}
+        self._ts_target_encoder = None
 
     def _resolve_target_columns(self, df):
         """Resolve target column(s) present in the given DataFrame."""
@@ -40,6 +111,10 @@ class AutoMLDataProcessor:
         """Applies text cleaning to a specific column in DataFrame."""
         if col in df.columns:
             cleaning_mode = self.nlp_config.get('cleaning_mode', 'standard')
+            if cleaning_mode == 'none':
+                # Raw mode: keep the text untouched for vectorizers/models
+                # that perform their own tokenization.
+                return df
             logger.info(f"Cleaning text from column: {col} (Mode: {cleaning_mode})")
             
             def clean_text_optimized(text):
@@ -84,9 +159,25 @@ class AutoMLDataProcessor:
             
         if target_vals is not None:
             target_vals_numeric = pd.to_numeric(target_vals, errors='coerce')
-            if not target_vals_numeric.isna().all():
+            if target_vals_numeric.isna().all() and not pd.isna(target_vals).all():
+                # Categorical target (e.g. Forecast Classification / TS Classification):
+                # encode labels consistently so lag features can be derived from them.
+                try:
+                    if self._ts_target_encoder is None:
+                        self._ts_target_encoder = LabelEncoder()
+                        clean_vals = target_vals.dropna().astype(str)
+                        self._ts_target_encoder.fit(clean_vals)
+                    target_vals_numeric = pd.Series(
+                        self._ts_target_encoder.transform(target_vals.astype(str)),
+                        index=target_vals.index
+                    )
+                except Exception as e:
+                    logger.warning(f"Could not encode categorical target for TS lags: {e}")
+                    target_vals_numeric = None
+            if target_vals_numeric is not None and not target_vals_numeric.isna().all():
                 target_vals = target_vals_numeric
-                if self.target_column and self.target_column in df.columns:
+                if self.target_column and self.target_column in df.columns and pd.to_numeric(df[self.target_column], errors='coerce').isna().all():
+                    # Only overwrite when the column was purely categorical
                     df[self.target_column] = target_vals
                 
                 for i in range(self.forecast_horizon, self.forecast_horizon + 5):
@@ -99,6 +190,60 @@ class AutoMLDataProcessor:
                     df = df.dropna(subset=lag_rolling_cols)
             
         return df
+
+    def _apply_ts_windows(self, df):
+        """Segments time series into sliding windows and extracts summary statistics.
+
+        Used by the TS Clustering task: each output row describes one temporal
+        window (regime) so that standard clustering algorithms can group
+        similar behaviors together.
+        """
+        cfg = self.ts_clustering_config or {}
+        window_size = max(2, int(cfg.get('window_size', 12)))
+        step = max(1, int(cfg.get('step', 1)))
+        series_col = cfg.get('series_col')
+
+        df = df.copy()
+        if series_col and series_col in df.columns:
+            series_cols = [series_col]
+        else:
+            series_cols = df.select_dtypes(include=['int64', 'float64', 'int32', 'float32']).columns.tolist()
+            if self.date_col and self.date_col in series_cols:
+                series_cols.remove(self.date_col)
+
+        if not series_cols:
+            logger.warning("TS Clustering: no numeric series column found. Returning raw frame.")
+            return df
+
+        logger.info(f"TS Clustering: windowing {series_cols} (window={window_size}, step={step})")
+        feature_frames = []
+        for col in series_cols:
+            s = pd.to_numeric(df[col], errors='coerce')
+            r = s.rolling(window=window_size, step=step, min_periods=window_size)
+            feats = pd.DataFrame(index=r.mean().index)
+            feats[f'{col}_w_mean'] = r.mean()
+            feats[f'{col}_w_std'] = r.std().fillna(0.0)
+            feats[f'{col}_w_min'] = r.min()
+            feats[f'{col}_w_max'] = r.max()
+            feats[f'{col}_w_median'] = r.median()
+            feats[f'{col}_w_skew'] = r.skew().fillna(0.0)
+            # Trend within the window: current value minus the value one window ago
+            feats[f'{col}_w_trend'] = s.loc[feats.index] - s.shift(window_size).loc[feats.index]
+            feature_frames.append(feats.dropna())
+
+        if not feature_frames:
+            return df
+
+        windowed = pd.concat(feature_frames, axis=1).dropna()
+        # Keep the date column aligned when possible for traceability
+        if self.date_col and self.date_col in df.columns:
+            try:
+                windowed[self.date_col] = df[self.date_col].loc[windowed.index].values
+            except Exception:
+                pass
+        logger.info(f"TS Clustering: generated {windowed.shape[1]} window features over {windowed.shape[0]} segments.")
+        return windowed
+
 
     def fit_transform(self, df, nlp_cols=None):
         self.nlp_cols = nlp_cols if nlp_cols else []
@@ -124,6 +269,11 @@ class AutoMLDataProcessor:
                 df = self._clean_text_feature(df, col)
                 if col in df.columns:
                      df[col] = df[col].fillna("")
+
+        # TS Clustering: convert the series into window-summary features first.
+        # The task becomes an ordinary clustering problem over temporal regimes.
+        if self.task_type == 'ts_clustering':
+            df = self._apply_ts_windows(df)
 
         if self.is_time_series:
             df = self._apply_ts_features(df)
@@ -180,30 +330,42 @@ class AutoMLDataProcessor:
         low_card_features = []
         high_card_features = []
         for col in all_categorical:
-            if X_to_process[col].nunique() <= 15:
+            if X_to_process[col].nunique() <= self.onehot_cardinality_threshold:
                 low_card_features.append(col)
             else:
                 high_card_features.append(col)
 
-        if self.scaler_type == 'minmax':
-            scaler = MinMaxScaler()
-        elif self.scaler_type == 'robust':
-            scaler = RobustScaler()
-        else:
-            scaler = StandardScaler()
+        # Encoding mode overrides the automatic cardinality-based routing
+        if self.encoding_mode == 'onehot':
+            low_card_features = all_categorical
+            high_card_features = []
+        elif self.encoding_mode == 'ordinal':
+            low_card_features = []
+            high_card_features = all_categorical
 
-        numeric_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='median')),
-            ('scaler', scaler)
-        ])
+        scaler = build_scaler(self.scaler_type)
+
+        impute_strategies_numeric = ['mean', 'median', 'constant']
+        num_impute_strategy = self.impute_strategy if self.impute_strategy in impute_strategies_numeric else 'median'
+        num_imputer_kwargs = {'fill_value': self.impute_fill_value} if num_impute_strategy == 'constant' else {}
+
+        numeric_steps = [('imputer', SimpleImputer(strategy=num_impute_strategy, **num_imputer_kwargs))]
+        if self.clip_outliers:
+            numeric_steps.append(('winsorizer', Winsorizer(lower_q=self.outlier_lower_q, upper_q=self.outlier_upper_q)))
+        if scaler is not None:
+            numeric_steps.append(('scaler', scaler))
+        numeric_transformer = Pipeline(steps=numeric_steps)
+
+        cat_impute_strategy = self.impute_strategy if self.impute_strategy in ['most_frequent', 'constant'] else 'most_frequent'
+        cat_imputer_kwargs = {'fill_value': str(self.impute_fill_value)} if cat_impute_strategy == 'constant' else {}
 
         low_card_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')),
+            ('imputer', SimpleImputer(strategy=cat_impute_strategy, **cat_imputer_kwargs)),
             ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=True))
         ])
         
         high_card_transformer = Pipeline(steps=[
-            ('imputer', SimpleImputer(strategy='most_frequent')),
+            ('imputer', SimpleImputer(strategy=cat_impute_strategy, **cat_imputer_kwargs)),
             ('ordinal', OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1))
         ])
 
@@ -216,7 +378,7 @@ class AutoMLDataProcessor:
             transformers.append(('cat_high', high_card_transformer, high_card_features))
 
         if nlp_features:
-            from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
+            from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer, HashingVectorizer
             vectorizer_type = self.nlp_config.get('vectorizer', 'tfidf')
             ngram_range = self.nlp_config.get('ngram_range', (1, 3))
             max_features = self.nlp_config.get('max_features', 5000)
@@ -253,6 +415,36 @@ class AutoMLDataProcessor:
                         vectorizer = TfidfVectorizer(max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words)
                 elif vectorizer_type == 'count':
                     vectorizer = CountVectorizer(max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words)
+                elif vectorizer_type == 'binary':
+                    # Binary Bag-of-Words: presence flags instead of raw counts
+                    vectorizer = CountVectorizer(binary=True, max_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words)
+                elif vectorizer_type == 'hashing':
+                    # Feature hashing: stateless, fixed-width, memory-friendly for huge vocabularies.
+                    # HashingVectorizer lacks get_feature_names_out in sklearn, so wrap it to keep
+                    # the ColumnTransformer feature-name chain intact.
+                    from sklearn.base import BaseEstimator, TransformerMixin
+
+                    class HashingVectorizerAdapter(BaseEstimator, TransformerMixin):
+                        def __init__(self, n_features=5000, ngram_range=(1, 3), stop_words=None):
+                            self.n_features = n_features
+                            self.ngram_range = ngram_range
+                            self.stop_words = stop_words
+                            self.vectorizer = None
+                        def fit(self, X, y=None):
+                            self.vectorizer = HashingVectorizer(
+                                n_features=self.n_features, ngram_range=self.ngram_range,
+                                stop_words=self.stop_words, alternate_sign=True
+                            )
+                            self.vectorizer.fit(X, y)
+                            return self
+                        def transform(self, X):
+                            return self.vectorizer.transform(X)
+                        def get_feature_names_out(self, input_features=None):
+                            return np.array([f"hash_{i}" for i in range(self.n_features)])
+
+                    vectorizer = HashingVectorizerAdapter(
+                        n_features=effective_max_features, ngram_range=ngram_range, stop_words=stop_words
+                    )
                 elif vectorizer_type == 'passthrough':
                      def pass_text(x):
                          if hasattr(x, 'values'): x = x.values
@@ -314,6 +506,9 @@ class AutoMLDataProcessor:
                 df = self._clean_text_feature(df, col)
                 if col in df.columns:
                      df[col] = df[col].fillna("")
+
+        if self.task_type == 'ts_clustering':
+            df = self._apply_ts_windows(df)
 
         if self.is_time_series:
             df = self._apply_ts_features(df)

@@ -87,7 +87,8 @@ class WhiteboxNotebookGenerator:
         
         # 4. Data Loading
         self._add_markdown("### 2. Data Loading")
-        shuffle = "False" if task_type == 'time_series' else "True"
+        temporal_tasks = ('time_series', 'forecast', 'forecast_classification', 'ts_clustering')
+        shuffle = "False" if (task_type in temporal_tasks or self.config.get('is_time_series')) else "True"
         
         if self.dataset_path:
             self._add_markdown("Loading the exact dataset used during the AutoML session.")
@@ -151,9 +152,9 @@ class WhiteboxNotebookGenerator:
             'mae': ('mean_absolute_error', ''),
             'mape': ('mean_absolute_percentage_error', '')
         }
-        metric_fn, metric_kwargs = metric_map.get(opt_metric, ('accuracy_score' if task_type == 'classification' else 'mean_squared_error', ''))
+        metric_fn, metric_kwargs = metric_map.get(opt_metric, ('accuracy_score' if task_type in ('classification', 'forecast_classification') else 'mean_squared_error', ''))
         
-        is_classification = task_type == 'classification'
+        is_classification = task_type in ('classification', 'forecast_classification')
         
         eval_code = ""
         if is_classification:
@@ -292,16 +293,16 @@ class WhiteboxNotebookGenerator:
         
         if "XGB" in model_name:
             import_str = "from xgboost import XGBClassifier, XGBRegressor"
-            model_class = "XGBClassifier" if self.config.get('task') == 'classification' else "XGBRegressor"
+            model_class = "XGBClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "XGBRegressor"
         elif "LGBM" in model_name:
             import_str = "from lightgbm import LGBMClassifier, LGBMRegressor"
-            model_class = "LGBMClassifier" if self.config.get('task') == 'classification' else "LGBMRegressor"
+            model_class = "LGBMClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "LGBMRegressor"
         elif "CatBoost" in model_name:
             import_str = "from catboost import CatBoostClassifier, CatBoostRegressor"
-            model_class = "CatBoostClassifier" if self.config.get('task') == 'classification' else "CatBoostRegressor"
+            model_class = "CatBoostClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "CatBoostRegressor"
         elif "RandomForest" in model_name:
             import_str = "from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor"
-            model_class = "RandomForestClassifier" if self.config.get('task') == 'classification' else "RandomForestRegressor"
+            model_class = "RandomForestClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "RandomForestRegressor"
         elif "LogisticRegression" in model_name or "Ridge" in model_name or "Lasso" in model_name:
             import_str = "from sklearn.linear_model import LogisticRegression, Ridge, Lasso"
             model_class = model_name

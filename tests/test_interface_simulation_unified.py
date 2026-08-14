@@ -20,6 +20,15 @@ class TestInterfaceSimulationUnified(unittest.TestCase):
         self.trainer_multilabel = AutoMLTrainer(task_type='multi_label')
         self.trainer_assoc = AutoMLTrainer(task_type='association_rules')
 
+    def tearDown(self):
+        # _sync_transformer_runtime() may copy patched mocks from automl_engine
+        # into src.engines.classical during tests. Restore the real runtime
+        # bindings so subsequent tests see the genuine TransformersWrapper.
+        import automl_engine as _ae
+        from src.engines import classical as _classical
+        _classical.TRANSFORMERS_AVAILABLE = _ae.TRANSFORMERS_AVAILABLE
+        _classical.TransformersWrapper = _ae.TransformersWrapper
+
     def test_supported_models_unified(self):
         """Test if get_supported_models returns the correct unified list."""
         models_cls = self.trainer_cls.get_supported_models()

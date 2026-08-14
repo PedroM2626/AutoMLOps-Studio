@@ -85,7 +85,7 @@ def predict(request: PredictionRequest):
         
         # If classifier and label encoder exists, inverse transform
         if (hasattr(model_assets["processor"], "label_encoder") and model_assets["processor"].label_encoder
-                and hasattr(model_assets["processor"], "task_type") and model_assets["processor"].task_type == "classification"):
+                and hasattr(model_assets["processor"], "task_type") and model_assets["processor"].task_type in ("classification", "forecast_classification")):
             try:
                 pred_classes = model_assets["processor"].label_encoder.inverse_transform(predictions)
                 result = pred_classes.tolist()

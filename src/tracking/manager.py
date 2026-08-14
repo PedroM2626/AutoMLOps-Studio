@@ -229,7 +229,14 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
             stability_config    = config.get('stability_config')
             data_type           = config.get('data_type', 'tabular')
             semi_supervised     = config.get('semi_supervised', False)
-            is_time_series      = (task == 'time_series')
+            is_time_series      = config.get('is_time_series', False) or task in ('forecast', 'forecast_classification', 'ts_clustering')
+            preprocessing_cfg   = config.get('preprocessing', {}) or {}
+            ts_clustering_cfg   = config.get('ts_clustering_config', {}) or {}
+            scaler_overrides    = config.get('scaler_overrides', {}) or {}
+
+            # Time-aware tasks implicitly operate over sequential data
+            if is_time_series and data_type == 'tabular':
+                data_type = 'sequential'
 
             log_queue.put(("log", f"[JOB] Starting preprocessing for experiment: {experiment_name}"))
 
@@ -240,7 +247,16 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 nlp_config=nlp_config,
                 semi_supervised=semi_supervised,
                 enable_dfs=config.get('enable_dfs', False),
-                dfs_depth=config.get('dfs_depth', 1)
+                dfs_depth=config.get('dfs_depth', 1),
+                scaler_type=preprocessing_cfg.get('scaler_type', 'auto'),
+                impute_strategy=preprocessing_cfg.get('impute_strategy', 'median'),
+                impute_fill_value=preprocessing_cfg.get('impute_fill_value', 0.0),
+                encoding_mode=preprocessing_cfg.get('encoding_mode', 'auto'),
+                onehot_cardinality_threshold=preprocessing_cfg.get('onehot_cardinality_threshold', 15),
+                clip_outliers=preprocessing_cfg.get('clip_outliers', False),
+                outlier_lower_q=preprocessing_cfg.get('outlier_lower_q', 0.01),
+                outlier_upper_q=preprocessing_cfg.get('outlier_upper_q', 0.99),
+                ts_clustering_config=ts_clustering_cfg
             )
             X_train_proc, y_train_proc = processor.fit_transform(train_df, nlp_cols=selected_nlp_cols)
 
@@ -338,6 +354,7 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 use_deep_learning=use_deep_learning,
                 ensemble_mode=ensemble_mode,
                 n_jobs=config.get('n_jobs', -1),
+                data_type=data_type,
                 semi_supervised=semi_supervised
             )
             clean_exp_name = "".join(c for c in experiment_name if ord(c) < 128) or "AutoML_Experiment"
@@ -364,7 +381,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 y_test=y_test_proc,
                 X_raw=train_df,
                 processor=processor,
-                strict_cv=config.get('strict_cv', False)
+                strict_cv=config.get('strict_cv', False),
+                scaler_overrides=scaler_overrides
             )
 
             best_score = getattr(trainer, 'best_score', None)
