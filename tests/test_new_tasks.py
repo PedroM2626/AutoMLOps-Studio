@@ -9,6 +9,7 @@ Smoke tests for the expanded task catalog:
 - Per-model scaling overrides
 - NLP regression wiring (TransformersWrapper task mapping)
 - NLP text vectorizer customization (TF-IDF / Bag-of-Words / binary / hashing)
+- Multi-output (multivariate) regression
 """
 import numpy as np
 import pandas as pd
@@ -408,4 +409,65 @@ def test_nlp_classification_e2e_bag_of_words():
     assert trainer.best_model is not None
     metrics, _ = trainer.evaluate(X, y)
     assert metrics["accuracy"] > 0.8
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-output (multivariate) regression
+# ─────────────────────────────────────────────────────────────────────────────
+
+def make_multi_reg_df(n=200, seed=5):
+    rng = np.random.default_rng(seed)
+    X = rng.normal(0, 1, size=(n, 4))
+    y1 = 2 * X[:, 0] + X[:, 1] + rng.normal(0, 0.1, n)
+    y2 = -X[:, 0] + 3 * X[:, 2] + rng.normal(0, 0.1, n)
+    df = pd.DataFrame(X, columns=list("abcd"))
+    df["t1"] = y1
+    df["t2"] = y2
+    return df
+
+
+def test_multi_regression_model_catalog():
+    from sklearn.multioutput import MultiOutputRegressor
+    trainer = AutoMLTrainer(task_type='multi_regression', preset='test')
+    models = trainer.get_available_models()
+    assert {'random_forest', 'ridge', 'linear_regression'}.issubset(set(models))
+    # Instantiated models must be wrapped for multi-output support
+    wrapped = trainer._instantiate_model('ridge', {'ridge_alpha': 1.0})
+    assert isinstance(wrapped, MultiOutputRegressor)
+
+
+def test_multi_regression_e2e_holdout():
+    df = make_multi_reg_df()
+    proc = AutoMLDataProcessor(target_column=['t1', 't2'], task_type='multi_regression')
+    X, y = proc.fit_transform(df)
+    assert np.asarray(y).ndim == 2 and np.asarray(y).shape[1] == 2
+
+    trainer = AutoMLTrainer(task_type='multi_regression', preset='test')
+    trainer.train(
+        X, y, selected_models=['ridge', 'random_forest'],
+        experiment_name='test_multi_reg', optimization_metric='r2', **FAST
+    )
+    assert trainer.best_model is not None
+    metrics, preds = trainer.evaluate(X[:30], y[:30])
+    assert 'r2' in metrics and 'rmse' in metrics
+    assert metrics['n_outputs'] == 2
+    assert len(metrics['per_output_r2']) == 2
+    assert np.asarray(preds).shape == (30, 2)
+    assert metrics['r2'] > 0.5
+
+
+def test_multi_regression_e2e_cv():
+    df = make_multi_reg_df(n=180)
+    proc = AutoMLDataProcessor(target_column=['t1', 't2'], task_type='multi_regression')
+    X, y = proc.fit_transform(df)
+    trainer = AutoMLTrainer(task_type='multi_regression', preset='test')
+    trainer.train(
+        X, y, selected_models=['ridge'],
+        experiment_name='test_multi_reg_cv', optimization_metric='r2',
+        n_trials=1, timeout=120, validation_strategy='cv',
+        validation_params={'folds': 3}
+    )
+    assert trainer.best_model is not None
+    metrics, _ = trainer.evaluate(X[:20], y[:20])
+    assert metrics['r2'] > 0.5
 

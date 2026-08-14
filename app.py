@@ -2113,10 +2113,11 @@ if current_main_section == "⚙️ AutoML":
                               task_tmp = cfg.get('task', 'classification')
                               unsup_targetless_tasks = ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction", "association_rules"]
                               if task_tmp not in unsup_targetless_tasks:
-                                  if task_tmp in ["multi_label", "multi_task"]:
+                                  if task_tmp in ["multi_label", "multi_task", "multi_regression"]:
                                       default_targets = [c for c in sample_df.columns[-2:] if c in sample_df.columns]
+                                      _mt_label = {'multi_label': 'Multi-Label', 'multi_task': 'Multi-Task', 'multi_regression': 'Multi-Output Regression'}[task_tmp]
                                       target_pre_w = st.multiselect(
-                                          f"🎯 Target Columns ({'Multi-Label' if task_tmp == 'multi_label' else 'Multi-Task'})",
+                                          f"🎯 Target Columns ({_mt_label})",
                                           sample_df.columns.tolist(),
                                           default=cfg.get('target', default_targets if default_targets else []),
                                           key="wizard_target_multi"
@@ -2283,6 +2284,7 @@ if current_main_section == "⚙️ AutoML":
                 ("ranking",           "🥇", "Ranking",           "Score items to optimize ordering relevance"),
                 ("multi_label",       "🏷️", "Multi-Label",       "Predict multiple target labels per row"),
                 ("multi_task",        "🔗", "Multi-Task",        "Predict multiple multi-class target columns simultaneously"),
+                ("multi_regression",  "🧮", "Multi-Output Regression", "Predict multiple continuous target columns simultaneously (multivariate regression)"),
             ]
             UNSUP_TASKS = [
                 ("clustering",               "🔵", "Clustering",               "Discover natural groups in data"),
@@ -2481,7 +2483,7 @@ if current_main_section == "⚙️ AutoML":
                 # ── Training Focus selector (shown for both modes) ────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                task_supports_ensembles = task not in ["ranking", "multi_label", "association_rules", "clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction"]
+                task_supports_ensembles = task not in ["ranking", "multi_label", "multi_regression", "association_rules", "clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction"]
                 if task_supports_ensembles:
                     FOCUS_OPTIONS = [
                         ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
@@ -2851,6 +2853,7 @@ if current_main_section == "⚙️ AutoML":
                     'forecast_classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
                     'ranking': ['ndcg', 'rmse', 'mae'],
                     'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
+                    'multi_regression': ['r2', 'rmse', 'mae', 'mape'],
                     'clustering': ['silhouette'],
                     'ts_clustering': ['silhouette'],
                     'time_series': ['rmse', 'mae', 'mape'],
@@ -3261,9 +3264,11 @@ if current_main_section == "⚙️ AutoML":
                 train_df = st.session_state['train_df']
                 if task not in ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "association_rules"]:
                     act_target = st.session_state.get('target_active')
-                    if task == "multi_label":
+                    if task in ["multi_label", "multi_task", "multi_regression"]:
                         if isinstance(act_target, list) and all(c in train_df.columns for c in act_target) and len(act_target) >= 2:
                             target = act_target
+                        elif isinstance(cfg.get('target'), list) and all(c in train_df.columns for c in cfg.get('target')) and len(cfg.get('target')) >= 2:
+                            target = cfg.get('target')
                         else:
                             target = st.multiselect(
                                 "🎯 Select Target Columns",
@@ -3290,7 +3295,7 @@ if current_main_section == "⚙️ AutoML":
                         st.rerun()
                 with col_sub:
                     if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
-                        if task in ["multi_label", "multi_task"] and (not isinstance(target, list) or len(target) < 2):
+                        if task in ["multi_label", "multi_task", "multi_regression"] and (not isinstance(target, list) or len(target) < 2):
                             st.error(f"Please select at least two target columns for {task.replace('_', ' ').title()} tasks.")
                             st.stop()
 

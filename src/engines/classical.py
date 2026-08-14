@@ -32,7 +32,7 @@ from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.naive_bayes import GaussianNB, BernoulliNB
 from sklearn.neighbors import LocalOutlierFactor, KNeighborsClassifier, KNeighborsRegressor, KernelDensity, NearestNeighbors
-from sklearn.multioutput import MultiOutputClassifier
+from sklearn.multioutput import MultiOutputClassifier, MultiOutputRegressor
 from sklearn.covariance import EllipticEnvelope, EmpiricalCovariance, MinCovDet
 from sklearn.decomposition import PCA, TruncatedSVD
 from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
@@ -1229,6 +1229,24 @@ class AutoMLTrainer:
                         model = MultiOutputClassifier(model)
                 return model
             return None
+        elif self.task_type == 'multi_regression':
+            # Multi-output (multivariate) regression: reuse the regression
+            # catalog and wrap estimators that are single-output only.
+            self.task_type = 'regression'
+            base_models = self._get_models(name=None)
+            self.task_type = 'multi_regression'
+            available = [m for m in base_models if m not in _ENSEMBLE_MODEL_KEYS]
+            if name is None:
+                return available
+            if name in available:
+                self.task_type = 'regression'
+                model = self._get_models(trial, name, random_state)
+                self.task_type = 'multi_regression'
+                if model is not None:
+                    if not isinstance(model, MultiOutputRegressor):
+                        model = MultiOutputRegressor(model)
+                return model
+            return None
         elif self.task_type == 'anomaly_detection':
             models_config = {
                 'isolation_forest': lambda t: IsolationForest(
@@ -1500,6 +1518,8 @@ class AutoMLTrainer:
         # Ensure optimization metric is compatible with task type
         if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape', 'poisson_deviance', 'gamma_deviance']:
             optimization_metric = 'r2'
+        elif self.task_type == 'multi_regression' and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
+            optimization_metric = 'r2'
         elif self.task_type in ['classification', 'multi_label', 'multi_task'] and optimization_metric not in ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']:
             optimization_metric = 'accuracy'
         elif self.task_type == 'survival_analysis' and optimization_metric not in ['c_index']:
@@ -1710,7 +1730,7 @@ class AutoMLTrainer:
                 # These task types currently use explicit validation for robust and simple scoring.
                 use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'association_rules', 'density_estimation']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'multi_regression', 'association_rules', 'density_estimation']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -1769,7 +1789,7 @@ class AutoMLTrainer:
             trial_params['task_type'] = getattr(self, 'original_task_type', self.task_type)
             
             try:
-                if self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task']:
+                if self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'multi_regression']:
                     if use_explicit_validation:
                         logger.info(f"DEBUG: fit() called. X_tr type: {type(X_tr)}, shape: {X_tr.shape if hasattr(X_tr, 'shape') else len(X_tr)}")
                         logger.info(f"DEBUG: y_tr type: {type(y_tr)}, shape: {y_tr.shape if hasattr(y_tr, 'shape') else len(y_tr)}")
@@ -1899,7 +1919,7 @@ class AutoMLTrainer:
                                     shuffle=shuffle_splits,
                                     random_state=current_seed if shuffle_splits else None,
                                 )
-                        elif self.task_type == 'regression' or self.task_type == 'forecast':
+                        elif self.task_type in ['regression', 'forecast', 'multi_regression']:
                             scoring_list = ['r2', 'neg_root_mean_squared_error', 'neg_mean_absolute_error']
                             if self.task_type == 'forecast' or validation_strategy == 'time_series_cv':
                                 cv = TimeSeriesSplit(n_splits=n_splits, gap=gap, max_train_size=max_train_size)
@@ -2946,6 +2966,15 @@ class AutoMLTrainer:
                     model = MultiOutputClassifier(model)
             return model
 
+        if self.task_type == 'multi_regression':
+            self.task_type = 'regression'
+            model = self._instantiate_model(name, params)
+            self.task_type = 'multi_regression'
+            if model is not None:
+                if not isinstance(model, MultiOutputRegressor):
+                    model = MultiOutputRegressor(model)
+            return model
+
         # Base instantiation
         model = self._base_instantiate_model(name, params)
         if model is None:
@@ -3378,13 +3407,22 @@ class AutoMLTrainer:
                 metrics['accuracy'] = float(np.mean(accuracies))
                 metrics['f1'] = float(np.mean(f1s))
                 metrics['hamming_loss'] = hamming_loss(y_t_arr, y_p_arr)
-            elif self.task_type in ['regression', 'forecast', 'ranking']:
+            elif self.task_type in ['regression', 'forecast', 'ranking', 'multi_regression']:
                 metrics['rmse'] = np.sqrt(mean_squared_error(y_test, y_pred))
                 metrics['mae'] = mean_absolute_error(y_test, y_pred)
                 metrics['median_ae'] = median_absolute_error(y_test, y_pred)
                 metrics['r2'] = r2_score(y_test, y_pred)
                 metrics['explained_variance'] = explained_variance_score(y_test, y_pred)
                 metrics['mape'] = mean_absolute_percentage_error(y_test, y_pred)
+                if self.task_type == 'multi_regression':
+                    # Per-output breakdown (averaged metrics above use uniform weighting)
+                    y_t_arr = np.asarray(y_test)
+                    y_p_arr = np.asarray(y_pred)
+                    if y_t_arr.ndim == 2 and y_p_arr.ndim == 2:
+                        metrics['n_outputs'] = int(y_t_arr.shape[1])
+                        metrics['per_output_r2'] = [
+                            float(r2_score(y_t_arr[:, c], y_p_arr[:, c])) for c in range(y_t_arr.shape[1])
+                        ]
                 if self.task_type == 'ranking':
                     try:
                         metrics['ndcg'] = float(ndcg_score([np.asarray(y_test).ravel()], [np.asarray(y_pred).ravel()]))

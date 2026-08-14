@@ -441,7 +441,9 @@ Task types: `classification`, `regression`, `forecast` (including `lstm`
 and `tcn` via `PyTorchTimeSeriesRegressor`), `survival_analysis`
 (c-index metric, custom `calculate_c_index`), `uplift_modeling`
 (s-learner / t-learner, custom `calculate_qini_score`), `clustering`,
-`anomaly_detection`, `multi_label`, `multi_task`, `ranking`,
+`anomaly_detection`, `multi_label`, `multi_task`, `multi_regression`
+(multi-output/multivariate regression via `MultiOutputRegressor`),
+`ranking`,
 `association_rules` (custom pairwise `AssociationRuleMiner` with
 support/confidence/lift), and `dimensionality_reduction`.
 See [Section 6](#6-supported-tasks--models) for the consolidated model list.
@@ -585,6 +587,7 @@ engine) and the specialized engines:
 | `density_estimation` | classical | kernel_density (`KernelDensity` wrapper: bandwidth + kernel search), gaussian_mixture_density (`GaussianMixture` wrapper), histogram_density (independent per-feature histograms) | Held-out `log_likelihood` (maximized); high-dimensional NLP features are first projected with TruncatedSVD |
 | `multi_label` | classical | MultiOutputClassifier wrappers over base classifiers | — |
 | `multi_task` | classical | MultiOutputClassifier orchestration | — |
+| `multi_regression` | classical | Full regression catalog (linear/ridge/lasso/elastic-net, random_forest, xgboost, lightgbm, extra_trees, svr, knn, mlp, …) wrapped with `MultiOutputRegressor` for simultaneous prediction of several continuous targets | `r2`, `rmse`, `mae`, `mape` (uniform average across outputs; `evaluate` also reports `n_outputs` and `per_output_r2`) |
 | `ranking` | classical | ranking-aware training | — |
 | `association_rules` | classical | custom pairwise `AssociationRuleMiner` (support / confidence / lift) — **not** Apriori/FP-Growth | — |
 | `dimensionality_reduction` | classical | pca, truncated_svd, lda, nca, pls | — |
