@@ -41,6 +41,7 @@ from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import io
 from PIL import Image
 import uuid
+import re
 import datetime
 import yaml
 import json
@@ -671,7 +672,7 @@ with st.sidebar:
     st.markdown("""
     <div style='text-align:center; padding:10px 0;'>
         <h1 style='font-size:1.5rem; margin-bottom:0;'>🚀 AutoMLOps</h1>
-        <p style='color:#8b949e; font-size:0.8rem;'>Studio v5.8.0</p>
+        <p style='color:#8b949e; font-size:0.8rem;'>Studio v5.9.0</p>
     </div>
     """, unsafe_allow_html=True)
 
@@ -3693,10 +3694,16 @@ if current_main_section == "🤖 Reinforcement Learning":
                     if uploaded_file:
                         custom_env_dir = os.path.join(ROOT_DIR, "tmp")
                         os.makedirs(custom_env_dir, exist_ok=True)
-                        custom_env_path = os.path.join(custom_env_dir, uploaded_file.name)
-                        with open(custom_env_path, "wb") as f:
-                            f.write(uploaded_file.getbuffer())
-                        st.success(f"✅ File saved to: {custom_env_path}")
+                        # The browser-supplied filename is attacker-controlled: keep only a
+                        # flat .py basename so it cannot escape tmp/ via separators or "..".
+                        safe_env_name = os.path.basename(uploaded_file.name.replace("\\", "/"))
+                        if not re.fullmatch(r"[A-Za-z0-9._-]+\.py", safe_env_name) or safe_env_name.startswith("."):
+                            st.error("❌ Invalid environment file name. Use a plain name like cartpole_env.py")
+                        else:
+                            custom_env_path = os.path.join(custom_env_dir, safe_env_name)
+                            with open(custom_env_path, "wb") as f:
+                                f.write(uploaded_file.getbuffer())
+                            st.success(f"✅ File saved to: {custom_env_path}")
                 
                 available_envs = get_available_rl_environments()
                 env_id = st.selectbox(
