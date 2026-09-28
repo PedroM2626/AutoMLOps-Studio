@@ -27,6 +27,7 @@ jobs:
     outputs:
       tag: ${{ steps.pick.outputs.tag }}
       ref: ${{ steps.pick.outputs.ref }}
+      tag_exists: ${{ steps.pick.outputs.tag_exists }}
     steps:
       - name: Resolve the release target
         uses: actions/checkout@v4
@@ -52,8 +53,13 @@ jobs:
           # Release creation wants a commit or branch, never a tag name, so publish the
           # commit the tag points at. GitHub rejects target_commitish=<tag> with 422.
           SHA="$(git rev-parse HEAD)"
+          EXISTS=false
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
+            EXISTS=true
+          fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "ref=$SHA" >> "$GITHUB_OUTPUT"
+          echo "tag_exists=$EXISTS" >> "$GITHUB_OUTPUT"
 
   build-desktop:
     needs: resolve-tag
@@ -168,7 +174,16 @@ jobs:
           } > RELEASE_NOTES.md
           cat RELEASE_NOTES.md
 
-      - name: Create GitHub Release
+      - name: Publish release for the existing tag
+        if: needs.resolve-tag.outputs.tag_exists == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          body_path: RELEASE_NOTES.md
+          files: release-assets/*
+
+      - name: Publish release and create the tag
+        if: needs.resolve-tag.outputs.tag_exists != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
