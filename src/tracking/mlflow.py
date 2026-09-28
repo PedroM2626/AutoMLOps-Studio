@@ -44,11 +44,26 @@ class MLFlowTracker:
             # Log model
             safe_artifact_path = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
             mlflow.set_tag("logged_model_artifact_path", safe_artifact_path)
-            mlflow.sklearn.log_model(
-                model, 
-                safe_artifact_path, 
-                registered_model_name=model_name if register else None
-            )
+            try:
+                mlflow.sklearn.log_model(
+                    model, 
+                    safe_artifact_path, 
+                    registered_model_name=model_name if register else None
+                )
+            except Exception as log_err:
+                # MLflow 3.9+ serializes sklearn models through skops and now refuses models
+                # whose types are untrusted or not top-level. Density, anomaly and association
+                # rule estimators are exactly those, and dropping the trial used to fail the
+                # whole Optuna study, so retry once with cloudpickle instead.
+                if "skops" not in str(log_err).lower():
+                    raise
+                print(f"Warning: skops could not serialize {type(model).__name__}, retrying with cloudpickle: {log_err}")
+                mlflow.sklearn.log_model(
+                    model,
+                    safe_artifact_path,
+                    registered_model_name=model_name if register else None,
+                    serialization_format="cloudpickle",
+                )
             
             # Log artifacts (e.g., plots, dataset samples)
             if artifacts:
