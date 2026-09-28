@@ -29,14 +29,26 @@ jobs:
       ref: ${{ steps.pick.outputs.ref }}
     steps:
       - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_REF: ${{ inputs.ref }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
-            echo "ref=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          # Inputs reach this step through env only: interpolating them into the
+          # script body would let a dispatch input inject shell commands.
+          if [ "$EVENT" = "push" ]; then
+            TAG="$GITHUB_REF_NAME"
+            REF="$GITHUB_REF_NAME"
           else
-            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "ref=${{ inputs.ref || github.sha }}" >> "$GITHUB_OUTPUT"
+            TAG="$INPUT_TAG"
+            REF="${INPUT_REF:-$GITHUB_SHA}"
           fi
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "Invalid tag name: '$TAG' (must start with v followed by a digit)"; exit 1 ;;
+          esac
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
   build-desktop:
     needs: resolve-tag
@@ -103,9 +115,10 @@ jobs:
           path: release-assets
 
       - name: Build release notes
+        env:
+          TAG: ${{ needs.resolve-tag.outputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.resolve-tag.outputs.tag }}"
           SHA="$(git rev-parse HEAD)"
           PREV="$(git tag --sort=creatordate --merged "$SHA" | grep -v "^${TAG}$" | tail -n 1 || true)"
           if [ -n "$PREV" ]; then
