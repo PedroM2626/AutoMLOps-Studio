@@ -20,11 +20,23 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: 'npm'
 
       - name: Install Node dependencies
-        run: npm install
+        shell: bash
+        run: |
+          # The electron package downloads its binary during postinstall, and that
+          # mirror intermittently answers 5xx, which used to fail the whole matrix.
+          for attempt in 1 2 3; do
+            if npm install; then
+              exit 0
+            fi
+            echo "npm install failed on attempt ${attempt} of 3; retrying in 20s"
+            sleep 20
+          done
+          echo "npm install failed on all 3 attempts"
+          exit 1
 
       - name: Build Electron App (Windows)
         if: matrix.os == 'windows-latest'
