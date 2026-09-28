@@ -28,27 +28,32 @@ jobs:
       tag: ${{ steps.pick.outputs.tag }}
       ref: ${{ steps.pick.outputs.ref }}
     steps:
+      - name: Resolve the release target
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
-          INPUT_REF: ${{ inputs.ref }}
         run: |
           # Inputs reach this step through env only: interpolating them into the
           # script body would let a dispatch input inject shell commands.
           if [ "$EVENT" = "push" ]; then
             TAG="$GITHUB_REF_NAME"
-            REF="$GITHUB_REF_NAME"
           else
             TAG="$INPUT_TAG"
-            REF="${INPUT_REF:-$GITHUB_SHA}"
           fi
           case "$TAG" in
             v[0-9]*) ;;
             *) echo "Invalid tag name: '$TAG' (must start with v followed by a digit)"; exit 1 ;;
           esac
+          # Release creation wants a commit or branch, never a tag name, so publish the
+          # commit the tag points at. GitHub rejects target_commitish=<tag> with 422.
+          SHA="$(git rev-parse HEAD)"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "ref=$SHA" >> "$GITHUB_OUTPUT"
 
   build-desktop:
     needs: resolve-tag
