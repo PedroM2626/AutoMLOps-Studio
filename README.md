@@ -269,9 +269,10 @@ pytest -q tests/
 
 ## 🔁 CI/CD
 
-Two GitHub Actions workflows keep the project healthy:
+Three GitHub Actions workflows keep the project healthy:
 - **CI** (`ci.yml`): on every push/PR — installs dependencies on Python 3.13 and runs `pytest -q tests/`.
 - **Build Desktop App** (`build-electron.yml`): on pushes to `main`/`master` (and manually) — builds Electron installers on Windows, macOS, and Ubuntu and uploads them as artifacts.
+- **Release** (`release.yml`): on a `v*` tag push (and manually) — builds the same three installers and publishes them as a GitHub Release with notes taken from `git log`. The installers bundle the Electron shell and app source only; they launch `python -m streamlit run app.py`, so Python with `requirements.txt` installed must already be available (a `venv/` next to the app, or system Python).
 
 ---
 

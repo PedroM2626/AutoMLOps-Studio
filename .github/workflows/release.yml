@@ -164,8 +164,9 @@ jobs:
               echo "| $(basename "$f") | Linux |"
             done
             echo ""
-            echo "The desktop app bundles the Electron shell only; Python dependencies are"
-            echo "installed from \`requirements.txt\` on first launch."
+            echo "The installers bundle the Electron shell and app source only. They launch"
+            echo "\`python -m streamlit run app.py\`, so Python with \`requirements.txt\` installed"
+            echo "must already be available (a \`venv/\` next to the app, or system Python)."
             echo ""
             echo "### Commits"
             echo ""
