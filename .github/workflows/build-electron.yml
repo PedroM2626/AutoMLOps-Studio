@@ -3,7 +3,7 @@ name: Build Desktop App
 on:
   push:
     branches: [ "main", "master" ]
-  workflow_dispatch: # Permite rodar o workflow manualmente pela aba Actions
+  workflow_dispatch: # Allows running the workflow manually from the Actions tab
 
 jobs:
   build:

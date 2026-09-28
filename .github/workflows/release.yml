@@ -1,0 +1,159 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v5.8.0). Created on the selected ref if missing.'
+        required: true
+        type: string
+      ref:
+        description: 'Commit SHA or branch the tag should point at.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.pick.outputs.tag }}
+      ref: ${{ steps.pick.outputs.ref }}
+    steps:
+      - id: pick
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "ref=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "ref=${{ inputs.ref || github.sha }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-desktop:
+    needs: resolve-tag
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.ref }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build Windows installer
+        if: matrix.os == 'windows-latest'
+        run: npm run dist -- --win
+
+      - name: Build macOS installer
+        if: matrix.os == 'macos-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run dist -- --mac
+
+      - name: Build Linux installer
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run dist -- --linux
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: [resolve-tag, build-desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve-tag.outputs.ref }}
+          fetch-depth: 0
+
+      - name: Collect installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'desktop-*'
+          merge-multiple: true
+          path: release-assets
+
+      - name: Build release notes
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.resolve-tag.outputs.tag }}"
+          SHA="$(git rev-parse HEAD)"
+          PREV="$(git tag --sort=creatordate --merged "$SHA" | grep -v "^${TAG}$" | tail -n 1 || true)"
+          if [ -n "$PREV" ]; then
+            RANGE="${PREV}..${SHA}"
+          else
+            RANGE="-40"
+          fi
+          {
+            echo "## AutoMLOps Studio ${TAG}"
+            echo ""
+            echo "- **Commit:** \`${SHA:0:7}\`"
+            if [ -n "$PREV" ]; then
+              echo "- **Changes since** \`${PREV}\`"
+            else
+              echo "- **First tagged release** - showing the last 40 commits"
+            fi
+            echo ""
+            echo "### Desktop installers"
+            echo ""
+            echo "| Asset | Platform |"
+            echo "| --- | --- |"
+            for f in release-assets/*.exe; do
+              [ -e "$f" ] || continue
+              echo "| $(basename "$f") | Windows |"
+            done
+            for f in release-assets/*.dmg; do
+              [ -e "$f" ] || continue
+              echo "| $(basename "$f") | macOS |"
+            done
+            for f in release-assets/*.AppImage; do
+              [ -e "$f" ] || continue
+              echo "| $(basename "$f") | Linux |"
+            done
+            echo ""
+            echo "The desktop app bundles the Electron shell only; Python dependencies are"
+            echo "installed from \`requirements.txt\` on first launch."
+            echo ""
+            echo "### Commits"
+            echo ""
+            git log --no-merges --pretty=format:'- %s (`%h`)' "$RANGE"
+            echo ""
+          } > RELEASE_NOTES.md
+          cat RELEASE_NOTES.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve-tag.outputs.tag }}
+          target_commitish: ${{ needs.resolve-tag.outputs.ref }}
+          body_path: RELEASE_NOTES.md
+          files: release-assets/*
