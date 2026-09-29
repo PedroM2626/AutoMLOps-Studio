@@ -4959,11 +4959,16 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
 
                             signature = get_model_signature(selected_model_name, selected_version)
                             input_cols = None
-                            if signature is not None and getattr(signature.inputs, "pandas_schema", None) is not None:
-                                input_cols = signature.inputs.pandas_schema.columns
+                            if signature is not None and signature.inputs is not None:
+                                # input_names() covers every stored schema; pandas_schema is only
+                                # filled in when mlflow persisted pandas metadata, and a JSON schema
+                                # has none - the feature count is the same information either way.
+                                input_cols = list(signature.inputs.input_names() or [])
+                                if not input_cols and getattr(signature.inputs, "pandas_schema", None) is not None:
+                                    input_cols = list(signature.inputs.pandas_schema.columns)
 
                             if not input_cols:
-                                st.error("This registered model carries no input signature, so the "
+                                st.error("This registered model's signature does not name its inputs, so the "
                                          "feature count cannot be inferred. Export ONNX from the "
                                          "Experiments page while its dataset is loaded.")
                             else:
