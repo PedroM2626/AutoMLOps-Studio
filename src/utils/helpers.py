@@ -1,12 +1,50 @@
 import os
 import datetime
+import re
+
+# A tracking URI written into a snippet the user downloads and pastes elsewhere must not
+# carry credentials, even though the store connection legitimately needs them.
+_CREDENTIALS_IN_URI = re.compile(r'(?P<scheme>[a-zA-Z][\w+.-]*)://[^/@]+:[^/@]+@')
+
+def mask_tracking_uri(uri):
+    """Strip credentials from a tracking URI before it is displayed or written out."""
+    text = str(uri or "")
+    redacted = _CREDENTIALS_IN_URI.search(text)
+    if redacted:
+        text = _CREDENTIALS_IN_URI.sub(lambda m: f"{m.group('scheme')}://", text)
+    return text
+
+def _tracking_uri_snippet_line():
+    """The set_tracking_uri() call for a generated snippet, pointing at the store in use.
+
+    Credentials stay out: the resolved URI is what the run used, but any userinfo in it
+    would be exported into a file the user can paste anywhere.
+    """
+    try:
+        import mlflow
+        uri = str(mlflow.get_tracking_uri() or "")
+    except Exception:
+        uri = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+
+    redacted = _CREDENTIALS_IN_URI.search(uri)
+    uri = mask_tracking_uri(uri)
+    # A Windows path URI ("file:///C:\Users\me\mlruns") would otherwise land inside a
+    # double-quoted string and make the generated snippet a SyntaxError, because \U is not
+    # a valid escape. Forward slashes are what a file URI uses anyway.
+    uri = uri.replace("\\", "/")
+    if redacted:
+        return (f'mlflow.set_tracking_uri("{uri}")\n'
+                "# Credentials were removed from this URI. Configure MLflow authentication before running.")
+    return f'mlflow.set_tracking_uri("{uri}")'
 
 def get_consumption_code(model_name, run_id, task_type, feature_names=None):
     """Generates a Python code snippet to consume the trained model."""
     safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
-    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    # The snippet has to point at the store the run actually landed in, so it uses the
+    # resolved URI rather than an environment variable a job may never have read.
+    tracking_line = _tracking_uri_snippet_line()
     
-    # Gerar dicionário de colunas para o DataFrame de exemplo
+    # Column dictionary for the sample DataFrame the snippet predicts on
     if feature_names and len(feature_names) > 0:
         cols_str = ",\n    ".join([f'"{col}": [0.0]' for col in feature_names[:10]]) # Show the first 10
         if len(feature_names) > 10:
@@ -20,7 +58,7 @@ import pandas as pd
 import numpy as np
 
 # 1. Configure Tracking (if necessary)
-mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+{tracking_line}
 
 # 2. Load model from MLflow
 # You can also use 'models:/{model_name}/latest' if you have registered the model
@@ -53,7 +91,7 @@ except Exception as e:
 def get_cv_consumption_code(model_name, run_id, task_type, backbone):
     """Generates a Python code snippet to consume a trained Computer Vision model."""
     safe_name = model_name.replace(" ", "_").replace("-", "_").replace("__", "_")
-    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db")
+    tracking_line = _tracking_uri_snippet_line()
     
     code = f"""# --- AutoMLOps Code Sample: Consuming CV Model ({model_name}) ---
 import mlflow
@@ -62,7 +100,7 @@ from PIL import Image
 from torchvision import transforms
 
 # 1. Configure Tracking (if necessary for remote download)
-mlflow.set_tracking_uri("{MLFLOW_TRACKING_URI}")
+{tracking_line}
 
 # 2. Load model from MLflow
 model_uri = "runs:/{run_id}/{safe_name}"
