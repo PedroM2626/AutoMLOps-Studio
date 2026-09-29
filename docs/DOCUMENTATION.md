@@ -57,8 +57,6 @@ Supporting packages:
   inference telemetry.
 - `src/deploy`, `src/utils` — Hugging Face deployment, SHAP explainers,
   consumption-code generation, and the "5 Pillars of ML" model profile.
-- `src/ui` — an empty placeholder package (both `__init__.py` files are
-  0 bytes); the real GUI lives entirely in `app.py`.
 - `debug_manager.py` — a manual debug script that submits a dummy
   classification job to `TrainingJobManager` and prints a JSON summary.
 
@@ -861,8 +859,6 @@ Unzip the bundle and run it independently of the Studio.
 - **Legacy data lake files:** `data_lake/uploads/` hash-prefixed CSVs and
   the `processed_train` / `processed_validation` versions are artifacts from
   older application versions and cannot be reproduced by current code.
-- **Empty `src/ui` package:** the GUI is a single-file Streamlit app
-  (`app.py`); `src/ui` is a placeholder.
 - **Missing desktop assets:** the Electron build references `assets/`
   (including an app icon), which is absent from the repository; the icon
   path is guarded so builds still succeed.

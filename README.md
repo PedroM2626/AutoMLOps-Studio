@@ -180,7 +180,7 @@ automlops-studio/
 └── requirements.txt        # Fully pinned dependency environment
 ```
 
-> Note: the GUI lives entirely in `app.py` (a single-file Streamlit app); `src/ui/` is an empty placeholder package.
+> Note: the GUI lives entirely in `app.py` (a single-file Streamlit app).
 
 ---
 
