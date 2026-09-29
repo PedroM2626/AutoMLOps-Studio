@@ -73,12 +73,20 @@ def registered_model():
     ])
     pipeline.fit(frame, target)
 
-    # Logged inside an active run, the way MLFlowTracker.log_experiment does it: outside a
-    # run the registered version carries no run_id, which is not a state the product creates.
-    with mlflow.start_run():
-        mlflow.sklearn.log_model(
-            pipeline, name="model", registered_model_name=MODEL_NAME, input_example=frame.head(2)
-        )
+    # Logged and registered through the product's own tracker. It stores the artifact under
+    # the estimator's name rather than "model", which is what the bundle has to resolve, and
+    # it handles mlflow's skops refusal the way production does.
+    from src.tracking.mlflow import MLFlowTracker
+
+    tracker = MLFlowTracker("ProbeServing")
+    tracker.log_experiment(
+        params={"task_type": "classification", "model_name": "random_forest"},
+        metrics={"accuracy": 0.9},
+        model=pipeline,
+        model_name=MODEL_NAME,
+        register=True,
+        feature_names=list(frame.columns),
+    )
     versions = mlflow.MlflowClient().search_model_versions(f"name='{MODEL_NAME}'")
     latest = max(int(entry.version) for entry in versions)
     return MODEL_NAME, str(latest)
@@ -94,7 +102,9 @@ def test_bundle_is_self_containing_and_valid_python(registered_model, tmp_path):
     assert (dest / "app.py").exists()
     assert (dest / "Dockerfile").exists()
     assert (dest / "requirements.txt").exists()
-    assert (dest / "model").is_dir()
+    # The run logged its artifact under the estimator name, so the bundle had to resolve it
+    # rather than assume the conventional "model" folder.
+    assert (dest / "model" / "MLmodel").exists()
 
     source = (dest / "app.py").read_text(encoding="utf-8")
     compile(source, "bundled app.py", "exec")

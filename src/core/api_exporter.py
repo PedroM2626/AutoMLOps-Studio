@@ -8,7 +8,6 @@ import tempfile
 import time
 import zipfile
 
-from mlflow.tracking import MlflowClient
 
 APP_CODE = """import os
 import pandas as pd
@@ -117,15 +116,19 @@ def build_bundle_dir(model_name: str, version: str, dest_dir: str) -> str:
     drift apart.
     """
     _validate_ref(model_name, version)
-    client = MlflowClient()
 
+    # The model folder the generated app.py looks for is "model", but the artifact a run
+    # logged it under is named after the estimator ("random_forest__Trial_1"), so the
+    # registry URI is resolved rather than guessing an artifact path off the run.
+    model_dir = os.path.join(dest_dir, "model")
+    os.makedirs(model_dir, exist_ok=True)
     try:
-        run_id = client.get_model_version(name=model_name, version=version).run_id
+        from mlflow.artifacts import download_artifacts
+        model_path = download_artifacts(
+            artifact_uri=f"models:/{model_name}/{version}", dst_path=model_dir
+        )
     except Exception as e:
-        raise ValueError(f"Failed to fetch model details from MLflow Registry: {e}")
-
-    # MLflow's download_artifacts fetches the whole folder
-    model_path = client.download_artifacts(run_id, "model", dst_path=dest_dir)
+        raise ValueError(f"Failed to fetch model artifacts from MLflow Registry: {e}")
 
     with open(os.path.join(dest_dir, "app.py"), "w", encoding="utf-8") as handle:
         handle.write(APP_CODE.format(model_name=model_name, version=version))
