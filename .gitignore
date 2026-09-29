@@ -22,3 +22,5 @@ image*
 *.csv
 /tmp/
 /mlflow.db
+# Whitebox notebooks staged by the training worker before they are logged to MLflow
+notebooks/automl_candidate_pipeline_*.ipynb

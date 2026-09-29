@@ -7,6 +7,40 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def _py_literal(value) -> str:
+    """Render a value as Python source so generated cells stay valid and typed."""
+    if value is None or isinstance(value, bool):
+        return repr(value)
+    # numpy scalars come first: np.float64 is a subclass of float, and repr(np.float64(1.5))
+    # is "np.float64(1.5)", which the generated cell cannot resolve.
+    if hasattr(value, "item") and not isinstance(value, (str, bytes, list, tuple, dict, set)):
+        return _py_literal(value.item())
+    if isinstance(value, float):
+        if value != value:
+            return "float('nan')"
+        if value == float("inf"):
+            return "float('inf')"
+        if value == float("-inf"):
+            return "float('-inf')"
+        return repr(value)
+    if isinstance(value, int):
+        return repr(value)
+    if isinstance(value, str):
+        return json.dumps(value)
+    if isinstance(value, dict):
+        return "{" + ", ".join(f"{_py_literal(k)}: {_py_literal(v)}" for k, v in value.items()) + "}"
+    if isinstance(value, (list, tuple, set)):
+        if isinstance(value, set) and not value:
+            return "set()"
+        opened, closed = ("[", "]") if isinstance(value, list) else (
+            ("(", ")") if isinstance(value, tuple) else ("{", "}"))
+        inner = ", ".join(_py_literal(v) for v in value)
+        if isinstance(value, tuple) and len(value) == 1:
+            inner += ","
+        return opened + inner + closed
+    return json.dumps(str(value))
+
+
 class WhiteboxNotebookGenerator:
     """
     Generates a SageMaker-style Jupyter Notebook that reproduces
@@ -77,7 +111,7 @@ class WhiteboxNotebookGenerator:
             "import matplotlib.pyplot as plt\n"
             "import seaborn as sns\n"
             "from sklearn.model_selection import train_test_split\n"
-            "from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, r2_score, mean_squared_error, mean_absolute_error, mean_absolute_percentage_error\n"
+            "from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, r2_score, mean_squared_error, root_mean_squared_error, mean_absolute_error, mean_absolute_percentage_error\n"
             "from sklearn.metrics import classification_report, confusion_matrix\n"
             "from src.core.processor import AutoMLDataProcessor\n\n"
             "# Configure visualization style\n"
@@ -87,31 +121,25 @@ class WhiteboxNotebookGenerator:
         
         # 4. Data Loading
         self._add_markdown("### 2. Data Loading")
-        temporal_tasks = ('time_series', 'forecast', 'forecast_classification', 'ts_clustering')
+        temporal_tasks = ('forecast', 'forecast_classification', 'ts_clustering')
         shuffle = "False" if (task_type in temporal_tasks or self.config.get('is_time_series')) else "True"
         
         if self.dataset_path:
             self._add_markdown("Loading the exact dataset used during the AutoML session.")
-            
-            # Format path safely for windows/linux
-            safe_path = self.dataset_path.replace('\\', '\\\\')
-            
+
             self._add_code(
-                f"df = pd.read_csv('{safe_path}')\n\n"
-                f"target_col = '{target_col}'\n"
-                f"X = df.drop(columns=[target_col])\n"
-                f"y = df[target_col]\n"
-                f"X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle={shuffle})"
+                f"df = pd.read_csv({json.dumps(str(self.dataset_path))})\n\n"
+                f"target_col = {json.dumps(str(target_col))}\n\n"
+                "# The processor expects the target inside the frame, so the split keeps whole rows together\n"
+                f"df_train, df_test = train_test_split(df, test_size=0.2, random_state=42, shuffle={shuffle})"
             )
         else:
             self._add_markdown("Load your original dataset here. The code below assumes you have loaded it into a pandas DataFrame named `df`.")
             self._add_code(
                 "# Replace with your actual dataset path\n"
                 "# df = pd.read_csv('your_dataset.csv')\n\n"
-                f"target_col = '{target_col}'\n"
-                "# X = df.drop(columns=[target_col])\n"
-                "# y = df[target_col]\n"
-                f"# X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, shuffle={shuffle})"
+                f"target_col = {json.dumps(str(target_col))}\n"
+                "# df_train, df_test = train_test_split(df, test_size=0.2, random_state=42, shuffle=" + shuffle + ")"
             )
         
         # 4.5. Data Preprocessing
@@ -121,11 +149,11 @@ class WhiteboxNotebookGenerator:
             "This step handles missing values, categorical encoding, NLP embeddings, and Deep Feature Synthesis (DFS)."
         )
         self._add_code(
-            f"processor = AutoMLDataProcessor(target_column='{target_col}', task_type='{task_type}')\n\n"
-            "# Fit the processor on training data and transform it\n"
-            "X_train_proc, y_train_proc = processor.fit_transform(X_train, y_train)\n\n"
-            "# Transform the test data using the fitted processor\n"
-            "X_test_proc, y_test_proc = processor.transform(X_test, y_test)"
+            f"processor = AutoMLDataProcessor(target_column={json.dumps(str(target_col))}, task_type={json.dumps(str(task_type))})\n\n"
+            "# Fit the processor on the training frame and transform it\n"
+            "X_train_proc, y_train_proc = processor.fit_transform(df_train)\n\n"
+            "# Transform the test frame using the fitted processor\n"
+            "X_test_proc, y_test_proc = processor.transform(df_test)"
         )
         
         # 5. Model Definition
@@ -148,7 +176,9 @@ class WhiteboxNotebookGenerator:
             'recall': ('recall_score', ", average='macro'"),
             'roc_auc': ('roc_auc_score', ''),
             'r2': ('r2_score', ''),
-            'rmse': ('mean_squared_error', ", squared=False"),
+            # squared= was removed from mean_squared_error in scikit-learn 1.6; the pinned
+            # 1.7 would raise TypeError on every generated notebook that optimizes RMSE.
+            'rmse': ('root_mean_squared_error', ''),
             'mae': ('mean_absolute_error', ''),
             'mape': ('mean_absolute_percentage_error', '')
         }
@@ -177,7 +207,7 @@ class WhiteboxNotebookGenerator:
             eval_code = (
                 "    # Detailed Regression Metrics\n"
                 "    print('\\n--- Regression Report ---')\n"
-                "    print(f'RMSE: {mean_squared_error(y_test_proc, preds, squared=False):.4f}')\n"
+                "    print(f'RMSE: {root_mean_squared_error(y_test_proc, preds):.4f}')\n"
                 "    print(f'MAE:  {mean_absolute_error(y_test_proc, preds):.4f}')\n"
                 "    print(f'R2:   {r2_score(y_test_proc, preds):.4f}')\n\n"
                 "    # Actual vs Predicted Plot\n"
@@ -226,19 +256,19 @@ class WhiteboxNotebookGenerator:
             self._add_code(
                 "mlflow.set_experiment('Whitebox_Notebook_Runs')\n"
                 "with mlflow.start_run(run_name='Manual_Execution'):\n"
-                f"    mlflow.log_param('model', '{model_name}')\n"
+                f"    mlflow.log_param('model', {json.dumps(str(model_name))})\n"
                 "    # Train the model\n"
                 "    model.fit(X_train_proc, y_train_proc)\n\n"
                 "    # Predict and Evaluate\n"
                 "    preds = model.predict(X_test_proc)\n"
                 f"    score = {metric_fn}(y_test_proc, preds{metric_kwargs})\n"
                 f"    print('Optimization Target ({opt_metric.upper()}):', score)\n"
-                f"    mlflow.log_metric('{opt_metric}', score)\n\n"
+                f"    mlflow.log_metric({json.dumps(str(opt_metric))}, score)\n\n"
                 f"{eval_code}\n"
                 f"{feat_imp_code}\n"
                 "    # Save Model\n"
                 "    try:\n"
-                "        mlflow.sklearn.log_model(model, 'model')\n"
+                "        mlflow.sklearn.log_model(model, name='model')\n"
                 "    except Exception:\n"
                 "        pass # For PyTorch models, custom logging might be required"
             )
@@ -261,7 +291,7 @@ class WhiteboxNotebookGenerator:
                 f"# {feat_imp_code.replace('    ', '#     ')}\n"
                 "#     # Save Model\n"
                 "#     try:\n"
-                "#         mlflow.sklearn.log_model(model, 'model')\n"
+                "#         mlflow.sklearn.log_model(model, name='model')\n"
                 "#     except Exception:\n"
                 "#         pass"
             )
@@ -269,7 +299,12 @@ class WhiteboxNotebookGenerator:
         # Save to disk
         if not output_path:
             filename = f"automl_candidate_pipeline_{uuid.uuid4().hex[:6]}.ipynb"
-            output_path = os.path.join(os.getcwd(), filename)
+            # Default into the project's notebooks/ folder. Writing bare into the current
+            # working directory scattered generated notebooks across the repo root, and
+            # .gitignore covers nothing matching *.ipynb.
+            output_dir = os.path.join(os.getcwd(), "notebooks")
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, filename)
             
         with open(output_path, 'w', encoding='utf-8') as f:
             nbf.write(self.nb, f)
@@ -284,49 +319,25 @@ class WhiteboxNotebookGenerator:
         self.nb.cells.append(nbf.v4.new_code_cell(code))
         
     def _get_model_instantiation_code(self) -> str:
-        """Converts best_params into a python code string that instantiates the model."""
-        model_name = self.best_params.get('model_name', '')
-        params = {k: v for k, v in self.best_params.items() if k != 'model_name'}
-        
-        # Format params dict into kwargs string
-        kwargs_str = ", ".join([f"{k}={repr(v)}" for k, v in params.items()])
-        
-        if "XGB" in model_name:
-            import_str = "from xgboost import XGBClassifier, XGBRegressor"
-            model_class = "XGBClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "XGBRegressor"
-        elif "LGBM" in model_name:
-            import_str = "from lightgbm import LGBMClassifier, LGBMRegressor"
-            model_class = "LGBMClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "LGBMRegressor"
-        elif "CatBoost" in model_name:
-            import_str = "from catboost import CatBoostClassifier, CatBoostRegressor"
-            model_class = "CatBoostClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "CatBoostRegressor"
-        elif "RandomForest" in model_name:
-            import_str = "from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor"
-            model_class = "RandomForestClassifier" if self.config.get('task') in ('classification', 'forecast_classification') else "RandomForestRegressor"
-        elif "LogisticRegression" in model_name or "Ridge" in model_name or "Lasso" in model_name:
-            import_str = "from sklearn.linear_model import LogisticRegression, Ridge, Lasso"
-            model_class = model_name
-        elif "LSTM" in model_name or "TCN" in model_name:
-            import_str = "from src.engines.pytorch_forecast import PyTorchLSTMRegressor, PyTorchTCNRegressor"
-            model_class = model_name
-        elif "LDA" in model_name or "LinearDiscriminantAnalysis" in model_name:
-            import_str = "from sklearn.discriminant_analysis import LinearDiscriminantAnalysis"
-            model_class = "LinearDiscriminantAnalysis"
-        elif "NCA" in model_name or "NeighborhoodComponentsAnalysis" in model_name:
-            import_str = "from sklearn.neighbors import NeighborhoodComponentsAnalysis"
-            model_class = "NeighborhoodComponentsAnalysis"
-        elif "PLS" in model_name or "PLSRegression" in model_name:
-            import_str = "from sklearn.cross_decomposition import PLSRegression"
-            model_class = "PLSRegression"
-        elif "PCA" in model_name:
-            import_str = "from sklearn.decomposition import PCA"
-            model_class = "PCA"
-        elif "SVD" in model_name or "TruncatedSVD" in model_name:
-            import_str = "from sklearn.decomposition import TruncatedSVD"
-            model_class = "TruncatedSVD"
-        else:
-            import_str = "# Import your custom model here"
-            model_class = model_name or "YourModelClass"
+        """Instantiate the champion with the engine that produced it.
 
-        code = f"{import_str}\n\nmodel = {model_class}({kwargs_str})\nprint(model)"
-        return code
+        Search-space names are not importable classes ("random_forest", "lightgbm"), and the
+        engine additionally strips per-model parameter prefixes, applies per-model defaults and
+        wraps the estimator for multi-output, semi-supervised and custom-ensemble runs.
+        Re-implementing that matching here generated notebooks calling a nonexistent
+        random_forest(), so the whitebox notebook could never run.
+        """
+        model_name = str(self.best_params.get("model_name", ""))
+        params = {k: v for k, v in self.best_params.items() if k != "model_name"}
+        trainer_args = ", ".join([
+            f"task_type={json.dumps(str(self.config.get('task', 'classification')))}",
+            f"data_type={json.dumps(str(self.config.get('data_type', 'tabular')))}",
+            f"ensemble_config={_py_literal(self.config.get('ensemble_config', {}) or {})}",
+            f"semi_supervised={_py_literal(bool(self.config.get('semi_supervised', False)))}",
+        ])
+        return (
+            "from src.engines.classical import AutoMLTrainer\n\n"
+            f"trainer = AutoMLTrainer({trainer_args})\n"
+            f"model = trainer._instantiate_model({json.dumps(model_name)}, {_py_literal(params)})\n"
+            "print(model)"
+        )
