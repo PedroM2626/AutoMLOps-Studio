@@ -454,10 +454,11 @@ See [Section 6](#6-supported-tasks--models) for the consolidated model list.
   num_classes=2, backbone='resnet18', multilabel_threshold=0.5)`.
 - **Tasks:** `image_classification`, `image_multi_label`
   (`MultiLabelImageDataset` + `label_csv`), `image_segmentation`
-  (DeepLabV3-ResNet50 + `mask_dir`), `object_detection`
-  (Faster R-CNN ResNet50-FPN), `pose_estimation` (Keypoint R-CNN).
-  `image_anomaly_detection` is also accepted but is routed through the
-  classification branch.
+  (DeepLabV3-ResNet50 + `mask_dir`), `image_anomaly_detection` (routed through the
+  classification branch). `object_detection` (Faster R-CNN) and `pose_estimation`
+  (Keypoint R-CNN) are still constructible but **raise `NotImplementedError` when
+  trained** - they previously looped over epochs writing zero metrics - so the Vision
+  Studio does not offer them.
 - **Backbones:** resnet18, resnet50, mobilenet_v2, efficientnet_b0,
   densenet121, vgg16.
 - **Options:** augmentation config; optimizers adam / sgd / rmsprop.
@@ -576,11 +577,11 @@ engine) and the specialized engines:
 | Task type | Engine | Models / algorithms | Metric notes |
 |---|---|---|---|
 | `classification` | classical | logistic_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, linear_svc, knn, mlp, sgd_classifier, passive_aggressive, naive_bayes, ridge_classifier, adaboost, bagging, hist_gradient_boosting, catboost; transformers (bert, distilbert, roberta, deberta); ensembles (voting / stacking) | Also used for **Time-Series Classification** when `data_type='sequential'` (chronological holdout + `TimeSeriesSplit` CV) |
-| `regression` | classical | linear_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, knn, mlp, ridge, lasso, elastic_net, sgd_regressor, adaboost, bagging, poisson, gamma (GLMs), hist_gradient_boosting, catboost; transformers (-reg variants for **NLP regression**: bert-base-uncased-reg, distilbert-base-uncased-reg) | — |
+| `regression` | classical | linear_regression, random_forest, xgboost, lightgbm, extra_trees, decision_tree, svm, knn, mlp, ridge, lasso, elastic_net, sgd_regressor, adaboost, bagging, poisson, gamma (GLMs), hist_gradient_boosting, catboost, **quantile_hgb / quantile_gbm** (`QuantileBundleRegressor`, see below); transformers (-reg variants for **NLP regression**: bert-base-uncased-reg, distilbert-base-uncased-reg) | — |
 | `forecast` | classical + pytorch_forecast | random_forest, xgboost, extra_trees, catboost, **lstm**, **tcn** (via `PyTorchTimeSeriesRegressor`) | `r2`, `rmse`, `mae`, `mape` |
 | `forecast_classification` | classical | Full classification catalog; internally mapped to `classification` with forced temporal behavior: lag features derived from the (encoded) categorical target, chronological holdout splits, and `TimeSeriesSplit` validation | `accuracy`, `f1`, `precision`, `recall`, `roc_auc` |
-| `survival_analysis` | classical | survival estimators | c-index (`calculate_c_index`) |
-| `uplift_modeling` | classical | s_learner, t_learner | Qini score (`calculate_qini_score`) |
+| `survival_analysis` | classical | `SurvivalTimeRegressor` over hist_gradient_boosting / random_forest / gradient_boosting | c-index (`calculate_c_index`). Needs **two target columns**: duration first, then the event flag |
+| `uplift_modeling` | classical | `SLearner` (treatment as a feature), `TLearner` (one model per arm) | Qini coefficient (`calculate_qini_score`): normalised area against random targeting, so ~0 is random and negative is worse than random. Needs **two target columns**: treatment first, then outcome |
 | `clustering` | classical | kmeans, agglomerative, dbscan, gaussian_mixture, mean_shift, birch, spectral | `silhouette`, `calinski_harabasz`, `davies_bouldin` |
 | `ts_clustering` | classical (processor windowing) | Same clustering catalog. `AutoMLDataProcessor` segments the chosen numeric series into sliding windows (configurable `window_size` / `step`) and extracts per-window summary features (`mean`, `std`, `min`, `max`, `median`, `skew`, `trend`) before clustering | `silhouette` |
 | `anomaly_detection` | classical | **11 detectors:** isolation_forest, local_outlier_factor, elliptic_envelope, one_class_svm, zscore_detector, modified_zscore (MAD), mahalanobis (empirical or robust MCD covariance), hbos (Histogram-Based Outlier Score), knn_outlier, pca_residual, rolling_residual (time-series oriented) | `decision_score`; semi-supervised `f1`/`precision`/`recall` when labels (1 = anomaly) are provided |
@@ -590,13 +591,22 @@ engine) and the specialized engines:
 | `multi_regression` | classical | Full regression catalog (linear/ridge/lasso/elastic-net, random_forest, xgboost, lightgbm, extra_trees, svr, knn, mlp, …) wrapped with `MultiOutputRegressor` for simultaneous prediction of several continuous targets | `r2`, `rmse`, `mae`, `mape` (uniform average across outputs; `evaluate` also reports `n_outputs` and `per_output_r2`) |
 | `ranking` | classical | ranking-aware training | — |
 | `association_rules` | classical | custom pairwise `AssociationRuleMiner` (support / confidence / lift) — **not** Apriori/FP-Growth | — |
-| `dimensionality_reduction` | classical | pca, truncated_svd, lda, nca, pls | — |
+| `dimensionality_reduction` | classical | pca, truncated_svd, lda (`ConstrainedLDA`, clamped to `min(n_features, n_classes - 1)`), nca, pls | `supervised_separability` (silhouette in the projected space, the only score all five share) plus `explained_variance` where the reducer reports it. A label target is required so the supervised reducers stay trainable |
 | `image_classification` | vision | backbone CNNs (resnet18/50, mobilenet_v2, efficientnet_b0, densenet121, vgg16) | — |
 | `image_multi_label` | vision | backbone CNNs with `MultiLabelImageDataset` | — |
 | `image_segmentation` | vision | DeepLabV3-ResNet50 | — |
-| `object_detection` | vision | Faster R-CNN ResNet50-FPN | — |
-| `pose_estimation` | vision | Keypoint R-CNN | — |
+| `object_detection` | vision | Faster R-CNN ResNet50-FPN - model only, training raises `NotImplementedError` | — |
+| `pose_estimation` | vision | Keypoint R-CNN - model only, training raises `NotImplementedError` | — |
 | Reinforcement learning | RL engine | PPO, DQN, A2C, SAC, TD3 (online, stable-baselines3); d3rlpy algorithms (offline) | episode reward metrics |
+
+- **Prediction intervals:** `quantile_hgb` (HistGradientBoosting, `loss='quantile'`) and
+  `quantile_gbm` (LightGBM, `objective='quantile'`) fit three models - lower quantile,
+  median, upper quantile - in one champion. `predict()` returns the median so the normal
+  regression metrics apply, while `predict_intervals()` returns the band widened by a
+  split-conformal correction. Raw quantile fits under-cover substantially (a 0.1-0.9 pair
+  measured 0.20/0.82 out of sample instead of 0.10/0.90, about 62% where 80% was claimed),
+  which is why the correction exists; `evaluate()` reports `interval_coverage` and
+  `interval_mean_width` as measured, never as nominal.
 
 Additional cross-cutting capabilities:
 
