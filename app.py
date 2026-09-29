@@ -26,7 +26,7 @@ from src.tracking.mlflow import (
     get_model_details, load_registered_model, get_run_details
 )
 from src.core.data_lake import DataLake
-from src.utils.helpers import get_consumption_code, generate_model_card
+from src.utils.helpers import get_consumption_code, generate_model_card, mask_tracking_uri
 from src.utils.explainers import ModelExplainer
 from src.deploy.hf_deploy import deploy_to_huggingface
 from src.tracking.manager import TrainingJobManager, JobStatus
@@ -783,15 +783,25 @@ with st.sidebar:
 
         dh_user = st.text_input("DagsHub Username", value=env_user, key="dh_user_input")
         dh_repo = st.text_input("Repository Name", value=default_repo, key="dh_repo_input")
-        dh_token = st.text_input("DagsHub Token (API Key)", value=env_pass, type="password", key="dh_token_input")
+        # The token is never pre-filled: a widget value is sent to every client that opens
+        # this page, which is fine on a laptop and a leak on a hosted Space. The environment
+        # credential is used directly when the field is left empty.
+        dh_token = st.text_input(
+            "DagsHub Token (API Key)",
+            value="",
+            type="password",
+            key="dh_token_input",
+            help="From the environment" if env_pass else "Required to connect",
+        )
 
         col_dh1, col_dh2 = st.columns(2)
         with col_dh1:
             if st.button("Connect", key="dh_connect_btn"):
-                if dh_user and dh_repo and dh_token:
+                effective_token = dh_token or env_pass
+                if dh_user and dh_repo and effective_token:
                     try:
                         os.environ["MLFLOW_TRACKING_USERNAME"] = dh_user
-                        os.environ["MLFLOW_TRACKING_PASSWORD"] = dh_token
+                        os.environ["MLFLOW_TRACKING_PASSWORD"] = effective_token
                         remote_uri = f"https://dagshub.com/{dh_user}/{dh_repo}.mlflow"
                         os.environ["MLFLOW_TRACKING_URI"] = remote_uri
                         mlflow.set_tracking_uri(remote_uri)
@@ -830,7 +840,7 @@ with st.sidebar:
             st.info("⚪ Local MLflow (SQLite)")
 
     current_uri = mlflow.get_tracking_uri()
-    st.caption(f"Tracking URI: `{current_uri}`")
+    st.caption(f"Tracking URI: `{mask_tracking_uri(current_uri)}`")
 
 # 🎨 Hero Header
 st.markdown("""
@@ -1138,7 +1148,7 @@ def render_pipeline_progress_ring(trials_done: int, total_est: int, is_done: boo
     </div>""", unsafe_allow_html=True)
 
 
-def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None, is_time_series=False):
+def prepare_multi_dataset(selected_configs, global_split=None, task_type='classification', date_col=None, target_col=None, is_time_series=False, schema_overrides=None):
     """
     Loads and splits multiple datasets based on user configurations.
     selected_configs: List of dicts with {'name': str, 'version': str, 'split': float}
@@ -1147,6 +1157,8 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
     date_col: Required for temporal split in time_series.
     target_col: Optional, for stratified split in classification.
     is_time_series: True if time series properties are enabled.
+    schema_overrides: include/dtype settings from the Step 1 schema editor, applied to
+        every dataset unless that dataset carries its own.
     """
     train_dfs = []
     test_dfs = []
@@ -1155,8 +1167,8 @@ def prepare_multi_dataset(selected_configs, global_split=None, task_type='classi
         df_ds = get_cached_dataframe(config['name'], config['version'])
         
         # Apply schema overrides if provided
-        if 'schema_overrides' in config:
-            overrides = config['schema_overrides']
+        overrides = config.get('schema_overrides') or schema_overrides
+        if overrides:
             cols_to_drop = [row['Column Name'] for row in overrides if not row.get('Include', True)]
             df_ds = df_ds.drop(columns=[c for c in cols_to_drop if c in df_ds.columns], errors='ignore')
             
@@ -1417,141 +1429,124 @@ if current_main_section == "📉 Monitoring":
     with mon_tabs[0]:
         col_mon1, col_mon2 = st.columns([1, 2])
 
-    with col_mon1:
-        st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-        st.subheader("📋 Configuration")
-        st.info("The Baseline is usually the training dataset stored in your Data Lake.")
-        mon_datasets = get_cached_datasets()
-        mon_ref_ds = st.selectbox("Select Baseline Dataset", [""] + mon_datasets, key="mon_ref_ds")
-        df_baseline = None
-        if mon_ref_ds:
-            mon_ref_ver = st.selectbox("Baseline Version", get_cached_versions(mon_ref_ds), key="mon_ref_ver")
-            df_baseline = get_cached_dataframe(mon_ref_ds, mon_ref_ver)
-            st.success(f"Loaded Baseline: {df_baseline.shape[0]} rows")
+        with col_mon1:
+            st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
+            st.subheader("📋 Configuration")
+            st.info("The Baseline is usually the training dataset stored in your Data Lake.")
+            mon_datasets = get_cached_datasets()
+            mon_ref_ds = st.selectbox("Select Baseline Dataset", [""] + mon_datasets, key="mon_ref_ds")
+            df_baseline = None
+            if mon_ref_ds:
+                mon_ref_ver = st.selectbox("Baseline Version", get_cached_versions(mon_ref_ds), key="mon_ref_ver")
+                df_baseline = get_cached_dataframe(mon_ref_ds, mon_ref_ver)
+                st.success(f"Loaded Baseline: {df_baseline.shape[0]} rows")
 
-        st.divider()
-        st.subheader("📡 Production Telemetry")
-        st.caption("Telemetry data collected from predicted logs.")
+            st.divider()
+            st.subheader("📡 Production Telemetry")
+            st.caption("Telemetry data collected from predicted logs.")
 
-        # Load Telemetry Data
-        telemetry_path = os.path.join("data_lake", "monitoring", "api_telemetry.csv")
-        df_telemetry = None
-        if os.path.exists(telemetry_path):
+            # Load Telemetry Data from the store the serving API actually writes to
+            df_telemetry = None
             try:
-                df_telemetry = pd.read_csv(telemetry_path)
+                from src.tracking.telemetry import TelemetryStore
+                df_telemetry = TelemetryStore().to_dataframe()
+            except Exception as tel_err:
+                st.error(f"Error loading telemetry: {tel_err}")
+            if df_telemetry is not None and not df_telemetry.empty:
                 st.success(f"Found {len(df_telemetry)} logs.")
 
                 # Filter by timeframe option
                 days_filter = st.slider("Analyze last N days", 1, 30, 7)
                 if '__timestamp' in df_telemetry.columns:
-                    df_telemetry['__timestamp'] = pd.to_datetime(df_telemetry['__timestamp'])
-                    cutoff_date = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
+                    df_telemetry['__timestamp'] = pd.to_datetime(df_telemetry['__timestamp'], utc=True, errors="coerce")
+                    cutoff_date = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days_filter)
                     df_telemetry = df_telemetry[df_telemetry['__timestamp'] >= cutoff_date]
                     st.caption(f"Filtered to {len(df_telemetry)} recent logs.")
-            except Exception as e:
-                st.error(f"Error loading telemetry: {e}")
-        else:
-            st.warning("No telemetry data found.")
-        st.markdown("</div>", unsafe_allow_html=True)
+            else:
+                df_telemetry = None
+                st.warning("No telemetry data found. Send a few requests to the serving API and refresh.")
+            st.markdown("</div>", unsafe_allow_html=True)
 
-    with col_mon2:
-        st.subheader("📊 Drift Analysis Matrix")
+        with col_mon2:
+            st.subheader("📊 Drift Analysis Matrix")
 
-        if df_baseline is not None and df_telemetry is not None and not df_telemetry.empty:
-            if st.button("Calculate Data Drift (Deepchecks)", type="primary"):
-                with st.spinner("Analyzing data distributions..."):
-                    try:
-                        import plotly.express as px
+            if df_baseline is not None and df_telemetry is not None and not df_telemetry.empty:
+                if st.button("Calculate Data Drift (KS + Chi-square)", type="primary"):
+                    with st.spinner("Analyzing data distributions..."):
+                        try:
+                            import plotly.express as px
+                            from src.core.drift import DriftDetector
                         
-                        # Find overlapping features (ignoring metadata columns)
-                        meta_cols = [c for c in df_telemetry.columns if c.startswith("__")]
-                        operational_cols = df_telemetry.drop(columns=meta_cols, errors='ignore').columns
-                        intersect_cols = df_baseline.select_dtypes(include=np.number).columns.intersection(operational_cols)
+                            # Find overlapping features (ignoring metadata columns)
+                            meta_cols = [c for c in df_telemetry.columns if c.startswith("__")]
+                            df_current_features = df_telemetry.drop(columns=meta_cols, errors='ignore')
+                            intersect_cols = [c for c in df_baseline.columns if c in df_current_features.columns]
                         
-                        if len(intersect_cols) == 0:
-                            st.error("No matching numeric columns found between Baseline and Telemetry.")
-                        else:
-                            st.info("Initiating Deepchecks Data Drift Suite...")
-                            # Try to import Deepchecks
-                            try:
-                                from deepchecks.tabular import Dataset
-                                from deepchecks.tabular.suites import data_drift
-                                import tempfile
-                                import os
-                                
-                                # Prepare Deepchecks datasets
-                                # Using only intersecting columns
-                                ds_train = Dataset(df_baseline[intersect_cols])
-                                ds_test = Dataset(df_telemetry[intersect_cols])
-                                
-                                # Run Suite
-                                suite = data_drift()
-                                result = suite.run(train_dataset=ds_train, test_dataset=ds_test)
-                                
-                                # Extract result (html)
-                                st.success("Drift Analysis Complete!")
-                                
-                                # Save HTML to temporary file and read it back
-                                fd, path = tempfile.mkstemp(suffix=".html")
-                                try:
-                                    with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                                        result.save_as_html(path)
-                                        
-                                    with open(path, 'r', encoding='utf-8') as f:
-                                        html_report = f.read()
-                                        
-                                    import streamlit.components.v1 as components
-                                    st.markdown("### Deepchecks Interactive Report")
-                                    components.html(html_report, height=800, scrolling=True)
-                                    
-                                finally:
-                                    os.remove(path)
-                                    
-                            except ImportError:
-                                st.error("Deepchecks is not installed or failed to import. Falling back to native scipy approach.")
-                                # Fallback scipy approach
-                                from scipy.stats import ks_2samp
+                            if len(intersect_cols) == 0:
+                                st.error("No matching columns found between Baseline and Telemetry.")
+                            else:
+                                # Same DriftDetector the Data page uses: KS on numeric columns,
+                                # chi-square on categorical ones. A deepchecks data_drift suite
+                                # used to run first with this kind of loop as an ImportError
+                                # fallback, but deepchecks 0.19.1 - still the newest release -
+                                # cannot be imported under numpy 2 at all (np.Inf and np.NaN were
+                                # removed), so its AttributeError skipped past the fallback and
+                                # the panel showed an error instead of a drift table.
+                                drifts = DriftDetector.detect_drift(
+                                    df_baseline[intersect_cols], df_current_features[intersect_cols]
+                                )
                                 drift_results = []
                                 drift_count = 0
-                                
-                                for col in intersect_cols:
-                                    stat, p_value = ks_2samp(df_baseline[col].dropna(), df_telemetry[col].dropna())
-                                    is_drift = p_value < 0.05 
-                                    if is_drift: drift_count += 1
-                                    
+
+                                for col, report in drifts.items():
+                                    is_drift = report['drift_detected']
+                                    if is_drift:
+                                        drift_count += 1
+
+                                    if report['test'] == 'skipped_high_cardinality':
+                                        status = "⚪ Not Tested"
+                                    else:
+                                        status = "🔴 Drift Detected" if is_drift else "🟢 Stable"
+
                                     drift_results.append({
                                         "Feature": col,
-                                        "KS-Statistic": float(stat),
-                                        "P-Value": float(p_value),
-                                        "Status": "🔴 Drift Detected" if is_drift else "🟢 Stable"
+                                        "Type": report['feature_type'],
+                                        "Test": report['test'],
+                                        "Statistic": round(report['statistic'], 4),
+                                        "P-Value": round(report['p_value'], 4),
+                                        "Status": status
                                     })
-                                
-                                st.write(f"### Results: {drift_count} out of {len(intersect_cols)} features drifting")
+
+                                st.write(f"### Results: {drift_count} out of {len(drift_results)} features drifting")
                                 df_report = pd.DataFrame(drift_results)
-                                st.dataframe(df_report.style.applymap(
-                                    lambda v: 'color: red' if 'Drift' in str(v) else 'color: green', 
+                                st.dataframe(df_report.style.map(
+                                    lambda v: ('color: red' if 'Drift' in str(v)
+                                               else 'color: #8b949e' if 'Not Tested' in str(v)
+                                               else 'color: green'),
                                     subset=['Status']
                                 ), use_container_width=True)
-                                
-                                with st.expander("View Distribution Plots"):
-                                    plot_col = st.selectbox("Select Feature to Plot", [r['Feature'] for r in drift_results])
-                                    if plot_col:
-                                        fig = px.histogram(
-                                            df_baseline, x=plot_col, color_discrete_sequence=['#4CAF50'], 
-                                            opacity=0.6, nbins=30, title=f"Feature Drift: {plot_col}"
-                                        )
-                                        fig.add_histogram(
-                                            x=df_telemetry[plot_col], name='Production (Telemetry)', 
-                                            marker_color='#FF5722', opacity=0.6
-                                        )
-                                        fig.update_layout(barmode='overlay')
-                                        st.plotly_chart(fig, use_container_width=True)
+
+                                numeric_features = [r['Feature'] for r in drift_results if r['Type'] == 'numeric']
+                                if numeric_features:
+                                    with st.expander("View Distribution Plots"):
+                                        plot_col = st.selectbox("Select Feature to Plot", numeric_features)
+                                        if plot_col:
+                                            fig = px.histogram(
+                                                df_baseline, x=plot_col, color_discrete_sequence=['#4CAF50'],
+                                                opacity=0.6, nbins=30, title=f"Feature Drift: {plot_col}"
+                                            )
+                                            fig.add_histogram(
+                                                x=df_current_features[plot_col], name='Production (Telemetry)',
+                                                marker_color='#FF5722', opacity=0.6
+                                            )
+                                            fig.update_layout(barmode='overlay')
+                                            st.plotly_chart(fig, use_container_width=True)
 
 
-                    except Exception as e:
-                        st.error(f"Error during drift analysis: {e}")
-        else:
-            st.info("👈 Load both Baseline and Telemetry data to run Drift Analysis.")
+                        except Exception as e:
+                            st.error(f"Error during drift analysis: {e}")
+            else:
+                st.info("👈 Load both Baseline and Telemetry data to run Drift Analysis.")
 
     with mon_tabs[1]:
         st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
@@ -1882,33 +1877,44 @@ if current_main_section == "🗄️ Data":
 
         if df_ref is not None and df_curr is not None:
             if st.button("🚀 Run Drift Detection", key="drift_run_btn", type="primary"):
-                with st.spinner("Calculating Drift Metrics (KS Test)..."):
-                    drift_report = []
-                    numeric_cols = df_ref.select_dtypes(include=np.number).columns.intersection(df_curr.columns)
+                with st.spinner("Calculating Drift Metrics (KS + Chi-square)..."):
+                    from src.core.drift import DriftDetector
 
-                    st.divider()
-                    st.markdown("### 📊 Distribution Comparison")
-                    for col in numeric_cols:
-                        from scipy.stats import ks_2samp
-                        stat, p_value = ks_2samp(df_ref[col].dropna(), df_curr[col].dropna())
-                        drift_detected = p_value < 0.05
-                        status_chip = "<span class='badge badge-failed'>🔴 Drift Detected</span>" if drift_detected else "<span class='badge badge-done'>🟢 Stable</span>"
+                    drifts = DriftDetector.detect_drift(df_ref, df_curr)
+                    if not drifts:
+                        st.error("The two datasets share no columns, so there is nothing to compare.")
+                    else:
+                        drift_report = []
+                        for col, report in drifts.items():
+                            drift_detected = report['drift_detected']
+                            if report['test'] == 'skipped_high_cardinality':
+                                verdict = "Not Tested"
+                            else:
+                                verdict = "Drift" if drift_detected else "Stable"
+                            drift_report.append({
+                                "Feature": col,
+                                "Type": report['feature_type'],
+                                "Test": report['test'],
+                                "Statistic": f"{report['statistic']:.4f}",
+                                "P-Value": f"{report['p_value']:.4f}",
+                                "Status": verdict
+                            })
 
-                        drift_report.append({
-                            "Feature": col,
-                            "KS Stat": f"{stat:.4f}",
-                            "P-Value": f"{p_value:.4f}",
-                            "Status": "Drift" if drift_detected else "Stable"
-                        })
+                        st.divider()
+                        st.markdown("### 📊 Distribution Comparison")
+                        # Histograms only for numeric features; a categorical shift is
+                        # visible in the summary table's chi-square row.
+                        for col, report in drifts.items():
+                            if report['feature_type'] != 'numeric':
+                                continue
+                            with st.expander(f"Feature: {col} - {'🔴' if report['drift_detected'] else '🟢'}", expanded=False):
+                                fig = px.histogram(df_ref, x=col, color_discrete_sequence=['#2f80ed'], opacity=0.5, nbins=30, title=f"Distribution Shift: {col}")
+                                fig.add_histogram(x=df_curr[col], name='Current', marker_color='#ef4444', opacity=0.5)
+                                fig.update_layout(barmode='overlay')
+                                st.plotly_chart(fig, use_container_width=True)
 
-                        with st.expander(f"Feature: {col} - {'🔴' if drift_detected else '🟢'}", expanded=False):
-                            fig = px.histogram(df_ref, x=col, color_discrete_sequence=['#2f80ed'], opacity=0.5, nbins=30, title=f"Distribution Shift: {col}")
-                            fig.add_histogram(x=df_curr[col], name='Current', marker_color='#ef4444', opacity=0.5)
-                            fig.update_layout(barmode='overlay')
-                            st.plotly_chart(fig, use_container_width=True)
-
-                    st.markdown("### 📋 Drift Summary Table")
-                    st.dataframe(pd.DataFrame(drift_report), use_container_width=True)
+                        st.markdown("### 📋 Drift Summary Table")
+                        st.dataframe(pd.DataFrame(drift_report), use_container_width=True)
 
 
 # --- TAB 1: AUTOML & MODEL HUB ---
@@ -2738,18 +2744,36 @@ if current_main_section == "⚙️ AutoML":
                 reg_models_list = get_cached_registered_models()
                 if reg_models_list:
                     base_name = st.selectbox("Registered Model", [m.name for m in reg_models_list], key="wiz_reg_model")
-                    cfg['selected_models'] = [base_name]
-                    st.info(f"Model **{base_name}** will be used as base for retraining.")
+                    details = get_model_details(base_name)
+                    if details and details.get('source'):
+                        cfg['selected_models'] = [base_name]
+                        cfg['custom_models'] = {base_name: details['source']}
+                        st.info(f"Model **{base_name}** v{details['version']} will be refitted as the search candidate.")
+                    else:
+                        cfg['selected_models'] = None
+                        cfg['custom_models'] = {}
+                        st.error(f"Registered model **{base_name}** has no loadable artifact, so it cannot be used.")
                 else:
                     cfg['selected_models'] = None
+                    cfg['custom_models'] = {}
 
             elif model_source == "Local Upload (.pkl)":
                 uploaded_pkl = st.file_uploader("Upload .pkl file", type="pkl", key="wiz_pkl_upload")
                 if uploaded_pkl:
+                    # The job runs in a spawned process, so the pickle is staged on disk and
+                    # the worker loads it; passing the estimator object through the config
+                    # would require it to survive pickling to the child and back.
+                    custom_dir = os.path.join(ROOT_DIR, "models")
+                    os.makedirs(custom_dir, exist_ok=True)
+                    custom_path = os.path.join(custom_dir, "wizard_uploaded_model.pkl")
+                    with open(custom_path, "wb") as pkl_fh:
+                        pkl_fh.write(uploaded_pkl.getbuffer())
                     cfg['selected_models'] = ["Uploaded_Model"]
-                    st.success("Model loaded for retraining.")
+                    cfg['custom_models'] = {"Uploaded_Model": custom_path}
+                    st.success(f"Model staged at `{os.path.relpath(custom_path, ROOT_DIR)}`; it will be refitted on your data.")
                 else:
                     cfg['selected_models'] = None
+                    cfg['custom_models'] = {}
 
             # ── Parallelism (n_jobs) ──────────────────────────────────
             with st.expander("⚙️ Parallelism & Compute"):
@@ -2870,7 +2894,6 @@ if current_main_section == "⚙️ AutoML":
                     'multi_task': ['accuracy', 'f1', 'hamming_loss'],
                     'clustering': ['silhouette'],
                     'ts_clustering': ['silhouette'],
-                    'time_series': ['rmse', 'mae', 'mape'],
                     'anomaly_detection': ['decision_score', 'f1'],
                     'density_estimation': ['log_likelihood'],
                     'dimensionality_reduction': ['supervised_separability', 'explained_variance'],
@@ -2922,7 +2945,7 @@ if current_main_section == "⚙️ AutoML":
                 "Holdout (Train/Test)", "Auto-Split (Optimized)", "Time Series Split"
             ]
 
-            if task in ("time_series", "forecast", "forecast_classification", "ts_clustering") or cfg.get('is_time_series', False):
+            if task in ("forecast", "forecast_classification", "ts_clustering") or cfg.get('is_time_series', False):
                 val_strategy_ui = "Time Series Split"
                 st.info("⏳ Time series must use temporal splitting.")
             elif task == "classification":
@@ -3261,7 +3284,8 @@ if current_main_section == "⚙️ AutoML":
                                 task_type=task,
                                 date_col=cfg.get('date_col'),
                                 target_col=cfg.get('target'),
-                                is_time_series=cfg.get('is_time_series', False)
+                                is_time_series=cfg.get('is_time_series', False),
+                                schema_overrides=cfg.get('schema_overrides')
                             )
                             st.session_state['train_df'] = t_df
                             st.session_state['test_df'] = te_df
@@ -3345,6 +3369,16 @@ if current_main_section == "⚙️ AutoML":
                             'preprocessing': cfg.get('preprocessing', {}),
                             'scaler_overrides': cfg.get('scaler_overrides', {}),
                             'ts_clustering_config': cfg.get('ts_clustering_config', {}),
+                            # The manager reads these; without them the wizard's Training
+                            # Focus, Deep Learning, DFS and CPU controls reach the job as
+                            # defaults and the user's choices are silently ignored.
+                            'use_ensemble': cfg.get('use_ensemble', True),
+                            'use_deep_learning': cfg.get('use_deep_learning', True),
+                            'ensemble_mode': cfg.get('ensemble_mode', 'both'),
+                            'enable_dfs': cfg.get('enable_dfs', False),
+                            'dfs_depth': cfg.get('dfs_depth', 1),
+                            'n_jobs': cfg.get('n_jobs', -1),
+                            'custom_models': cfg.get('custom_models', {}),
                             'mlflow_tracking_uri': mlflow.get_tracking_uri(),
                             'dagshub_user': os.environ.get('MLFLOW_TRACKING_USERNAME'),
                             'dagshub_token': os.environ.get('MLFLOW_TRACKING_PASSWORD'),
@@ -3590,7 +3624,7 @@ if current_main_section == "⚙️ AutoML":
                                 
                             # Log Model
                             import torch
-                            mlflow.pytorch.log_model(best_model_cv, "model")
+                            mlflow.pytorch.log_model(best_model_cv, name="model")
                             
                             # Generate Code
                             st.session_state['cv_run_id'] = run.info.run_id
@@ -3664,8 +3698,13 @@ if current_main_section == "⚙️ AutoML":
             st.markdown("#### Architect Insight")
             from src.engines.vision import get_cv_explanation
             cfg_used = {'lr': st.session_state.get('cv_lr', 'N/A'), 'batch_size': st.session_state.get('cv_batch', 'N/A')}
-            insight = get_cv_explanation(trainer.backbone, cfg_used)
-            st.info(f"🧠 **Model Insight:** {insight}")
+            # `trainer` only exists in the local scope of the block that just ran, so on a
+            # rerun that restores a trained model without uploading an image it was unbound
+            # and the page crashed exactly where the user came back to inspect the result.
+            insight_trainer = st.session_state.get('cv_trainer')
+            insight = get_cv_explanation(insight_trainer.backbone, cfg_used) if insight_trainer else None
+            if insight:
+                st.info(f"🧠 **Model Insight:** {insight}")
 
 # --- TAB 2: REINFORCEMENT LEARNING ---
 if current_main_section == "🤖 Reinforcement Learning":
@@ -4753,10 +4792,12 @@ if current_main_section == "🧪 Experiments":
                                         # Use 1 row sample for shape inference
                                         if 'train_df' in st.session_state:
                                             sample_x = st.session_state['train_df'].drop(columns=[job.config.get('target', '')]).head(1).values
-                                            out_path = f"exported_model_{job.job_id}.onnx"
+                                            export_dir = os.path.join(os.getcwd(), "tmp", "exports")
+                                            os.makedirs(export_dir, exist_ok=True)
+                                            out_path = os.path.join(export_dir, f"exported_model_{job.job_id}.onnx")
                                             t_onnx.export_best_model_to_onnx(X_sample=sample_x, path=out_path)
                                             with open(out_path, "rb") as f:
-                                                st.download_button("📥 Click to Download ONNX", f, file_name=out_path)
+                                                st.download_button("📥 Click to Download ONNX", f, file_name=os.path.basename(out_path))
                                             st.success(f"Model converted to ONNX!")
                                         else:
                                             st.warning("Need dataset in session to infer ONNX shape.")
@@ -4875,28 +4916,32 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
         with col_dep2:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
             st.markdown("##### ⚙️ 2. Deployment Configuration")
-            env = st.radio("Target Environment", ["Development (Local)", "Staging", "Production"], horizontal=True)
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                cpu_alloc = st.slider("CPU Units", 0.5, 4.0, 1.0, step=0.5)
-                min_replicas = st.number_input("Min Replicas", 1, 5, 1)
-            with c2:
-                mem_alloc = st.slider("Memory (GB)", 0.5, 16.0, 2.0, step=0.5)
-                max_replicas = st.number_input("Max Replicas", 1, 10, 2)
-            
-            if st.button("🚀 Deploy / Update Service", type="primary", use_container_width=True):
-                with st.spinner(f"Deploying {selected_model_name} v{selected_version}..."):
-                    time.sleep(1.5)
-                    endpoint_url = f"http://localhost:8000/predict/{selected_model_name}/{selected_version}"
-                    st.session_state['active_endpoint'] = {
-                        'url': endpoint_url,
-                        'model': selected_model_name,
-                        'version': selected_version,
-                        'env': env,
-                        'status': 'Healthy'
-                    }
-                    st.success(f"Deployment Successful! Endpoint active at: {endpoint_url}")
+            st.caption("Starts the same self-contained FastAPI bundle the export below produces, served locally, and reports what the service really answers.")
+
+            running_endpoint = st.session_state.get('active_endpoint')
+            serve_col, stop_col = st.columns(2)
+            with serve_col:
+                if st.button("🚀 Deploy / Update Service", type="primary", use_container_width=True):
+                    with st.spinner(f"Building the bundle and starting uvicorn for {selected_model_name} v{selected_version}..."):
+                        try:
+                            from src.core.api_exporter import start_local_service
+                            st.session_state['active_endpoint'] = start_local_service(selected_model_name, selected_version)
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Deployment failed: {e}")
+            with stop_col:
+                if running_endpoint and st.button("⏹ Stop service", use_container_width=True):
+                    from src.core.api_exporter import stop_local_service
+                    stop_local_service(running_endpoint)
+                    del st.session_state['active_endpoint']
+                    running_endpoint = None
+                    st.info("Service stopped and its working directory removed.")
+
+            if running_endpoint:
+                health_payload = running_endpoint.get('health') or {}
+                st.success(f"Serving `{running_endpoint['model']}` v{running_endpoint['version']} at "
+                           f"`{running_endpoint['url']}/predict` — /health answered "
+                           f"`{health_payload.get('status', 'unknown')}` (model loaded: {health_payload.get('model_loaded')}).")
             
             st.divider()
             st.markdown("##### 📥 Export Format")
@@ -4906,9 +4951,30 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
             
             with exp_col1:
                 if st.button("🧊 Download as ONNX", use_container_width=True):
-                    with st.spinner("Preparing ONNX binary..."):
+                    with st.spinner("Converting to ONNX..."):
                         try:
-                            st.info("ONNX Conversion logic active in Engine. Utility: export_best_model_to_onnx")
+                            from mlflow.sklearn import load_model as ml_load_skl
+                            from src.engines.classical import export_model_to_onnx
+                            from src.tracking.mlflow import get_model_signature
+
+                            signature = get_model_signature(selected_model_name, selected_version)
+                            input_cols = None
+                            if signature is not None and getattr(signature.inputs, "pandas_schema", None) is not None:
+                                input_cols = signature.inputs.pandas_schema.columns
+
+                            if not input_cols:
+                                st.error("This registered model carries no input signature, so the "
+                                         "feature count cannot be inferred. Export ONNX from the "
+                                         "Experiments page while its dataset is loaded.")
+                            else:
+                                skl_model = ml_load_skl(f"models:/{selected_model_name}/{selected_version}")
+                                export_dir = os.path.join(os.getcwd(), "tmp", "exports")
+                                os.makedirs(export_dir, exist_ok=True)
+                                onnx_filename = os.path.join(export_dir, f"exported_{selected_model_name}_v{selected_version}.onnx")
+                                export_model_to_onnx(skl_model, np.zeros((1, len(input_cols))), onnx_filename)
+                                with open(onnx_filename, "rb") as onnx_fh:
+                                    st.download_button("📥 Click to Download ONNX", onnx_fh, file_name=os.path.basename(onnx_filename))
+                                st.success(f"Converted {len(input_cols)} inputs to ONNX.")
                         except Exception as e:
                             st.error(f"ONNX conversion failed: {e}")
                             
@@ -4943,7 +5009,12 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
         
         if 'active_endpoint' in st.session_state:
             st.markdown("<div class='ui-card'>", unsafe_allow_html=True)
-            st.markdown(f"**Connected Endpoint**: `{st.session_state['active_endpoint']['url']}` <span class='badge badge-done'>Healthy</span>", unsafe_allow_html=True)
+            endpoint_health = (st.session_state['active_endpoint'].get('health') or {}).get('status', 'unreachable')
+            st.markdown(f"**Local service**: `{st.session_state['active_endpoint']['url']}/predict` "
+                        f"<span class='badge badge-done'>{endpoint_health}</span>", unsafe_allow_html=True)
+            # The playground below scores in this process; the URL above is for external
+            # callers. Saying "Connected Endpoint" implied the playground went through it.
+            st.caption("The checks below run in this process. Use the URL above to call the service from outside.")
             
             # Use model tags to determine task type
             is_cv = False
@@ -4982,8 +5053,10 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                         with st.spinner("Invoking model..."):
                             loaded_model = load_registered_model(selected_model_name, selected_version)
                             df_in = pd.DataFrame([data])
+                            started_at = time.perf_counter()
                             pred = loaded_model.predict(df_in)
-                            st.json({"prediction": pred.tolist(), "latency_ms": 45, "model_version": selected_version})
+                            elapsed_ms = round((time.perf_counter() - started_at) * 1000, 2)
+                            st.json({"prediction": pred.tolist(), "latency_ms": elapsed_ms, "model_version": selected_version})
                     except Exception as e:
                         st.error(f"Inference Error: {e}")
             
@@ -5084,7 +5157,12 @@ if current_main_section == "🔮 What-If Simulator":
             st.error("No model signature found. The What-If Simulator requires models logged with input schemas.")
         else:
             model = load_registered_model(selected_model)
-            
+            if model is None:
+                st.error(
+                    f"Could not load '{selected_model}' from the registry as a scikit-learn model, "
+                    "so it cannot be simulated here."
+                )
+
             st.markdown("### 🎛️ Dynamic Inputs")
             st.markdown("Tweak the values below to simulate a prediction in real-time.")
             
@@ -5104,7 +5182,7 @@ if current_main_section == "🔮 What-If Simulator":
                         inputs[name] = st.text_input(name, value="")
                 col_idx += 1
                 
-            if st.button("🔮 Simulate Prediction", type="primary"):
+            if st.button("🔮 Simulate Prediction", type="primary") and model is not None:
                 input_df = pd.DataFrame([inputs])
                 try:
                     pred = model.predict(input_df)
@@ -5124,25 +5202,29 @@ if current_main_section == "🔮 What-If Simulator":
                     with r2:
                         import shap
                         import matplotlib.pyplot as plt
+                        from src.utils.explainers import build_waterfall
                         st.markdown("#### 💡 SHAP Local Explanation")
                         try:
-                            if hasattr(model, "predict_proba"):
-                                explainer = shap.TreeExplainer(model)
-                                shap_values = explainer.shap_values(input_df)
-                                if isinstance(shap_values, list):
-                                    sv = shap_values[1] if len(shap_values) > 1 else shap_values[0]
-                                else:
-                                    sv = shap_values
-                                ev = explainer.expected_value
-                                if isinstance(ev, list) or isinstance(ev, np.ndarray):
-                                    ev = ev[1] if len(ev) > 1 else ev[0]
-                                
-                                fig, ax = plt.subplots(figsize=(10, 3))
-                                shap.waterfall_plot(shap.Explanation(values=sv[0], base_values=ev, data=input_df.iloc[0], feature_names=input_df.columns), show=False)
-                                st.pyplot(fig)
-                            else:
-                                st.info("SHAP local explanation is currently optimized for Tree-based models.")
+                            explainer = shap.TreeExplainer(model)
+                            raw_values = explainer.shap_values(input_df)
+                            # Regression returns (rows, features); classification adds an output
+                            # axis, so the class has to be picked before plotting.
+                            explanation = build_waterfall(
+                                raw_values,
+                                explainer.expected_value,
+                                input_df.iloc[0],
+                                input_df.columns,
+                                focus_class=1 if prob is not None else None,
+                            )
+                            shap.waterfall_plot(explanation, show=False)
+                            st.pyplot(plt.gcf())
+                            plt.close("all")
                         except Exception as e:
-                            st.warning(f"Could not generate SHAP explanation: {e}")
+                            plt.close("all")
+                            st.info(
+                                "No local SHAP explanation for this model "
+                                f"({type(e).__name__}: {e}). Waterfall plots need a tree-based "
+                                "estimator; other models are explained on the Experiments page."
+                            )
                 except Exception as e:
                     st.error(f"Prediction failed: {e}")
