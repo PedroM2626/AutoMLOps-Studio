@@ -1811,21 +1811,30 @@ class AutoMLTrainer:
         self.random_state = random_state
         self._trial_failures = {}
         
-        # Ensure optimization metric is compatible with task type
-        if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape', 'poisson_deviance', 'gamma_deviance']:
-            optimization_metric = 'r2'
-        elif self.task_type == 'multi_regression' and optimization_metric not in ['r2', 'rmse', 'mae', 'mape']:
-            optimization_metric = 'r2'
-        elif self.task_type in ['classification', 'multi_label', 'multi_task'] and optimization_metric not in ['accuracy', 'f1', 'precision', 'recall', 'roc_auc']:
-            optimization_metric = 'accuracy'
-        elif self.task_type == 'survival_analysis' and optimization_metric not in ['c_index']:
-            optimization_metric = 'c_index'
-        elif self.task_type == 'uplift_modeling' and optimization_metric not in ['qini_score']:
-            optimization_metric = 'qini_score'
-        elif self.task_type == 'density_estimation' and optimization_metric not in ['log_likelihood']:
-            optimization_metric = 'log_likelihood'
-        elif self.task_type == 'anomaly_detection' and optimization_metric not in ['decision_score', 'f1']:
-            optimization_metric = 'decision_score'
+        # Ensure optimization metric is compatible with task type. The accepted sets
+        # mirror what each trial scorer actually writes into trial_metrics - a metric the
+        # wizard offers but this list rejects is silently replaced, so the user's choice
+        # never reaches the search.
+        TASK_METRICS = {
+            'regression': ['r2', 'rmse', 'mae', 'mape', 'poisson_deviance', 'gamma_deviance'],
+            'forecast': ['r2', 'rmse', 'mae', 'mape'],
+            'ranking': ['ndcg', 'r2', 'rmse', 'mae'],
+            'multi_regression': ['r2', 'rmse', 'mae', 'mape'],
+            'classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
+            'forecast_classification': ['accuracy', 'f1', 'precision', 'recall', 'roc_auc'],
+            'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
+            'multi_task': ['accuracy', 'f1', 'hamming_loss'],
+            'survival_analysis': ['c_index'],
+            'uplift_modeling': ['qini_score'],
+            'density_estimation': ['log_likelihood'],
+            'anomaly_detection': ['decision_score', 'f1'],
+            'clustering': ['silhouette', 'calinski_harabasz', 'davies_bouldin'],
+            'dimensionality_reduction': ['supervised_separability', 'explained_variance'],
+            'association_rules': ['rule_score', 'rule_count', 'avg_lift'],
+        }
+        allowed = TASK_METRICS.get(self.task_type)
+        if allowed and optimization_metric not in allowed:
+            optimization_metric = allowed[0]
 
         # Use preset configurations if n_trials/timeout are not provided
         preset_config = self.preset_configs.get(self.preset, self.preset_configs['medium'])
@@ -2177,8 +2186,15 @@ class AutoMLTrainer:
                             y_pred_rank = np.asarray(y_pred_val).ravel()
                             trial_metrics['rmse'] = np.sqrt(mean_squared_error(y_true_rank, y_pred_rank))
                             trial_metrics['mae'] = mean_absolute_error(y_true_rank, y_pred_rank)
+                            trial_metrics['r2'] = r2_score(y_true_rank, y_pred_rank)
                             try:
-                                trial_metrics['ndcg'] = float(ndcg_score([y_true_rank], [y_pred_rank]))
+                                # ndcg_score needs non-negative graded relevance and these
+                                # targets are continuous (often negative). Shifting the floor to
+                                # zero keeps the ordering; the old path raised, fell back to 0.0,
+                                # and every ranking trial scored the same constant.
+                                shift = min(float(y_true_rank.min()), 0.0)
+                                trial_metrics['ndcg'] = float(ndcg_score(
+                                    [y_true_rank - shift], [y_pred_rank - shift]))
                             except Exception:
                                 trial_metrics['ndcg'] = 0.0
 
@@ -2187,7 +2203,7 @@ class AutoMLTrainer:
                             elif optimization_metric == 'ndcg':
                                 score = trial_metrics['ndcg']
                             else:
-                                score = trial_metrics['ndcg']
+                                score = trial_metrics['r2']
                         else:
                             trial_metrics['r2'] = r2_score(y_val, y_pred_val)
                             trial_metrics['rmse'] = np.sqrt(mean_squared_error(y_val, y_pred_val))
@@ -2411,10 +2427,12 @@ class AutoMLTrainer:
                     feature_names=self.feature_names
                 )
                 logger.info(f"Run {full_trial_name} registered with ID: {run_id}")
-                
-                # Gerar amostra de código para o relatório/callback
-                from src.utils.helpers import get_consumption_code
-                trial_metrics['consumption_code'] = get_consumption_code(full_trial_name, run_id, self.task_type, feature_names=self.feature_names)
+
+                # The DummyTracker sentinel means MLflow was unavailable, so a snippet
+                # pointing at runs:/dummy_run_id would be uncopy-pasteable. Skip it.
+                if run_id and run_id != "dummy_run_id":
+                    from src.utils.helpers import get_consumption_code
+                    trial_metrics['consumption_code'] = get_consumption_code(full_trial_name, run_id, self.task_type, feature_names=self.feature_names)
 
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
@@ -3125,6 +3143,9 @@ class AutoMLTrainer:
 
         self.best_params = study.best_params
         self.best_value = study.best_value
+        # The job manager reads best_score for its completion log and the Experiments
+        # page; the attribute used to exist only as best_value, so the score was lost.
+        self.best_score = study.best_value
         best_model_name = self.best_params.get('model_name')
         
         # If model_name was forced (not in params), retrieve from user_attrs
@@ -3191,10 +3212,11 @@ class AutoMLTrainer:
         else:
             self.feature_importance = None
 
-        # --- NOVA: Amostra de código para o melhor modelo global ---
+        # Consumption snippet for the overall champion.
         try:
-            # Recuperar run_id do melhor trial global
             best_run_id = study.best_trial.user_attrs.get('run_id')
+            if best_run_id == "dummy_run_id":
+                best_run_id = None
             self.best_run_id = best_run_id
             if best_model_name and best_run_id:
                 from src.utils.helpers import get_consumption_code
@@ -3214,26 +3236,9 @@ class AutoMLTrainer:
         X_sample: A sample of features (pandas DataFrame or numpy array) to infer input types.
         path: Path to save the .onnx file.
         """
-        try:
-            from skl2onnx import convert_sklearn
-            from skl2onnx.common.data_types import FloatTensorType
-            import onnx
-            
-            if not self.best_model:
-                raise ValueError("No best model found. Run training first.")
-                
-            # Most of our models expect float inputs after preprocessing
-            shape = X_sample.shape[1] if hasattr(X_sample, 'shape') else len(X_sample[0])
-            initial_type = [('float_input', FloatTensorType([None, shape]))]
-            
-            onx = convert_sklearn(self.best_model, initial_types=initial_type, target_opset=12)
-            with open(path, "wb") as f:
-                f.write(onx.SerializeToString())
-            logger.info(f"Model successfully exported to ONNX: {path}")
-            return path
-        except Exception as e:
-            logger.error(f"ONNX conversion failed: {e}")
-            raise e
+        if not self.best_model:
+            raise ValueError("No best model found. Run training first.")
+        return export_model_to_onnx(self.best_model, X_sample, path)
 
     def _instantiate_model(self, name, params):
         if self.task_type == 'multi_task':
@@ -3790,7 +3795,10 @@ class AutoMLTrainer:
                         ]
                 if self.task_type == 'ranking':
                     try:
-                        metrics['ndcg'] = float(ndcg_score([np.asarray(y_test).ravel()], [np.asarray(y_pred).ravel()]))
+                        truth = np.asarray(y_test).ravel()
+                        preds = np.asarray(y_pred).ravel()
+                        shift = min(float(truth.min()), 0.0)
+                        metrics['ndcg'] = float(ndcg_score([truth - shift], [preds - shift]))
                     except Exception:
                         metrics['ndcg'] = 0.0
                 try:
@@ -4322,6 +4330,34 @@ def get_technical_explanation(model_name, params, task_type):
         if 'n_neighbors' in k or 'neighbors' in k: param_desc.append(f"- **Neighbors ({v})**: Number of neighbors to use when calculating local density.")
         
     return model_desc, "\n".join(param_desc)
+
+def export_model_to_onnx(model, X_sample, path):
+    """Convert a fitted sklearn-compatible estimator to an ONNX file.
+
+    Shared by the Experiments page and the Model Registry so both produce the same
+    artifact; the registry path used to be a button that only printed a message.
+    X_sample only has to carry the feature count, so a zero row is enough.
+    """
+    try:
+        from skl2onnx import convert_sklearn
+        from skl2onnx.common.data_types import FloatTensorType
+        import onnx
+
+        if model is None:
+            raise ValueError("No model to export.")
+
+        shape = X_sample.shape[1] if hasattr(X_sample, 'shape') else len(X_sample[0])
+        initial_type = [('float_input', FloatTensorType([None, shape]))]
+
+        onx = convert_sklearn(model, initial_types=initial_type, target_opset=12)
+        with open(path, "wb") as handle:
+            handle.write(onx.SerializeToString())
+        logger.info(f"Model successfully exported to ONNX: {path}")
+        return path
+    except Exception as exc:
+        logger.error(f"ONNX conversion failed: {exc}")
+        raise
+
 
 def save_pipeline(processor, model, path):
     os.makedirs(os.path.dirname(path), exist_ok=True)

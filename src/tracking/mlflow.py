@@ -7,27 +7,6 @@ from dotenv import load_dotenv
 load_dotenv()
 from src.utils.helpers import get_consumption_code
 
-# Monkeypatch RunInfo to handle potential run_uuid/run_id mismatch in this environment
-try:
-    from mlflow.entities import RunInfo
-    import inspect
-    _orig_run_info_init = RunInfo.__init__
-    _sig = inspect.signature(_orig_run_info_init)
-    if "run_uuid" in _sig.parameters and "run_id" in _sig.parameters:
-        def _patched_run_info_init(self, *args, **kwargs):
-            if "run_uuid" not in kwargs and len(args) == 0:
-                kwargs["run_uuid"] = kwargs.get("run_id")
-            return _orig_run_info_init(self, *args, **kwargs)
-        RunInfo.__init__ = _patched_run_info_init
-    elif "run_uuid" in _sig.parameters and "run_id" not in _sig.parameters:
-        def _patched_run_info_init(self, *args, **kwargs):
-            if "run_uuid" not in kwargs and len(args) == 0:
-                kwargs["run_uuid"] = kwargs.get("run_id")
-            return _orig_run_info_init(self, *args, **kwargs)
-        RunInfo.__init__ = _patched_run_info_init
-except Exception:
-    pass
-
 class MLFlowTracker:
     def __init__(self, experiment_name):
         self.experiment_name = experiment_name
@@ -46,8 +25,8 @@ class MLFlowTracker:
             mlflow.set_tag("logged_model_artifact_path", safe_artifact_path)
             try:
                 mlflow.sklearn.log_model(
-                    model, 
-                    safe_artifact_path, 
+                    model,
+                    name=safe_artifact_path,
                     registered_model_name=model_name if register else None
                 )
             except Exception as log_err:
@@ -60,7 +39,7 @@ class MLFlowTracker:
                 print(f"Warning: skops could not serialize {type(model).__name__}, retrying with cloudpickle: {log_err}")
                 mlflow.sklearn.log_model(
                     model,
-                    safe_artifact_path,
+                    name=safe_artifact_path,
                     registered_model_name=model_name if register else None,
                     serialization_format="cloudpickle",
                 )

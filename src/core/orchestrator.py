@@ -104,7 +104,8 @@ class AutoMLOrchestrator:
             policy=policy,
             wrappers=wrappers,
             custom_env_path=custom_env_path,
-            verbose=1
+            verbose=1,
+            **self.config.get('hyperparams', {})
         )
         
         # Train the model

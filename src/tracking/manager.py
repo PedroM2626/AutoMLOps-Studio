@@ -110,7 +110,12 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
 
     try:
         # Set tracking URI from config
-        tracking_uri = config.get('mlflow_tracking_uri', 'sqlite:///mlflow.db')
+        # A job that logged to a store nobody else reads made runs vanish from the
+        # Experiments page, so fall back to the configured environment before the
+        # bundled default.
+        tracking_uri = (config.get('mlflow_tracking_uri')
+                        or os.getenv('MLFLOW_TRACKING_URI')
+                        or 'sqlite:///mlflow.db')
         import mlflow
         mlflow.set_tracking_uri(tracking_uri)
 
@@ -151,7 +156,8 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 policy=policy,
                 wrappers=wrappers,
                 custom_env_path=custom_env_path,
-                verbose=1
+                verbose=1,
+                **config.get('hyperparams', {})
             )
             
             model = trainer.train(
@@ -342,6 +348,22 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 trials_data.append(trial_info)
                 status_queue.put({"type": "trial", "trial": trial_info, "score": float(score), "full_name": full_name})
 
+            # Custom models arrive as references (local pickle path or MLflow artifact
+            # URI) because the job runs in a spawned process and the estimator itself
+            # would have to survive pickling twice.
+            custom_models = {}
+            for cm_name, cm_ref in (config.get('custom_models') or {}).items():
+                try:
+                    if os.path.exists(cm_ref):
+                        import joblib
+                        custom_models[cm_name] = joblib.load(cm_ref)
+                    else:
+                        import mlflow.sklearn
+                        custom_models[cm_name] = mlflow.sklearn.load_model(cm_ref)
+                    log_queue.put(("log", f"[JOB] Custom model '{cm_name}' loaded from {cm_ref}"))
+                except Exception as cm_err:
+                    log_queue.put(("log", f"[JOB] WARNING: could not load custom model '{cm_name}': {cm_err}"))
+
             # Training — forward DL/ensemble flags from job config
             use_ensemble      = config.get('use_ensemble', True)
             use_deep_learning = config.get('use_deep_learning', True)
@@ -381,6 +403,7 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                 y_test=y_test_proc,
                 X_raw=train_df,
                 processor=processor,
+                custom_models=custom_models,
                 strict_cv=config.get('strict_cv', False),
                 scaler_overrides=scaler_overrides
             )
@@ -568,11 +591,6 @@ class TrainingJobManager:
             if not job.is_active() and job._process is None:
                 continue
 
-            # Check if process died unexpectedly
-            if job._process and not job._process.is_alive() and job.status == JobStatus.RUNNING:
-                job.status = JobStatus.FAILED
-                job.end_time = time.time()
-
             # Drain log queue
             if job._log_queue:
                 while True:
@@ -618,6 +636,14 @@ class TrainingJobManager:
 
                     except Exception:
                         break
+
+            # Only after the queues are drained: a child that finished normally exits a
+            # moment before its last "done" message is read, and declaring it dead here
+            # first stranded successful jobs as FAILED.
+            if job.is_active() and job._process is not None and not job._process.is_alive():
+                job.status = JobStatus.FAILED
+                job.end_time = time.time()
+                job.error_msg = job.error_msg or "Training process exited before reporting a result."
 
     # ── Helpers ──────────────────────────────
     def get_job(self, job_id: str) -> Optional[TrainingJob]:
