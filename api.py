@@ -76,11 +76,13 @@ class PredictionRequest(BaseModel):
 def predict(request: PredictionRequest):
     if model_assets["model"] is None:
         if not load_latest_model():
-            raise HTTPException(status_code=400, detail="No model loaded. Train a model first.")
+            raise HTTPException(status_code=503, detail="No model loaded. Train a model first.")
     
     try:
         df = pd.DataFrame(request.data)
-        X_proc = model_assets["processor"].transform(df)
+        # AutoMLDataProcessor.transform returns the (X, y) pair, like fit_transform;
+        # feeding that tuple to predict failed every real serving request.
+        X_proc, _ = model_assets["processor"].transform(df)
         predictions = model_assets["model"].predict(X_proc)
         
         # If classifier and label encoder exists, inverse transform
@@ -106,6 +108,9 @@ def predict(request: PredictionRequest):
             logging.error(f"Failed to log telemetry: {tel_err}")
             
         return {"predictions": result}
+    except (ValueError, KeyError, TypeError) as invalid_input:
+        # Missing or malformed columns are the caller's problem, not a server fault.
+        raise HTTPException(status_code=400, detail=str(invalid_input))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
