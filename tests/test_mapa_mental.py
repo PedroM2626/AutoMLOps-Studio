@@ -77,7 +77,9 @@ def test_survival_analysis_task():
     trainer = AutoMLTrainer(task_type="survival_analysis", preset="test")
     model_surv = trainer._get_models(name="survival_cox_ph", random_state=42)
     assert model_surv is not None
-    model_surv.fit(X, y_surv.iloc[:, 0])
+    # The target keeps both columns: the wrapper fits the duration and the c-index
+    # reads the event flag, so a single column cannot score the model.
+    model_surv.fit(X, y_surv)
     preds = model_surv.predict(X)
     assert len(preds) == 50
 
