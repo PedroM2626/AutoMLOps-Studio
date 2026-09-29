@@ -170,21 +170,21 @@ Supporting packages:
 | Package | Version |
 |---|---|
 | streamlit | 1.54.0 |
-| fastapi | 0.115.0 |
-| uvicorn | 0.32.0 |
-| mlflow | 3.1.0 |
+| fastapi | 0.121.2 |
+| uvicorn | 0.38.0 |
+| mlflow | 3.16.1 |
 | optuna | 4.7.0 |
 | scikit-learn | 1.7.2 |
 | xgboost | 3.1.1 |
 | lightgbm | 4.6.0 |
 | catboost | 1.2.8 |
-| torch | 2.9.0 |
-| torchvision | 0.24.0 |
+| torch | 2.9.1 |
+| torchvision | 0.24.1 |
 | transformers | 4.57.0 |
 | stable_baselines3 | 2.7.0 |
 | gymnasium | 1.2.3 |
 | d3rlpy | 2.3.0 |
-| shap | 0.49.1 |
+| shap | 0.50.0 |
 | deepchecks | 0.19.1 |
 | pytest | 8.3.4 |
 
