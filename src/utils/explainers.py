@@ -9,6 +9,44 @@ except:
 
 logger = logging.getLogger(__name__)
 
+def build_waterfall(shap_values, expected_value, row, feature_names, focus_class=None):
+    """Reduce one row's SHAP output to the single-vector shape a waterfall plot needs.
+
+    TreeExplainer returns (rows, features) for regression but (rows, features, outputs) for
+    classification, and shap refuses a matrix with "can currently only plot a single
+    explanation" unless the output axis is picked first.
+    """
+    index = 0
+    if isinstance(shap_values, list):
+        # Older shap releases return one (rows, features) matrix per class instead of a
+        # single 3-D array, so the class has to be chosen before the row is taken.
+        if focus_class is not None and focus_class < len(shap_values):
+            index = focus_class
+        values = np.asarray(shap_values[index])
+    else:
+        values = np.asarray(shap_values)
+    base = np.asarray(expected_value).ravel()
+
+    if values.ndim == 3:
+        values = values[0]
+        outputs = values.shape[1]
+        if focus_class is not None and focus_class < outputs:
+            index = focus_class
+        values = values[:, index]
+    elif values.ndim == 2:
+        values = values[0]
+    elif values.ndim != 1:
+        raise ValueError(f"Unsupported SHAP value shape {values.shape}")
+
+    base_value = float(base[index]) if base.size > index else float(base[0])
+    data = row.to_numpy() if hasattr(row, "to_numpy") else np.asarray(row)
+    return shap.Explanation(
+        values=values,
+        base_values=base_value,
+        data=data,
+        feature_names=list(feature_names),
+    )
+
 class ModelExplainer:
     def __init__(self, model, X_train, task_type="classification"):
         self.model = model
