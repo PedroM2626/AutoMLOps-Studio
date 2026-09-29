@@ -1615,7 +1615,9 @@ if current_main_section == "📉 Monitoring":
                     # Dynamic Target Column Selection
                     target_col = st.selectbox("Target Column Name", options=df_stab_ref.columns.tolist(), index=len(df_stab_ref.columns)-1)
                     
-                task_type_sel = st.selectbox("Task Type", ["classification", "regression", "clustering", "forecast", "anomaly_detection"])
+                # StabilityAnalyzer only scores classification and regression; the other
+                # task types used to be selectable here and produced empty metric tables.
+                task_type_sel = st.selectbox("Task Type", ["classification", "regression"])
                 
                 # Pre-unwrap actual_model strictly for UI param reading
                 actual_model = None
@@ -2112,11 +2114,17 @@ if current_main_section == "⚙️ AutoML":
                           col_ta, col_dc = st.columns(2)
                           with col_ta:
                               task_tmp = cfg.get('task', 'classification')
-                              unsup_targetless_tasks = ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction", "association_rules"]
+                              unsup_targetless_tasks = ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "association_rules"]
                               if task_tmp not in unsup_targetless_tasks:
-                                  if task_tmp in ["multi_label", "multi_task", "multi_regression"]:
+                                  if task_tmp in ["multi_label", "multi_task", "multi_regression", "survival_analysis", "uplift_modeling"]:
                                       default_targets = [c for c in sample_df.columns[-2:] if c in sample_df.columns]
-                                      _mt_label = {'multi_label': 'Multi-Label', 'multi_task': 'Multi-Task', 'multi_regression': 'Multi-Output Regression'}[task_tmp]
+                                      _mt_label = {
+                                          'multi_label': 'Multi-Label',
+                                          'multi_task': 'Multi-Task',
+                                          'multi_regression': 'Multi-Output Regression',
+                                          'survival_analysis': 'Survival - first column is duration, second is the event flag',
+                                          'uplift_modeling': 'Uplift - first column is treatment, second is the outcome',
+                                      }[task_tmp]
                                       target_pre_w = st.multiselect(
                                           f"🎯 Target Columns ({_mt_label})",
                                           sample_df.columns.tolist(),
@@ -2484,7 +2492,11 @@ if current_main_section == "⚙️ AutoML":
                 # ── Training Focus selector (shown for both modes) ────────────
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("<p style='font-weight:600;margin-bottom:6px;'>Training Focus</p>", unsafe_allow_html=True)
-                task_supports_ensembles = task not in ["ranking", "multi_label", "multi_regression", "association_rules", "clustering", "ts_clustering", "anomaly_detection", "density_estimation", "dimensionality_reduction"]
+                task_supports_ensembles = task not in [
+                    "ranking", "multi_label", "multi_regression", "multi_task", "association_rules",
+                    "clustering", "ts_clustering", "anomaly_detection", "density_estimation",
+                    "dimensionality_reduction", "forecast", "survival_analysis", "uplift_modeling",
+                ]
                 if task_supports_ensembles:
                     FOCUS_OPTIONS = [
                         ("single",        "🎯", "Single Models",   "Train individual models only. Faster, simpler, easier to interpret."),
@@ -2855,12 +2867,13 @@ if current_main_section == "⚙️ AutoML":
                     'ranking': ['ndcg', 'rmse', 'mae'],
                     'multi_label': ['f1_micro', 'subset_accuracy', 'precision_micro', 'recall_micro', 'hamming_loss'],
                     'multi_regression': ['r2', 'rmse', 'mae', 'mape'],
+                    'multi_task': ['accuracy', 'f1', 'hamming_loss'],
                     'clustering': ['silhouette'],
                     'ts_clustering': ['silhouette'],
                     'time_series': ['rmse', 'mae', 'mape'],
                     'anomaly_detection': ['decision_score', 'f1'],
                     'density_estimation': ['log_likelihood'],
-                    'dimensionality_reduction': ['explained_variance', 'supervised_separability'],
+                    'dimensionality_reduction': ['supervised_separability', 'explained_variance'],
                     'association_rules': ['rule_score', 'rule_count', 'avg_lift']
                 }
                 metric_list = metric_options.get(task, ['accuracy'])
@@ -3265,7 +3278,7 @@ if current_main_section == "⚙️ AutoML":
                 train_df = st.session_state['train_df']
                 if task not in ["clustering", "ts_clustering", "anomaly_detection", "density_estimation", "association_rules"]:
                     act_target = st.session_state.get('target_active')
-                    if task in ["multi_label", "multi_task", "multi_regression"]:
+                    if task in ["multi_label", "multi_task", "multi_regression", "survival_analysis", "uplift_modeling"]:
                         if isinstance(act_target, list) and all(c in train_df.columns for c in act_target) and len(act_target) >= 2:
                             target = act_target
                         elif isinstance(cfg.get('target'), list) and all(c in train_df.columns for c in cfg.get('target')) and len(cfg.get('target')) >= 2:
@@ -3296,7 +3309,7 @@ if current_main_section == "⚙️ AutoML":
                         st.rerun()
                 with col_sub:
                     if st.button("🚀 Submit Experiment", key="wiz_submit_btn", type="primary"):
-                        if task in ["multi_label", "multi_task", "multi_regression"] and (not isinstance(target, list) or len(target) < 2):
+                        if task in ["multi_label", "multi_task", "multi_regression", "survival_analysis", "uplift_modeling"] and (not isinstance(target, list) or len(target) < 2):
                             st.error(f"Please select at least two target columns for {task.replace('_', ' ').title()} tasks.")
                             st.stop()
 
@@ -3356,16 +3369,14 @@ if current_main_section == "⚙️ AutoML":
         st.markdown("""
         <div class='hero-header' style='background:linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(31, 41, 55, 0.4) 100%);'>
           <div class='hero-title'>👁️ Vision Studio</div>
-                    <div class='hero-subtitle'>Train deep learning vision models for classification, multi-label, segmentation, detection, anomaly detection, and pose estimation.</div>
+                    <div class='hero-subtitle'>Train deep learning vision models for classification, multi-label, segmentation and image anomaly detection.</div>
         </div>""", unsafe_allow_html=True)
 
         CV_TASKS = [
             ("image_classification", "🖼️", "Classification", "Assign a single label to an image."),
             ("image_multi_label", "🏷️", "Multi-Label", "Assign multiple labels to an image simultaneously."),
             ("image_segmentation", "🧩", "Segmentation", "Pixel-level classification (masks)."),
-            ("object_detection", "🎯", "Detection", "Find and bound objects in an image."),
-                        ("image_anomaly_detection", "🚨", "Anomaly Detection", "Detect whether an image is anomalous or normal."),
-                        ("pose_estimation", "🕺", "Pose Estimation", "Estimate keypoints / body joints in images."),
+            ("image_anomaly_detection", "🚨", "Anomaly Detection", "Detect whether an image is anomalous or normal."),
         ]
         
         st.markdown("<h4 style='margin-bottom:12px;'>1. Select Vision Task</h4>", unsafe_allow_html=True)
