@@ -1,6 +1,7 @@
 import os
 import logging
 import importlib.util
+import math
 import time
 import warnings
 import pandas as pd
@@ -85,20 +86,44 @@ def calculate_c_index(event_indicator, event_time, risk_scores):
         return 0.5
 
 def calculate_qini_score(treatment, outcome, uplift_scores):
-    """Calculates Qini Score for Uplift Modeling."""
+    """Normalised area between the model's Qini curve and the random-targeting line.
+
+    The old version summed the cumulative Qini curve, which is monotone positive,
+    so the raw area was always large and np.clip turned every ranking - random
+    included - into exactly 1.0. Optuna was therefore ranking uplift models by a
+    constant. This returns ~0 for a random ranking, positive for a useful one and
+    negative when targeting people the wrong way round.
+    """
     try:
-        df = pd.DataFrame({'t': treatment, 'y': outcome, 's': uplift_scores})
-        df = df.sort_values(by='s', ascending=False).reset_index(drop=True)
-        n_t = (df['t'] == 1).sum()
-        n_c = (df['t'] == 0).sum()
-        if n_t == 0 or n_c == 0:
+        t = np.asarray(treatment, dtype=float).ravel()
+        y = np.asarray(outcome, dtype=float).ravel()
+        s = np.asarray(uplift_scores, dtype=float).ravel()
+        if not (len(t) == len(y) == len(s)) or len(t) < 2:
             return 0.0
-        df['cum_yt'] = (df['y'] * df['t']).cumsum()
-        df['cum_yc'] = (df['y'] * (1 - df['t'])).cumsum()
-        df['cum_nt'] = df['t'].cumsum()
-        df['cum_nc'] = (1 - df['t']).cumsum()
-        qini_curve = df['cum_yt'] - df['cum_yc'] * (df['cum_nt'] / np.maximum(df['cum_nc'], 1))
-        return float(np.clip(qini_curve.sum() / len(df), -1.0, 1.0))
+        if not np.any(t == 1) or not np.any(t == 0):
+            return 0.0
+
+        def qini_curve(order):
+            ts, ys = t[order], y[order]
+            cum_nt = np.cumsum(ts)
+            cum_nc = np.cumsum(1.0 - ts)
+            cum_yt = np.cumsum(ys * ts)
+            cum_yc = np.cumsum(ys * (1.0 - ts))
+            return cum_yt - cum_yc * (cum_nt / np.maximum(cum_nc, 1.0))
+
+        def area(curve):
+            return float(np.trapezoid(curve, dx=1.0))
+
+        model_curve = qini_curve(np.argsort(-s, kind='stable'))
+        # Perfect targeting reads the incremental response straight off the observed
+        # labels; it only normalises the scale, it is never returned as a score.
+        perfect_curve = qini_curve(np.argsort(-(y * t - y * (1.0 - t)), kind='stable'))
+        random_line = np.linspace(0.0, float(model_curve[-1]), len(model_curve))
+
+        denominator = area(perfect_curve) - area(random_line)
+        if abs(denominator) < 1e-12:
+            return 0.0
+        return float(np.clip((area(model_curve) - area(random_line)) / denominator, -1.0, 1.0))
     except Exception:
         return 0.0
 
@@ -255,6 +280,47 @@ def _to_dense_array(X):
     if isinstance(X, (pd.DataFrame, pd.Series)):
         X = X.values
     return np.asarray(X, dtype=float)
+
+
+def _split_two_column_target(y, task):
+    """Splits a [a, b] target into its two columns as 1D arrays.
+
+    Survival needs (duration, event) and uplift needs (treatment, outcome). The
+    holdout split hands these back as plain ndarrays, so checking only for a
+    DataFrame used to fall through with the whole two-column array as the first
+    column, which sklearn then rejected with "y should be a 1d array".
+    """
+    if isinstance(y, pd.DataFrame):
+        if y.shape[1] < 2:
+            raise ValueError(f"{task} needs two target columns, got {list(y.columns)}")
+        return y.iloc[:, 0].to_numpy(), y.iloc[:, 1].to_numpy()
+    arr = np.asarray(y) if y is not None else None
+    if arr is None or arr.ndim != 2 or arr.shape[1] < 2:
+        raise ValueError(f"{task} needs a two-column target, got shape {None if arr is None else arr.shape}")
+    return arr[:, 0], arr[:, 1]
+
+
+def _with_treatment_column(X, treatment):
+    """Returns X with the treatment arm appended as a feature (for the S-Learner)."""
+    if isinstance(X, pd.DataFrame):
+        Xt = X.copy()
+        Xt['treatment'] = np.asarray(treatment)[: len(Xt)]
+        return Xt
+    return np.column_stack([_to_dense_array(X), np.asarray(treatment)])
+
+
+def _project_features(model, X):
+    """Projects X through a fitted reducer.
+
+    NeighborhoodComponentsAnalysis learns a projection but ships no transform,
+    so its components_ have to be applied by hand.
+    """
+    if hasattr(model, 'transform'):
+        return np.asarray(model.transform(X), dtype=float)
+    components = getattr(model, 'components_', None)
+    if components is not None:
+        return _to_dense_array(X) @ np.asarray(components).T
+    raise ValueError(f"{type(model).__name__} cannot project features")
 
 
 class StatisticalZScoreDetector(BaseEstimator):
@@ -543,6 +609,211 @@ class DensityHistogram(BaseEstimator):
         return np.exp(np.clip(self.score_samples(X), -700, 700))
 
 
+class SurvivalTimeRegressor(BaseEstimator, RegressorMixin):
+    """Regressors over the duration column of a [duration, event] target.
+
+    The event column is deliberately not used for fitting: these models estimate
+    survival time directly and the c-index does the censoring-aware scoring.
+    Fitting on the raw two-column target instead of a single duration vector is
+    what used to kill every survival trial.
+    """
+
+    def __init__(self, base='hist_gradient_boosting', n_estimators=100, max_iter=100,
+                 max_depth=None, learning_rate=0.1, loss='poisson', random_state=None):
+        self.base = base
+        self.n_estimators = n_estimators
+        self.max_iter = max_iter
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.loss = loss
+        self.random_state = random_state
+
+    def _make_estimator(self):
+        if self.base == 'random_forest':
+            return RandomForestRegressor(n_estimators=self.n_estimators, max_depth=self.max_depth,
+                                         random_state=self.random_state)
+        if self.base == 'gradient_boosting':
+            return GradientBoostingRegressor(n_estimators=self.n_estimators, max_depth=self.max_depth,
+                                             learning_rate=self.learning_rate, random_state=self.random_state)
+        return HistGradientBoostingRegressor(loss=self.loss, max_iter=self.max_iter,
+                                             max_depth=self.max_depth, learning_rate=self.learning_rate,
+                                             random_state=self.random_state)
+
+    def fit(self, X, y):
+        duration, _ = _split_two_column_target(y, 'survival_analysis')
+        self.model_ = self._make_estimator()
+        self.model_.fit(X, np.asarray(duration, dtype=float))
+        return self
+
+    def predict(self, X):
+        return self.model_.predict(X)
+
+
+class SLearner(BaseEstimator, RegressorMixin):
+    """S-Learner: one regressor sees the treatment arm as an extra feature.
+
+    predict() returns the estimated uplift (treated minus control outcome), which
+    is what the qini score ranks. Keeping both arms inside one fitted object is
+    what makes the champion reproduce the score the trial earned.
+    """
+
+    def __init__(self, n_estimators=100, learning_rate=0.1, max_depth=3, random_state=None):
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.max_depth = max_depth
+        self.random_state = random_state
+
+    def _make_estimator(self):
+        return GradientBoostingRegressor(n_estimators=self.n_estimators, learning_rate=self.learning_rate,
+                                         max_depth=self.max_depth, random_state=self.random_state)
+
+    def fit(self, X, y):
+        treatment, outcome = _split_two_column_target(y, 'uplift_modeling')
+        self.model_ = self._make_estimator()
+        self.model_.fit(_with_treatment_column(X, treatment), np.asarray(outcome, dtype=float))
+        return self
+
+    def predict(self, X):
+        rows = len(X) if hasattr(X, '__len__') else _to_dense_array(X).shape[0]
+        treated = self.model_.predict(_with_treatment_column(X, np.ones(rows)))
+        control = self.model_.predict(_with_treatment_column(X, np.zeros(rows)))
+        return treated - control
+
+
+class TLearner(BaseEstimator, RegressorMixin):
+    """T-Learner: one regressor per treatment arm; predict() returns the uplift."""
+
+    def __init__(self, n_estimators=100, learning_rate=0.1, max_depth=3, random_state=None):
+        self.n_estimators = n_estimators
+        self.learning_rate = learning_rate
+        self.max_depth = max_depth
+        self.random_state = random_state
+
+    def _make_estimator(self):
+        return GradientBoostingRegressor(n_estimators=self.n_estimators, learning_rate=self.learning_rate,
+                                         max_depth=self.max_depth, random_state=self.random_state)
+
+    def fit(self, X, y):
+        treatment, outcome = _split_two_column_target(y, 'uplift_modeling')
+        t = np.asarray(treatment)
+        o = np.asarray(outcome, dtype=float)
+        if not np.any(t == 1) or not np.any(t == 0):
+            raise ValueError("uplift_modeling needs both treated and control rows in the target")
+        self.model_treated_ = self._make_estimator().fit(X[t == 1], o[t == 1])
+        self.model_control_ = self._make_estimator().fit(X[t == 0], o[t == 0])
+        return self
+
+    def predict(self, X):
+        return self.model_treated_.predict(X) - self.model_control_.predict(X)
+
+
+class QuantileBundleRegressor(BaseEstimator, RegressorMixin):
+    """Three regressors fitted at the median and at two quantiles of the target.
+
+    predict() stays a plain median forecast so the existing regression metrics
+    apply, while predict_intervals() exposes the band the other two models
+    learned. sklearn 1.7 has no quantile-capable RandomForestRegressor, so the
+    band is built from three fits rather than one quantile forest.
+
+    Raw quantile fits under-cover: on 4000 Gaussian samples a 0.1-0.9 pair
+    measured out-of-sample at roughly 0.20/0.82 instead of 0.10/0.90, i.e. about
+    62% coverage where 80% was claimed. With calibrate=True the band is widened
+    by a conformal correction computed on a held-out slice of the training data,
+    so the nominal level means what it says.
+    """
+
+    def __init__(self, base='hist_gradient_boosting', quantiles=(0.1, 0.5, 0.9), n_estimators=100,
+                 max_depth=None, learning_rate=0.1, random_state=None, calibrate=True,
+                 calibration_fraction=0.25):
+        self.base = base
+        self.quantiles = quantiles
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.random_state = random_state
+        self.calibrate = calibrate
+        self.calibration_fraction = calibration_fraction
+
+    def _make_estimator(self, quantile):
+        if self.base == 'lightgbm':
+            return lgb.LGBMRegressor(objective='quantile', alpha=quantile, n_estimators=self.n_estimators,
+                                     max_depth=self.max_depth if self.max_depth else -1,
+                                     learning_rate=self.learning_rate, verbosity=-1,
+                                     random_state=self.random_state)
+        if self.base == 'hist_gradient_boosting':
+            return HistGradientBoostingRegressor(loss='quantile', quantile=quantile, max_iter=self.n_estimators,
+                                                 max_depth=self.max_depth, learning_rate=self.learning_rate,
+                                                 random_state=self.random_state)
+        # sklearn 1.7 has no quantile-capable RandomForestRegressor: taking the name would
+        # silently build three identical models and a zero-width band, so unknown bases fail.
+        raise ValueError(f"unsupported quantile base '{self.base}'")
+
+    def _fit_models(self, X, y):
+        self.models_ = {q: self._make_estimator(q).fit(X, y) for q in self.quantiles}
+
+    def fit(self, X, y):
+        truth = np.asarray(y, dtype=float)
+        if not self.calibrate or len(truth) < 40:
+            self.conformal_adjustment_ = 0.0
+            self._fit_models(X, y)
+            return self
+
+        n = len(truth)
+        rng = np.random.default_rng(self.random_state if isinstance(self.random_state, (int, type(None))) else 42)
+        order = rng.permutation(n)
+        cut = int(n * (1.0 - self.calibration_fraction))
+        fit_idx, cal_idx = order[:cut], order[cut:]
+        self._fit_models(X.iloc[fit_idx] if hasattr(X, 'iloc') else X[fit_idx],
+                         truth[fit_idx])
+
+        lower_q, upper_q = self.quantiles[0], self.quantiles[-1]
+        X_cal = X.iloc[cal_idx] if hasattr(X, 'iloc') else X[cal_idx]
+        low = self.models_[lower_q].predict(X_cal)
+        high = self.models_[upper_q].predict(X_cal)
+        scores = np.maximum(low - truth[cal_idx], truth[cal_idx] - high)
+        # Split-conformal correction for the nominal band level (upper_q - lower_q), using
+        # the ceil((n+1)*level)/n finite-sample quantile so coverage is guaranteed rather
+        # than asymptotic.
+        target = float(upper_q - lower_q)
+        level = math.ceil((len(scores) + 1) * target) / len(scores)
+        self.conformal_adjustment_ = float(max(0.0, np.quantile(scores, min(1.0, level))))
+        # Refit on everything so the shipped models see all rows; the adjustment was
+        # estimated on data held out from them.
+        self._fit_models(X, truth)
+        return self
+
+    def _predict_at(self, X, quantile):
+        return np.asarray(self.models_[quantile].predict(X), dtype=float)
+
+    def predict(self, X):
+        median = self.quantiles[len(self.quantiles) // 2]
+        return self._predict_at(X, median)
+
+    def predict_intervals(self, X):
+        lower, upper = self.quantiles[0], self.quantiles[-1]
+        adjustment = getattr(self, 'conformal_adjustment_', 0.0)
+        return (self._predict_at(X, lower) - adjustment,
+                self._predict_at(X, upper) + adjustment)
+
+
+class ConstrainedLDA(LinearDiscriminantAnalysis):
+    """LDA that never asks for more components than min(n_features, n_classes - 1).
+
+    The catalog tunes n_components before it can see the labels, and the svd
+    solver raises outright when the request exceeds that bound, which pruned the
+    whole trial.
+    """
+
+    def fit(self, X, y=None):
+        if y is not None and self.n_components is not None:
+            labels = np.asarray(y).ravel()
+            n_features = np.asarray(X).shape[1] if not hasattr(X, 'shape') or len(np.asarray(X).shape) > 1 else 1
+            cap = min(n_features, len(np.unique(labels)) - 1)
+            if cap >= 1:
+                self.n_components = min(self.n_components, cap)
+        return super().fit(X, y)
+
+
 class AutoMLTrainer:
     def __init__(self, task_type='classification', preset='medium', ensemble_config=None,
                  use_ensemble=True, use_deep_learning=True, ensemble_mode='both', n_jobs=-1,
@@ -650,13 +921,17 @@ class AutoMLTrainer:
             if name == 'bagging': return BaggingRegressor(random_state=random_state)
             if name == 'poisson': return PoissonRegressor(max_iter=300)
             if name == 'gamma': return GammaRegressor(max_iter=300)
+            if name == 'quantile_hgb': return QuantileBundleRegressor(base='hist_gradient_boosting')
+            if name == 'quantile_gbm': return QuantileBundleRegressor(base='lightgbm')
             if name == 'hist_gradient_boosting': return HistGradientBoostingRegressor(random_state=random_state)
             if name == 'catboost' and CATBOOST_AVAILABLE: return cb.CatBoostRegressor(verbose=0, thread_count=self.n_jobs, random_seed=random_state)
         elif self.task_type == 'survival_analysis':
-            if name == 'survival_cox_ph' or name == 'survival_gradient_boosting': return HistGradientBoostingRegressor(loss='poisson', random_state=random_state)
-            if name == 'survival_random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
+            if name == 'survival_cox_ph': return SurvivalTimeRegressor(base='hist_gradient_boosting', loss='poisson', random_state=random_state)
+            if name == 'survival_gradient_boosting': return SurvivalTimeRegressor(base='gradient_boosting', random_state=random_state)
+            if name == 'survival_random_forest': return SurvivalTimeRegressor(base='random_forest', random_state=random_state)
         elif self.task_type == 'uplift_modeling':
-            if name == 's_learner' or name == 't_learner': return GradientBoostingRegressor(random_state=random_state)
+            if name == 's_learner': return SLearner(random_state=random_state)
+            if name == 't_learner': return TLearner(random_state=random_state)
         elif self.task_type == 'ranking':
             if name == 'ranking_linear_regression': return LinearRegression()
             if name == 'ranking_random_forest': return RandomForestRegressor(n_estimators=100, random_state=random_state)
@@ -677,7 +952,7 @@ class AutoMLTrainer:
         elif self.task_type == 'dimensionality_reduction':
             if name == 'pca': return PCA(random_state=random_state)
             if name == 'truncated_svd': return TruncatedSVD(random_state=random_state)
-            if name == 'lda': return LinearDiscriminantAnalysis()
+            if name == 'lda': return ConstrainedLDA()
             if name == 'nca': return NeighborhoodComponentsAnalysis(random_state=random_state)
             if name == 'pls': return PLSRegression()
             
@@ -1015,14 +1290,6 @@ class AutoMLTrainer:
                     early_stopping=True,
                     n_iter_no_change=10
                 ),
-                'hist_gradient_boosting': lambda t: HistGradientBoostingRegressor(
-                    max_iter=t.suggest_int('hgb_max_iter', 100, 1000),
-                    learning_rate=t.suggest_float('hgb_lr', 0.01, 0.3, log=True),
-                    max_depth=t.suggest_int('hgb_max_depth', 3, 20),
-                    max_leaf_nodes=t.suggest_int('hgb_max_leaf_nodes', 15, 255),
-                    l2_regularization=t.suggest_float('hgb_l2', 1e-10, 10.0, log=True),
-                    random_state=random_state
-                ),
                 'catboost': lambda t: cb.CatBoostRegressor(
                     iterations=t.suggest_int('cb_iterations', 100, 1000) if self.preset == 'best_quality' else t.suggest_int('cb_iterations', 50, 150),
                     learning_rate=t.suggest_float('cb_lr', 0.001, 0.3, log=True),
@@ -1074,6 +1341,25 @@ class AutoMLTrainer:
                 ),
                 'ransac': lambda t: RANSACRegressor(random_state=random_state),
                 'theil_sen': lambda t: TheilSenRegressor(random_state=random_state),
+                'quantile_hgb': lambda t: QuantileBundleRegressor(
+                    base='hist_gradient_boosting',
+                    n_estimators=t.suggest_int('qf_n_estimators', 50, 400) if t else 100,
+                    max_depth=t.suggest_int('qf_max_depth', 3, 25) if t else None,
+                    quantiles=(t.suggest_float('qf_lower', 0.05, 0.35) if t else 0.1,
+                               0.5,
+                               t.suggest_float('qf_upper', 0.65, 0.95) if t else 0.9),
+                    random_state=random_state
+                ),
+                'quantile_gbm': lambda t: QuantileBundleRegressor(
+                    base='lightgbm',
+                    n_estimators=t.suggest_int('qg_n_estimators', 50, 400) if t else 100,
+                    max_depth=t.suggest_int('qg_max_depth', 3, 15) if t else None,
+                    learning_rate=t.suggest_float('qg_lr', 0.01, 0.3, log=True) if t else 0.1,
+                    quantiles=(t.suggest_float('qg_lower', 0.05, 0.35) if t else 0.1,
+                               0.5,
+                               t.suggest_float('qg_upper', 0.65, 0.95) if t else 0.9),
+                    random_state=random_state
+                ),
                 'bert-base-uncased-reg': lambda t: TransformersWrapper(model_name='bert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
                 'distilbert-base-uncased-reg': lambda t: TransformersWrapper(model_name='distilbert-base-uncased', task='regression', learning_rate=t.suggest_float('learning_rate', 1e-6, 1e-4, log=True), epochs=t.suggest_int('num_train_epochs', 1, 3)) if TRANSFORMERS_AVAILABLE else None,
                 'stacking_ensemble': lambda t: StackingRegressor(
@@ -1342,8 +1628,11 @@ class AutoMLTrainer:
 
             def get_lda(t):
                 try:
-                    solver = t.suggest_categorical('lda_solver', ['svd', 'lsqr']) if hasattr(t, 'suggest_categorical') else 'svd'
-                    return LinearDiscriminantAnalysis(
+                    # 'lsqr' is deliberately excluded: it has no transform(), and the
+                    # dimensionality_reduction scorer projects the holdout through it.
+
+                    solver = t.suggest_categorical('lda_solver', ['svd', 'eigen']) if hasattr(t, 'suggest_categorical') else 'svd'
+                    return ConstrainedLDA(
                         n_components=t.suggest_int('lda_n_components', 1, min(max_comp, 5)) if hasattr(t, 'suggest_int') else 1,
                         solver=solver
                     )
@@ -1381,33 +1670,39 @@ class AutoMLTrainer:
             logger.info(f"DEBUG _get_models: task_type={self.task_type}, name requested={name}, returning keys={list(models_config.keys())}")
         elif self.task_type == 'survival_analysis':
             models_config = {
-                'survival_cox_ph': lambda t: HistGradientBoostingRegressor(
+                'survival_cox_ph': lambda t: SurvivalTimeRegressor(
+                    base='hist_gradient_boosting',
                     loss='poisson',
                     max_iter=t.suggest_int('surv_cox_max_iter', 50, 300) if t else 100,
                     learning_rate=t.suggest_float('surv_cox_lr', 0.01, 0.2, log=True) if t else 0.1,
                     random_state=random_state
                 ),
-                'survival_random_forest': lambda t: RandomForestRegressor(
+                'survival_random_forest': lambda t: SurvivalTimeRegressor(
+                    base='random_forest',
                     n_estimators=t.suggest_int('surv_rf_n_estimators', 50, 200) if t else 100,
                     max_depth=t.suggest_int('surv_rf_max_depth', 3, 15) if t else 10,
                     random_state=random_state
                 ),
-                'survival_gradient_boosting': lambda t: GradientBoostingRegressor(
+                'survival_gradient_boosting': lambda t: SurvivalTimeRegressor(
+                    base='gradient_boosting',
                     n_estimators=t.suggest_int('surv_gb_n_estimators', 50, 200) if t else 100,
+                    max_depth=t.suggest_int('surv_gb_max_depth', 2, 8) if t else 3,
                     learning_rate=t.suggest_float('surv_gb_lr', 0.01, 0.2, log=True) if t else 0.1,
                     random_state=random_state
                 )
             }
         elif self.task_type == 'uplift_modeling':
             models_config = {
-                's_learner': lambda t: GradientBoostingRegressor(
+                's_learner': lambda t: SLearner(
                     n_estimators=t.suggest_int('s_learner_n_est', 50, 200) if t else 100,
                     learning_rate=t.suggest_float('s_learner_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    max_depth=t.suggest_int('s_learner_depth', 2, 8) if t else 3,
                     random_state=random_state
                 ),
-                't_learner': lambda t: GradientBoostingRegressor(
+                't_learner': lambda t: TLearner(
                     n_estimators=t.suggest_int('t_learner_n_est', 50, 200) if t else 100,
                     learning_rate=t.suggest_float('t_learner_lr', 0.01, 0.2, log=True) if t else 0.1,
+                    max_depth=t.suggest_int('t_learner_depth', 2, 8) if t else 3,
                     random_state=random_state
                 )
             }
@@ -1514,6 +1809,7 @@ class AutoMLTrainer:
 
     def train(self, X_train, y_train=None, X_test=None, y_test=None, n_trials=None, timeout=None, callback=None, selected_models=None, early_stopping_rounds=None, experiment_name="AutoML_Experiment", manual_params=None, random_state=42, validation_strategy='cv', validation_params=None, custom_models=None, X_raw=None, time_budget=None, optimization_mode='bayesian', optimization_metric='accuracy', stability_config=None, feature_names=None, class_names=None, **kwargs):
         self.random_state = random_state
+        self._trial_failures = {}
         
         # Ensure optimization metric is compatible with task type
         if self.task_type in ['regression', 'forecast', 'ranking'] and optimization_metric not in ['r2', 'rmse', 'mae', 'mape', 'poisson_deviance', 'gamma_deviance']:
@@ -1726,11 +2022,12 @@ class AutoMLTrainer:
             
             # Only for methods using explicit holdout (auto_split or manual holdout)
             use_explicit_validation = validation_strategy in ['auto_split', 'holdout']
-            if self.task_type in ['ranking', 'multi_label', 'association_rules', 'density_estimation']:
+            if self.task_type in ['ranking', 'multi_label', 'association_rules', 'density_estimation',
+                                  'survival_analysis', 'uplift_modeling', 'dimensionality_reduction']:
                 # These task types currently use explicit validation for robust and simple scoring.
                 use_explicit_validation = True
             
-            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'multi_regression', 'association_rules', 'density_estimation']:
+            if use_explicit_validation and self.task_type in ['classification', 'regression', 'forecast', 'ranking', 'multi_label', 'multi_task', 'multi_regression', 'association_rules', 'density_estimation', 'survival_analysis', 'uplift_modeling', 'dimensionality_reduction']:
                 if validation_strategy == 'auto_split':
                     split_ratio = trial.suggest_float('data_split_ratio', 0.6, 0.9)
                 else: # holdout
@@ -1862,7 +2159,12 @@ class AutoMLTrainer:
                                 f1s.append(f1_score(y_val_arr[:, col], y_pred_val_arr[:, col], average='weighted', zero_division=0))
                             trial_metrics['accuracy'] = float(np.mean(accuracies))
                             trial_metrics['f1'] = float(np.mean(f1s))
-                            trial_metrics['hamming_loss'] = hamming_loss(y_val_arr, y_pred_val_arr)
+                            # sklearn refuses multiclass-multioutput here, so score each
+                            # target column and average.
+                            trial_metrics['hamming_loss'] = float(np.mean([
+                                hamming_loss(y_val_arr[:, c], y_pred_val_arr[:, c])
+                                for c in range(y_val_arr.shape[1])
+                            ]))
                             
                             if optimization_metric == 'f1':
                                 score = trial_metrics['f1']
@@ -2041,88 +2343,51 @@ class AutoMLTrainer:
                     score = trial_metrics['log_likelihood']
 
                 elif self.task_type == 'survival_analysis':
-                    # y_tr: col 0 = duration, col 1 = event_observed
-                    if isinstance(y_tr, pd.DataFrame) and y_tr.shape[1] >= 2:
-                        duration = y_tr.iloc[:, 0]
-                        event = y_tr.iloc[:, 1]
-                    else:
-                        duration = y_tr
-                        event = np.ones(len(y_tr))
-                    model.fit(X_tr, duration)
-                    
-                    if isinstance(y_val, pd.DataFrame) and y_val.shape[1] >= 2:
-                        duration_val = y_val.iloc[:, 0]
-                        event_val = y_val.iloc[:, 1]
-                    else:
-                        duration_val = y_val
-                        event_val = np.ones(len(y_val))
-                        
+                    # SurvivalTimeRegressor fits the duration column of the two-column target.
+                    model.fit(X_tr, y_tr)
                     preds = model.predict(X_val)
-                    c_idx = calculate_c_index(event_val, duration_val, preds)
+                    duration_val, event_val = _split_two_column_target(y_val, 'survival_analysis')
+                    # calculate_c_index ranks by risk (higher score = earlier event), so the
+                    # predicted survival time has to enter negated or the index inverts.
+                    c_idx = calculate_c_index(event_val, duration_val, -np.asarray(preds, dtype=float))
                     trial_metrics['c_index'] = c_idx
                     score = c_idx
 
                 elif self.task_type == 'uplift_modeling':
-                    # y_tr: col 0 = treatment, col 1 = outcome
-                    if isinstance(y_tr, pd.DataFrame) and y_tr.shape[1] >= 2:
-                        treatment = y_tr.iloc[:, 0]
-                        outcome = y_tr.iloc[:, 1]
-                    else:
-                        treatment = np.random.randint(0, 2, size=len(y_tr))
-                        outcome = y_tr
-                        
-                    if isinstance(y_val, pd.DataFrame) and y_val.shape[1] >= 2:
-                        treatment_val = y_val.iloc[:, 0]
-                        outcome_val = y_val.iloc[:, 1]
-                    else:
-                        treatment_val = np.random.randint(0, 2, size=len(y_val))
-                        outcome_val = y_val
-                    
-                    if 't_learner' in model_name:
-                        m1 = GradientBoostingRegressor(random_state=random_state)
-                        m0 = GradientBoostingRegressor(random_state=random_state)
-                        mask1 = (treatment == 1)
-                        mask0 = (treatment == 0)
-                        if mask1.sum() > 0: m1.fit(X_tr[mask1], outcome[mask1])
-                        if mask0.sum() > 0: m0.fit(X_tr[mask0], outcome[mask0])
-                        uplift = m1.predict(X_val) - m0.predict(X_val)
-                    else: # S-Learner
-                        X_with_t = X_tr.copy()
-                        X_with_t['treatment'] = treatment
-                        model.fit(X_with_t, outcome)
-                        X_t1 = X_val.copy()
-                        X_t1['treatment'] = 1
-                        X_t0 = X_val.copy()
-                        X_t0['treatment'] = 0
-                        uplift = model.predict(X_t1) - model.predict(X_t0)
-                        
+                    # SLearner/TLearner read (treatment, outcome) out of the two-column target
+                    # and predict the uplift score, so the champion that ships is the same
+                    # object that earned this qini value, not a bare regressor.
+                    model.fit(X_tr, y_tr)
+                    uplift = model.predict(X_val)
+                    treatment_val, outcome_val = _split_two_column_target(y_val, 'uplift_modeling')
                     qini = calculate_qini_score(treatment_val, outcome_val, uplift)
                     trial_metrics['qini_score'] = qini
                     score = qini
 
                 elif self.task_type == 'dimensionality_reduction':
                     if y_tr is not None:
-                        try:
-                            model.fit(X_tr, y_tr)
-                        except Exception:
-                            model.fit(X_tr)
+                        model.fit(X_tr, y_tr)
                     else:
                         model.fit(X_tr)
 
-                    if hasattr(model, 'explained_variance_ratio_'):
-                        score = float(model.explained_variance_ratio_.sum())
+                    has_val = X_val is not None and len(X_val) > 0
+                    X_trans = _project_features(model, X_val if has_val else X_tr)
+                    y_eval = np.asarray(y_val if has_val else y_tr)
+
+                    evr = getattr(model, 'explained_variance_ratio_', None)
+                    if evr is not None:
+                        trial_metrics['explained_variance'] = float(np.sum(evr))
+
+                    # Silhouette in the projected space is the only score every reducer can be
+                    # ranked on: explained variance would compare PCA against NCA by units,
+                    # not by quality. It is optimistic for the supervised reducers, which used
+                    # these very labels to build the projection.
+                    if len(np.unique(y_eval)) > 1 and X_trans.shape[1] >= 2:
+                        score = float(silhouette_score(X_trans, y_eval))
                     else:
-                        try:
-                            X_trans = model.transform(X_val) if X_val is not None and len(X_val) > 0 else model.transform(X_tr)
-                            y_eval = y_val if X_val is not None and len(X_val) > 0 else y_tr
-                            if y_eval is not None and len(np.unique(y_eval)) > 1:
-                                score = float(silhouette_score(X_trans, y_eval))
-                            else:
-                                score = float(np.var(X_trans, axis=0).sum())
-                        except Exception:
-                            score = 0.0
-                    trial_metrics['explained_variance'] = score
+                        score = float(np.var(X_trans, axis=0).sum())
                     trial_metrics['supervised_separability'] = score
+
                 else: # clustering
                     model.fit(X_tr)
                     labels = model.labels_ if hasattr(model, 'labels_') else model.predict(X_tr)
@@ -2153,6 +2418,7 @@ class AutoMLTrainer:
 
             except Exception as e:
                 logger.error(f"Error during trial for {model_name}: {e}")
+                self._trial_failures[model_name] = f"{type(e).__name__}: {e}"
                 # Don't set score to 0.0 here, raise TrialPruned to let Optuna know the trial failed completely
                 import optuna
                 raise optuna.TrialPruned(f"Trial failed due to exception: {e}")
@@ -2169,7 +2435,9 @@ class AutoMLTrainer:
             # Ensure score is never negative for visualization purposes (unless metric allows)
             # Most of our metrics (acc, f1, r2) are >= 0. For RMSE/MAE we use negative, so we check task.
             # Anomaly decision scores and density log-likelihoods can legitimately be negative.
-            if self.task_type in ['classification', 'clustering', 'dimensionality_reduction']:
+            # Anomaly decision scores, density log-likelihoods and silhouette in the projected
+            # space are legitimately signed, so dimensionality_reduction is not clamped.
+            if self.task_type in ['classification', 'clustering']:
                 score = max(0.0, score)
             
             # Enrich trial metrics with parameters for easy access in callbacks
@@ -2844,6 +3112,17 @@ class AutoMLTrainer:
                 study._stop_flag = False
             logger.info(f"Optimization for {m_name} finalized.")
         
+        completed_trials = [t for t in study.get_trials(deepcopy=False)
+                            if t.state == optuna.trial.TrialState.COMPLETE]
+        if not completed_trials:
+            # Optuna's own "No trials are completed yet" hides why every fit failed, so
+            # surface the recorded causes instead.
+            reasons = "; ".join(f"{name} -> {msg}" for name, msg in self._trial_failures.items())
+            raise ValueError(
+                f"Every trial failed for task '{self.original_task_type}'. "
+                f"{reasons or 'No trial produced a score.'}"
+            )
+
         self.best_params = study.best_params
         self.best_value = study.best_value
         best_model_name = self.best_params.get('model_name')
@@ -3208,6 +3487,16 @@ class AutoMLTrainer:
                 return TweedieRegressor(**{k.replace('tweedie_', ''): v for k, v in params.items() if k.startswith('tweedie_')})
             if name == 'ransac': return RANSACRegressor()
             if name == 'theil_sen': return TheilSenRegressor()
+            if name in ('quantile_hgb', 'quantile_gbm'):
+                prefix = 'qf_' if name == 'quantile_hgb' else 'qg_'
+                return QuantileBundleRegressor(
+                    base='hist_gradient_boosting' if name == 'quantile_hgb' else 'lightgbm',
+                    n_estimators=params.get(f'{prefix}n_estimators', 100),
+                    max_depth=params.get(f'{prefix}max_depth', None),
+                    learning_rate=params.get(f'{prefix}lr', 0.1),
+                    quantiles=(params.get(f'{prefix}lower', 0.1), 0.5, params.get(f'{prefix}upper', 0.9)),
+                    random_state=params.get('random_state', 42)
+                )
         elif self.task_type == 'ranking':
             if name == 'ranking_linear_regression':
                 return LinearRegression()
@@ -3338,6 +3627,55 @@ class AutoMLTrainer:
                 )
             if name == 'histogram_density':
                 return DensityHistogram(n_bins=params.get('hist_bins', 30))
+        elif self.task_type == 'dimensionality_reduction':
+            seed = getattr(self, 'random_state', 42)
+            if name == 'pca':
+                return PCA(n_components=params.get('pca_n_components', 2),
+                           svd_solver=params.get('pca_solver', 'auto'),
+                           random_state=seed)
+            if name == 'truncated_svd':
+                return TruncatedSVD(n_components=params.get('svd_n_components', 2),
+                                    algorithm=params.get('svd_alg', 'randomized'),
+                                    random_state=seed)
+            if name == 'lda':
+                return ConstrainedLDA(n_components=params.get('lda_n_components', 1),
+                                     solver=params.get('lda_solver', 'svd'))
+            if name == 'nca':
+                return NeighborhoodComponentsAnalysis(n_components=params.get('nca_n_components', 2),
+                                                      init=params.get('nca_init', 'auto'),
+                                                      random_state=seed)
+            if name == 'pls':
+                return PLSRegression(n_components=params.get('pls_n_components', 2))
+        elif self.task_type == 'survival_analysis':
+            seed = getattr(self, 'random_state', 42)
+            if name == 'survival_cox_ph':
+                return SurvivalTimeRegressor(base='hist_gradient_boosting', loss='poisson',
+                                             max_iter=params.get('surv_cox_max_iter', 100),
+                                             learning_rate=params.get('surv_cox_lr', 0.1),
+                                             random_state=seed)
+            if name == 'survival_random_forest':
+                return SurvivalTimeRegressor(base='random_forest',
+                                             n_estimators=params.get('surv_rf_n_estimators', 100),
+                                             max_depth=params.get('surv_rf_max_depth', 10),
+                                             random_state=seed)
+            if name == 'survival_gradient_boosting':
+                return SurvivalTimeRegressor(base='gradient_boosting',
+                                             n_estimators=params.get('surv_gb_n_estimators', 100),
+                                             max_depth=params.get('surv_gb_max_depth', 3),
+                                             learning_rate=params.get('surv_gb_lr', 0.1),
+                                             random_state=seed)
+        elif self.task_type == 'uplift_modeling':
+            seed = getattr(self, 'random_state', 42)
+            if name == 's_learner':
+                return SLearner(n_estimators=params.get('s_learner_n_est', 100),
+                                learning_rate=params.get('s_learner_lr', 0.1),
+                                max_depth=params.get('s_learner_depth', 3),
+                                random_state=seed)
+            if name == 't_learner':
+                return TLearner(n_estimators=params.get('t_learner_n_est', 100),
+                                learning_rate=params.get('t_learner_lr', 0.1),
+                                max_depth=params.get('t_learner_depth', 3),
+                                random_state=seed)
 
     def evaluate(self, X_test, y_test=None):
         # Density Estimation: evaluate log-likelihood of the held-out data
@@ -3353,6 +3691,31 @@ class AutoMLTrainer:
                 'max_log_likelihood': float(np.max(scores)),
             }
             return metrics, np.exp(np.clip(scores, -700, 700))
+
+        if self.task_type == 'dimensionality_reduction':
+            projected = _project_features(self.best_model, X_test)
+            metrics = {}
+            evr = getattr(self.best_model, 'explained_variance_ratio_', None)
+            if evr is not None:
+                metrics['explained_variance'] = float(np.sum(evr))
+            if y_test is not None:
+                labels = np.asarray(y_test)
+                if len(np.unique(labels)) > 1 and projected.shape[1] >= 2:
+                    metrics['supervised_separability'] = float(silhouette_score(projected, labels))
+            return metrics, projected
+
+        if y_test is not None and self.task_type in ('survival_analysis', 'uplift_modeling'):
+            # Both targets carry two columns, so the metric has to be read off the
+            # right half rather than treated as a single vector.
+            if self.task_type == 'survival_analysis':
+                duration, event = _split_two_column_target(y_test, 'survival_analysis')
+                preds = np.asarray(self.best_model.predict(X_test), dtype=float)
+                metrics = {'c_index': calculate_c_index(event, duration, -preds)}
+                return metrics, preds
+            treatment, outcome = _split_two_column_target(y_test, 'uplift_modeling')
+            uplift = np.asarray(self.best_model.predict(X_test), dtype=float)
+            metrics = {'qini_score': calculate_qini_score(treatment, outcome, uplift)}
+            return metrics, uplift
 
         if y_test is not None:
             if self.task_type == 'association_rules':
@@ -3406,7 +3769,9 @@ class AutoMLTrainer:
                     f1s.append(f1_score(y_t_arr[:, col], y_p_arr[:, col], average='weighted', zero_division=0))
                 metrics['accuracy'] = float(np.mean(accuracies))
                 metrics['f1'] = float(np.mean(f1s))
-                metrics['hamming_loss'] = hamming_loss(y_t_arr, y_p_arr)
+                metrics['hamming_loss'] = float(np.mean([
+                    hamming_loss(y_t_arr[:, c], y_p_arr[:, c]) for c in range(y_t_arr.shape[1])
+                ]))
             elif self.task_type in ['regression', 'forecast', 'ranking', 'multi_regression']:
                 metrics['rmse'] = np.sqrt(mean_squared_error(y_test, y_pred))
                 metrics['mae'] = mean_absolute_error(y_test, y_pred)
@@ -3432,7 +3797,16 @@ class AutoMLTrainer:
                     metrics['msle'] = mean_squared_log_error(y_test, np.clip(y_pred, 0, None))
                 except:
                     metrics['msle'] = 0.0
-            
+                if hasattr(self.best_model, 'predict_intervals'):
+                    # A quantile bundle carries its own band, so report how often the band
+                    # actually caught the truth and how wide it had to be to do it.
+                    lower, upper = self.best_model.predict_intervals(X_test)
+                    truth = np.asarray(y_test, dtype=float)
+                    lower = np.asarray(lower, dtype=float)
+                    upper = np.asarray(upper, dtype=float)
+                    metrics['interval_coverage'] = float(np.mean((truth >= lower) & (truth <= upper)))
+                    metrics['interval_mean_width'] = float(np.mean(upper - lower))
+
             elif self.task_type == 'anomaly_detection':
                 # Predictions: -1 = anomaly, 1 = normal.
                 # Labels: accept both {0 normal, 1 anomaly} and {-1 anomaly, 1 normal} conventions.
@@ -3716,12 +4090,76 @@ class AutoMLTrainer:
             'spectral': {
                 'spectral_n_clusters': ('int', 2, 20, 3)
             },
-            'hist_gradient_boosting': {
-                'hgb_max_iter': ('int', 10, 1000, 100),
-                'hgb_lr': ('float', 0.01, 0.3, 0.1),
-                'hgb_max_depth': ('int', 1, 50, 10),
-                'hgb_max_leaf_nodes': ('int', 20, 255, 31),
-                'hgb_l2': ('float', 0.0, 10.0, 0.0)
+            'hist_gradient_boosting': (
+                {
+                    'hgb_reg_max_iter': ('int', 10, 1000, 100),
+                    'hgb_reg_lr': ('float', 0.01, 0.3, 0.1),
+                    'hgb_reg_max_depth': ('int', 1, 50, 10),
+                    'hgb_reg_max_leaf_nodes': ('int', 20, 255, 31),
+                    'hgb_reg_l2': ('float', 0.0, 10.0, 0.0)
+                } if self.task_type == 'regression' else
+                {
+                    'hgb_max_iter': ('int', 10, 1000, 100),
+                    'hgb_lr': ('float', 0.01, 0.3, 0.1),
+                    'hgb_max_depth': ('int', 1, 50, 10),
+                    'hgb_max_leaf_nodes': ('int', 20, 255, 31),
+                    'hgb_l2': ('float', 0.0, 10.0, 0.0)
+                }
+            ),
+            'quantile_hgb': {
+                'qf_n_estimators': ('int', 10, 500, 100),
+                'qf_max_depth': ('int', 3, 30, 10),
+                'qf_lower': ('float', 0.05, 0.35, 0.1),
+                'qf_upper': ('float', 0.65, 0.95, 0.9)
+            },
+            'quantile_gbm': {
+                'qg_n_estimators': ('int', 10, 500, 100),
+                'qg_max_depth': ('int', 3, 30, 10),
+                'qg_lr': ('float', 0.01, 0.3, 0.1),
+                'qg_lower': ('float', 0.05, 0.35, 0.1),
+                'qg_upper': ('float', 0.65, 0.95, 0.9)
+            },
+            'pca': {
+                'pca_n_components': ('int', 2, 10, 2),
+                'pca_solver': ('list', ['auto', 'full', 'arpack', 'randomized'], 'auto')
+            },
+            'truncated_svd': {
+                'svd_n_components': ('int', 2, 10, 2),
+                'svd_alg': ('list', ['arpack', 'randomized'], 'randomized')
+            },
+            'lda': {
+                'lda_n_components': ('int', 1, 5, 1),
+                'lda_solver': ('list', ['svd', 'eigen'], 'svd')
+            },
+            'nca': {
+                'nca_n_components': ('int', 2, 10, 2),
+                'nca_init': ('list', ['auto', 'pca', 'random'], 'auto')
+            },
+            'pls': {
+                'pls_n_components': ('int', 2, 10, 2)
+            },
+            'survival_cox_ph': {
+                'surv_cox_max_iter': ('int', 50, 300, 100),
+                'surv_cox_lr': ('float', 0.01, 0.2, 0.1)
+            },
+            'survival_random_forest': {
+                'surv_rf_n_estimators': ('int', 50, 200, 100),
+                'surv_rf_max_depth': ('int', 3, 15, 10)
+            },
+            'survival_gradient_boosting': {
+                'surv_gb_n_estimators': ('int', 50, 200, 100),
+                'surv_gb_max_depth': ('int', 2, 8, 3),
+                'surv_gb_lr': ('float', 0.01, 0.2, 0.1)
+            },
+            's_learner': {
+                's_learner_n_est': ('int', 50, 200, 100),
+                's_learner_lr': ('float', 0.01, 0.2, 0.1),
+                's_learner_depth': ('int', 2, 8, 3)
+            },
+            't_learner': {
+                't_learner_n_est': ('int', 50, 200, 100),
+                't_learner_lr': ('float', 0.01, 0.2, 0.1),
+                't_learner_depth': ('int', 2, 8, 3)
             },
             'bagging': {
                 'bagging_n_estimators': ('int', 5, 200, 10),
