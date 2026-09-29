@@ -19,7 +19,7 @@ def get_model_pillars_profile(model_name: str, task_type: str = "classification"
     # Modality Detection
     is_cv = t_type in ["image_classification", "image_segmentation", "object_detection", "pose_estimation"] or any(k in m_name for k in ['resnet', 'yolo', 'unet', 'vit', 'conv', 'torchvision'])
     is_rl = t_type in ["rl_agent", "reinforcement_learning", "rl"] or any(k in m_name for k in ['ppo', 'a2c', 'dqn', 'sac', 'td3', 'd3rlpy'])
-    is_seq = t_type in ["forecast", "time_series"] or any(k in m_name for k in ['lstm', 'tcn', 'arima', 'prophet', 'seq'])
+    is_seq = t_type in ["forecast", "forecast_classification", "ts_clustering"] or any(k in m_name for k in ['lstm', 'tcn', 'arima', 'prophet', 'seq'])
     
     # Identify White-box vs Black-box structure
     is_white_box = not (is_cv or is_rl or is_seq) and any(k in m_name for k in [

@@ -247,22 +247,6 @@ class AutoMLDataProcessor:
 
     def fit_transform(self, df, nlp_cols=None):
         self.nlp_cols = nlp_cols if nlp_cols else []
-        self.quality_report_html = None
-        try:
-            from deepchecks.tabular import Dataset as DeepDataset
-            from deepchecks.tabular.suites import data_integrity
-            label = self.target_column if self.target_column in df.columns else None
-            if len(df) > 10:
-                logger.info("Running Data Integrity check with Deepchecks...")
-                ds = DeepDataset(df, label=label, cat_features=df.select_dtypes(include=['object', 'category']).columns.tolist())
-                integ_suite = data_integrity()
-                suite_result = integ_suite.run(ds)
-                # Fixed: Use lower case np.inf for NumPy 2.0 compatibility.
-                # The warning in Deepchecks might still appear if the library uses the old alias internally.
-                self.quality_report_html = suite_result.save_as_html(render_static=True)
-                logger.info("Data Integrity check completed.")
-        except Exception as e:
-            logger.warning(f"Deepchecks failed: {e}")
 
         if self.nlp_cols:
             for col in self.nlp_cols:

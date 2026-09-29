@@ -730,8 +730,6 @@ There is no pytest configuration file (no `pytest.ini` / `pyproject.toml` /
 
 ```bash
 pytest -q tests/
-# or the provided wrapper (runs pytest.main(["tests", "-v"])):
-python tests/run_tests.py
 ```
 
 `tests/conftest.py` provides an autouse fixture that redirects MLflow to a
@@ -744,21 +742,20 @@ temporary `file:///` store for every test, keeping the real
 |---|---|
 | `test_core.py` | processor, AutoMLTrainer classification/regression, DriftDetector, save/load_pipeline |
 | `test_classical.py` | classical model zoo, supervised dimensionality reduction |
-| `test_mapa_mental.py` | 5-pillars profile, model card, GLM Poisson/Gamma, survival, uplift |
+| `test_model_pillars.py` | 5-pillars profile, model card, GLM Poisson/Gamma, survival, uplift |
 | `test_pytorch_forecast.py` | LSTM/TCN regressors |
 | `test_rl.py` | RLTrainer init/train/save/load/evaluate, environments, wrappers |
 | `test_orchestrator.py` | classical submission + RL training via orchestrator |
 | `test_api.py` | `/health/live`, API-key enforcement, predict + SQLite telemetry |
 | `test_data_lake.py` | save/load/delete + path-traversal rejection |
-| `test_drift.py` | numeric/categorical drift signals |
+| `test_drift.py` | numeric/categorical drift signals, high-cardinality skip, threshold |
 | `test_mlflow_tracking.py` | `register_model_from_run` artifact resolution |
-| `test_patch.py` | RunInfo `run_uuid` patch |
+| `test_task_type_regressions.py` | train() + evaluate() per task type, band calibration, search-space keys |
 | `test_stability_integration.py` | StabilityAnalyzer |
 | `test_card.py` | model card generation |
 | `test_streamlit_gui.py` | app imports / initialization |
 | `test_reflex_services.py` | asserts the legacy Reflex module is gone |
 | `test_interface_simulation_unified.py` | unittest-based unified interface simulation |
-| `inspect_runinfo.py`, `reproduce_mlflow_error.py` | non-pytest debug scripts |
 
 ---
 

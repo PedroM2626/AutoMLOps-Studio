@@ -1,5 +1,5 @@
 services:
-  # Serviço da API (FastAPI)
+  # API service (FastAPI)
   api:
     build: .
     container_name: automl-api
@@ -12,7 +12,7 @@ services:
       - .env
     restart: unless-stopped
 
-  # Serviço do Dashboard (Streamlit)
+  # Dashboard service (Streamlit)
   dashboard:
     build: .
     container_name: automl-dashboard
@@ -27,7 +27,7 @@ services:
       - api
     restart: unless-stopped
 
-  # MLflow UI (Visualização de Experimentos)
+  # MLflow UI (experiment viewer)
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.19.0
     container_name: automl-mlflow
@@ -35,6 +35,6 @@ services:
       - "5000:5000"
     volumes:
       - .:/app
-    # Aponta para o banco SQLite na raiz e artifacts no mlruns
+    # Points at the SQLite database in the repo root and artifacts under mlruns
     command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns
     restart: unless-stopped
