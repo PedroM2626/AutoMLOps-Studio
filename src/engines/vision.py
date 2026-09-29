@@ -7,13 +7,29 @@ from PIL import Image, ImageDraw
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset, random_split
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import datasets, models, transforms
 from torchvision.models.segmentation import deeplabv3_resnet50, DeepLabV3_ResNet50_Weights
 from torchvision.models.detection import fasterrcnn_resnet50_fpn, FasterRCNN_ResNet50_FPN_Weights
 from torchvision.models.detection import keypointrcnn_resnet50_fpn, KeypointRCNN_ResNet50_FPN_Weights
 
 logger = logging.getLogger(__name__)
+
+
+def _split_with_transforms(make_dataset, total, val_split, train_tf, val_tf, seed=42):
+    """Split indices once, then build one dataset instance per side.
+
+    random_split hands both subsets the SAME dataset object, so giving the validation
+    subset a different transform also replaces the training view: augmentation was silently
+    dropped from training, and where no val transform was applied at all, validation scored
+    randomly augmented images and stopped being reproducible.
+    """
+    val_size = max(1, int(total * val_split))
+    permutation = torch.randperm(total, generator=torch.Generator().manual_seed(seed))
+    train_idx = permutation[val_size:].tolist()
+    val_idx = permutation[:val_size].tolist()
+    return (Subset(make_dataset(train_tf), train_idx),
+            Subset(make_dataset(val_tf), val_idx))
 
 # ---------------------------------------------------------------------------
 # Supported backbones for classification / multi-label
@@ -105,15 +121,29 @@ class SegmentationDataset(Dataset):
         self.mask_dir = mask_dir
         self.transform = transform
         self.mask_transform = mask_transform
-        self.images = sorted(os.listdir(image_dir))
-        self.masks = sorted(os.listdir(mask_dir))
+        # Pair by filename: two independently sorted listings drift as soon as one folder
+        # has an extra file, and the training then scores images against the wrong mask.
+        images = {name for name in os.listdir(image_dir)
+                  if os.path.isfile(os.path.join(image_dir, name))}
+        masks = {name for name in os.listdir(mask_dir)
+                 if os.path.isfile(os.path.join(mask_dir, name))}
+        self.pairs = sorted(images & masks)
+        skipped = sorted((images | masks) - set(self.pairs))
+        if skipped:
+            logger.warning(
+                f"Segmentation skipped {len(skipped)} file(s) without a counterpart in the "
+                f"other folder, e.g. {skipped[:3]}"
+            )
+        if not self.pairs:
+            raise ValueError(f"No image/mask pairs found in {image_dir} and {mask_dir}")
 
     def __len__(self):
-        return len(self.images)
+        return len(self.pairs)
 
     def __getitem__(self, idx):
-        img_path = os.path.join(self.image_dir, self.images[idx])
-        mask_path = os.path.join(self.mask_dir, self.masks[idx])
+        name = self.pairs[idx]
+        img_path = os.path.join(self.image_dir, name)
+        mask_path = os.path.join(self.mask_dir, name)
 
         image = Image.open(img_path).convert('RGB')
         mask = Image.open(mask_path).convert('L')  # Grayscale mask
@@ -187,6 +217,23 @@ class CVAutoMLTrainer:
             return model.to(self.device)
 
     # ------------------------------------------------------------------
+    def _safe_augmentation(self, augmentation_config):
+        """Drop geometric augmentations for segmentation.
+
+        The mask is transformed separately with a resize-only pipeline, so flipping or
+        rotating the image without the same op on the mask would train the model against
+        shifted labels.
+        """
+        if not augmentation_config or self.task_type != 'image_segmentation':
+            return augmentation_config
+        geometric = ('horizontal_flip', 'vertical_flip', 'random_rotation', 'random_crop')
+        dropped = [key for key in geometric if augmentation_config.get(key)]
+        if dropped:
+            logger.warning(
+                f"Segmentation ignores {dropped}: the mask would not be transformed with the image."
+            )
+        return {key: value for key, value in augmentation_config.items() if key not in geometric}
+
     def _build_transforms(self, augmentation_config=None, train=True):
         """Build torchvision transforms with optional augmentation."""
         aug = augmentation_config or {}
@@ -239,7 +286,7 @@ class CVAutoMLTrainer:
         optimizer_name : str
             'adam', 'sgd', or 'rmsprop'.
         """
-        train_tf = self._build_transforms(augmentation_config, train=True)
+        train_tf = self._build_transforms(self._safe_augmentation(augmentation_config), train=True)
         val_tf = self._build_transforms(augmentation_config=None, train=False)
 
         # ------ Segmentation ------
@@ -252,14 +299,17 @@ class CVAutoMLTrainer:
                 transforms.Resize((224, 224), interpolation=Image.NEAREST),
                 transforms.ToTensor()
             ])
-            full_dataset = SegmentationDataset(
+            reference = SegmentationDataset(
                 data_dir, mask_dir, transform=train_tf, mask_transform=mask_tf)
+            train_ds, val_ds = _split_with_transforms(
+                lambda tf: SegmentationDataset(data_dir, mask_dir, transform=tf, mask_transform=mask_tf),
+                len(reference), val_split, train_tf, val_tf)
             model = self.get_model()
             criterion = nn.CrossEntropyLoss()
             optimizer = self._make_optimizer(model, optimizer_name, lr)
 
             return self._run_training_loop(
-                model, full_dataset, full_dataset, criterion, optimizer,
+                model, train_ds, val_ds, criterion, optimizer,
                 n_epochs, batch_size, callback, segmentation=True)
 
         # ------ Object Detection / Pose Estimation: not trainable yet ------
@@ -278,17 +328,13 @@ class CVAutoMLTrainer:
                 logger.error('label_csv is required for multi-label classification')
                 return None
 
-            full_dataset = MultiLabelImageDataset(data_dir, label_csv, transform=train_tf)
-            self.num_classes = len(full_dataset.label_names)
-            self.label_names = full_dataset.label_names
+            reference = MultiLabelImageDataset(data_dir, label_csv, transform=train_tf)
+            self.num_classes = len(reference.label_names)
+            self.label_names = reference.label_names
 
-            val_size = max(1, int(len(full_dataset) * val_split))
-            train_size = len(full_dataset) - val_size
-            train_ds, val_ds = random_split(
-                full_dataset, [train_size, val_size],
-                generator=torch.Generator().manual_seed(42))
-            # Apply val transforms to val subset
-            val_ds.dataset.transform = val_tf
+            train_ds, val_ds = _split_with_transforms(
+                lambda tf: MultiLabelImageDataset(data_dir, label_csv, transform=tf),
+                len(reference), val_split, train_tf, val_tf)
 
             model = self.get_model()
             criterion = nn.BCEWithLogitsLoss()
@@ -305,18 +351,16 @@ class CVAutoMLTrainer:
         # ------ Standard Classification / Image Anomaly Detection ------
         else:
             try:
-                full_dataset = datasets.ImageFolder(data_dir, transform=train_tf)
-                self.num_classes = len(full_dataset.classes)
-                self.class_names = full_dataset.classes
+                reference = datasets.ImageFolder(data_dir, transform=train_tf)
+                self.num_classes = len(reference.classes)
+                self.class_names = reference.classes
             except Exception as e:
                 logger.error(f'Error loading images: {e}')
                 return None
 
-            val_size = max(1, int(len(full_dataset) * val_split))
-            train_size = len(full_dataset) - val_size
-            train_ds, val_ds = random_split(
-                full_dataset, [train_size, val_size],
-                generator=torch.Generator().manual_seed(42))
+            train_ds, val_ds = _split_with_transforms(
+                lambda tf: datasets.ImageFolder(data_dir, transform=tf),
+                len(reference), val_split, train_tf, val_tf)
 
             model = self.get_model()
             criterion = nn.CrossEntropyLoss()
@@ -452,9 +496,11 @@ class CVAutoMLTrainer:
     # ------------------------------------------------------------------
     def _run_training_loop(self, model, train_ds, val_ds, criterion, optimizer,
                             n_epochs, batch_size, callback, segmentation=False):
-        """Segmentation training loop (no validation split)."""
+        """Segmentation training loop with a held-out validation pass."""
         loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,
                             num_workers=0, pin_memory=False)
+        val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False,
+                                num_workers=0, pin_memory=False)
         start_time = time.time()
         for epoch in range(n_epochs):
             model.train()
@@ -471,23 +517,41 @@ class CVAutoMLTrainer:
                 loss.backward()
                 optimizer.step()
                 running_loss += loss.item() * inputs.size(0)
+                _, predicted = logits.max(1)
                 if segmentation:
-                    _, predicted = logits.max(1)
                     total += targets.nelement()
                     correct += predicted.eq(targets).sum().item()
                 else:
-                    _, predicted = logits.max(1)
                     total += targets.size(0)
                     correct += predicted.eq(targets).sum().item()
 
             epoch_loss = running_loss / len(train_ds)
             epoch_acc = correct / total if total else 0
+
+            model.eval()
+            val_loss_sum, val_correct, val_total = 0.0, 0, 0
+            with torch.no_grad():
+                for inputs, targets in val_loader:
+                    inputs, targets = inputs.to(self.device), targets.to(self.device)
+                    outputs = model(inputs)
+                    logits = outputs['out'] if segmentation else outputs
+                    val_loss_sum += criterion(logits, targets).item() * inputs.size(0)
+                    _, predicted = logits.max(1)
+                    if segmentation:
+                        val_total += targets.nelement()
+                        val_correct += predicted.eq(targets).sum().item()
+                    else:
+                        val_total += targets.size(0)
+                        val_correct += predicted.eq(targets).sum().item()
+
+            val_loss = val_loss_sum / max(1, len(val_ds))
+            val_acc = val_correct / val_total if val_total else 0.0
             duration = time.time() - start_time
             entry = {'epoch': epoch, 'acc': epoch_acc, 'loss': epoch_loss,
-                     'val_acc': 0.0, 'val_loss': 0.0}
+                     'val_acc': val_acc, 'val_loss': val_loss}
             self.history.append(entry)
             if callback:
-                callback(epoch, epoch_acc, epoch_loss, duration, 0.0, 0.0)
+                callback(epoch, epoch_acc, epoch_loss, duration, val_acc, val_loss)
 
         self.best_model = model
         return model
@@ -504,18 +568,11 @@ class CVAutoMLTrainer:
         input_tensor = transform(img).unsqueeze(0).to(self.device)
 
         with torch.no_grad():
-            if self.task_type in ['object_detection', 'pose_estimation']:
-                outputs = self.best_model([input_tensor.squeeze(0)])
-            else:
-                outputs = self.best_model(input_tensor)
+            outputs = self.best_model(input_tensor)
             if self.task_type == 'image_segmentation':
                 logits = outputs['out']
                 _, predicted = logits.max(1)
                 return predicted.squeeze(0).cpu().numpy()
-            elif self.task_type == 'object_detection':
-                return outputs[0]
-            elif self.task_type == 'pose_estimation':
-                return outputs[0]
             elif self.task_type == 'image_multi_label':
                 probs = torch.sigmoid(outputs).squeeze(0).cpu().numpy()
                 preds = (probs >= self.multilabel_threshold).astype(int)
