@@ -262,17 +262,15 @@ class CVAutoMLTrainer:
                 model, full_dataset, full_dataset, criterion, optimizer,
                 n_epochs, batch_size, callback, segmentation=True)
 
-        # ------ Object Detection (demo stub) ------
+        # ------ Object Detection / Pose Estimation: not trainable yet ------
         elif self.task_type in ['object_detection', 'pose_estimation']:
-            model = self.get_model()
-            optimizer = self._make_optimizer(model, optimizer_name, lr)
-            for epoch in range(n_epochs):
-                if callback:
-                    callback(epoch, 0.0, 0.0, 0.0, 0.0, 0.0)
-                self.history.append({'epoch': epoch, 'acc': 0.0, 'loss': 0.0,
-                                     'val_acc': 0.0, 'val_loss': 0.0})
-            self.best_model = model
-            return model
+            # This used to loop over epochs writing zeros, so the run looked trained,
+            # logged a flat loss curve and shipped an untrained model as the champion.
+            raise NotImplementedError(
+                f"{self.task_type} needs a labelled detection/pose dataset and is not "
+                "implemented yet. Use image_classification, image_multi_label or "
+                "image_segmentation."
+            )
 
         # ------ Multi-label ------
         elif self.task_type == 'image_multi_label':
