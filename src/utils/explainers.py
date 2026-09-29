@@ -9,23 +9,6 @@ except:
 
 logger = logging.getLogger(__name__)
 
-def shap_target(model):
-    """Hand shap the raw booster when the estimator is an sklearn wrapper.
-
-    XGBClassifier exposes feature_names_in_ as a read-only property on the pinned xgboost,
-    and shap's TreeExplainer assigns feature names onto whatever object it is given, so the
-    wrapper path raised and fell through to KernelExplainer - orders of magnitude slower.
-    """
-    getter = getattr(model, "get_booster", None)
-    if callable(getter):
-        try:
-            booster = getter()
-            if booster is not None:
-                return booster
-        except Exception as booster_err:
-            logger.warning(f"Could not unwrap the booster for SHAP: {booster_err}")
-    return model
-
 def build_waterfall(shap_values, expected_value, row, feature_names, focus_class=None):
     """Reduce one row's SHAP output to the single-vector shape a waterfall plot needs.
 
@@ -102,7 +85,7 @@ class ModelExplainer:
             if any(x in model_type for x in ["xgb", "lgbm", "randomforest", "extratrees"]):
                 logger.info(f"ModelExplainer: Using TreeExplainer for {model_type}")
                 try:
-                    self.explainer = shap.TreeExplainer(shap_target(model))
+                    self.explainer = shap.TreeExplainer(model)
                 except Exception as e:
                     logger.warning(f"TreeExplainer failed: {e}. Falling back to general Explainer.")
                     self.explainer = shap.Explainer(model, background)

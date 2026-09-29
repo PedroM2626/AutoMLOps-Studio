@@ -528,37 +528,21 @@ def _render(explanation):
 
 
 
-def test_xgboost_is_unwrapped_before_shap_sees_it():
-    """shap assigns feature names onto whatever object it receives; on the pinned xgboost
-    the wrapper's feature_names_in_ is read-only, which pushed explanations down to
-    KernelExplainer - orders of magnitude slower."""
+
+def test_xgboost_explanation_stays_on_the_fast_tree_path(tiny_frame):
+    """shap 0.49.1 could not read an xgboost 3.1.1 tree - it raised while parsing the leaf
+    values, so every boosted-tree explanation fell through to KernelExplainer and the
+    Experiments page silently lost its SHAP chart. The pinned shap has to keep this fast."""
     import shap
-    from src.utils.explainers import shap_target
-
     xgboost = pytest.importorskip("xgboost")
-    rng = np.random.default_rng(6)
-    X = pd.DataFrame({"num_a": rng.normal(0, 1, 40), "num_b": rng.normal(0, 1, 40)})
-    y = (X["num_a"] > 0).astype(int).to_numpy()
-    model = xgboost.XGBClassifier(n_estimators=10, max_depth=2, eval_metric="logloss",
-                                  random_state=0).fit(X, y)
+    X, y, _, _ = tiny_frame
+    model = xgboost.XGBClassifier(
+        n_estimators=20, max_depth=3, eval_metric="logloss", random_state=0
+    ).fit(X, y)
 
-    target = shap_target(model)
+    explainer = ModelExplainer(model, X, task_type="classification")
 
-    assert target is not model
-    assert type(target).__name__ == "Booster"
-    explainer = shap.TreeExplainer(target)
-    values = np.asarray(explainer.shap_values(X.head(5)))
-    assert values.shape[0] == 5
+    assert "TreeExplainer" in type(explainer.explainer).__name__
+    values = _values_matrix(explainer.get_shap_values(X.head(8)))
+    _assert_matches_input(values, 8, X.shape[1])
     assert np.isfinite(values).all()
-
-
-def test_estimators_without_a_booster_are_passed_through():
-    from sklearn.ensemble import RandomForestClassifier
-    from src.utils.explainers import shap_target
-
-    rng = np.random.default_rng(7)
-    X = pd.DataFrame({"num_a": rng.normal(0, 1, 30)})
-    y = (X["num_a"] > 0).astype(int).to_numpy()
-    model = RandomForestClassifier(n_estimators=4, random_state=0).fit(X, y)
-
-    assert shap_target(model) is model

@@ -5207,10 +5207,10 @@ if current_main_section == "🔮 What-If Simulator":
                     with r2:
                         import shap
                         import matplotlib.pyplot as plt
-                        from src.utils.explainers import build_waterfall, shap_target
+                        from src.utils.explainers import build_waterfall
                         st.markdown("#### 💡 SHAP Local Explanation")
                         try:
-                            explainer = shap.TreeExplainer(shap_target(model))
+                            explainer = shap.TreeExplainer(model)
                             raw_values = explainer.shap_values(input_df)
                             # Regression returns (rows, features); classification adds an output
                             # axis, so the class has to be picked before plotting.
