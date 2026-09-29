@@ -9,7 +9,10 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env
+      # Optional: a fresh clone has no .env (it is gitignored), and requiring one made
+      # "docker compose up" fail before any container started.
+      - path: .env
+        required: false
     restart: unless-stopped
 
   # Dashboard service (Streamlit)
@@ -22,19 +25,22 @@ services:
     volumes:
       - .:/app
     env_file:
-      - .env
+      - path: .env
+        required: false
     depends_on:
       - api
     restart: unless-stopped
 
   # MLflow UI (experiment viewer)
   mlflow:
-    image: ghcr.io/mlflow/mlflow:v2.19.0
+    # Built from this repo so the UI and the client agree on one mlflow version: the
+    # pinned ghcr image predates the 3.x store schema this app migrates into mlflow.db.
+    # Points at the SQLite database in the repo root and artifacts under mlruns.
+    build: .
+    command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns
     container_name: automl-mlflow
     ports:
       - "5000:5000"
     volumes:
       - .:/app
-    # Points at the SQLite database in the repo root and artifacts under mlruns
-    command: mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns
     restart: unless-stopped

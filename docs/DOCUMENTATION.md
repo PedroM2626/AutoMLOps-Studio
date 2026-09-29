@@ -287,7 +287,7 @@ Open **http://localhost:5000**.
 |---|---|---|---|
 | `api` | `uvicorn api:app --host 0.0.0.0 --port 8000` | 8000 | **8000** |
 | `dashboard` | Streamlit (`app.py`), depends on `api` | 8501 | **8501** |
-| `mlflow` | image `ghcr.io/mlflow/mlflow:v2.19.0`, `mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns` | 5000 | **5000** |
+| `mlflow` | builds this repo's image so client and UI share one mlflow version, `mlflow ui --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////app/mlflow.db --default-artifact-root /app/mlruns` | 5000 | **5000** |
 
 ```bash
 # Ensure .env exists (the api service fails without API_SECRET_KEY)
