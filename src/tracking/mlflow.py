@@ -179,6 +179,23 @@ def get_model_details(model_name, version=None):
         print(f"Error fetching model details: {e}")
         return None
 
+def log_pytorch_model(model, name="model"):
+    """Log a torch model in a format this mlflow can write and read back.
+
+    mlflow 3.16 defaults to pt2, which traces `forward()` on an example input - a Faster /
+    Keypoint R-CNN takes a list of tensors and cannot be traced, so the call fails outright.
+    Older releases pickle by default and have no such parameter at all, so it is only passed
+    when the installed signature accepts it.
+    """
+    import inspect
+    import mlflow.pytorch as mlflow_pytorch
+
+    kwargs = {}
+    if "serialization_format" in inspect.signature(mlflow_pytorch.log_model).parameters:
+        kwargs["serialization_format"] = "pickle"
+    return mlflow_pytorch.log_model(model, name=name, **kwargs)
+
+
 def load_registered_model(model_name, version=None):
     """Load a registered model with the loader its artifact was actually logged with.
 

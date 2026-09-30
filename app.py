@@ -3639,8 +3639,8 @@ if current_main_section == "⚙️ AutoML":
                                     mlflow.log_metric(f"final_{key}", last_epoch[key])
                                 
                             # Log Model
-                            import torch
-                            mlflow.pytorch.log_model(best_model_cv, name="model")
+                            from src.tracking.mlflow import log_pytorch_model
+                            log_pytorch_model(best_model_cv)
                             
                             # Generate Code
                             st.session_state['cv_run_id'] = run.info.run_id
