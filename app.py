@@ -3392,7 +3392,7 @@ if current_main_section == "⚙️ AutoML":
         st.markdown("""
         <div class='hero-header' style='background:linear-gradient(135deg, rgba(139, 92, 246, 0.15) 0%, rgba(31, 41, 55, 0.4) 100%);'>
           <div class='hero-title'>👁️ Vision Studio</div>
-                    <div class='hero-subtitle'>Train deep learning vision models for classification, multi-label, segmentation and image anomaly detection.</div>
+                    <div class='hero-subtitle'>Train deep learning vision models for classification, multi-label, segmentation, anomaly detection, object detection and pose estimation.</div>
         </div>""", unsafe_allow_html=True)
 
         CV_TASKS = [
@@ -3400,6 +3400,8 @@ if current_main_section == "⚙️ AutoML":
             ("image_multi_label", "🏷️", "Multi-Label", "Assign multiple labels to an image simultaneously."),
             ("image_segmentation", "🧩", "Segmentation", "Pixel-level classification (masks)."),
             ("image_anomaly_detection", "🚨", "Anomaly Detection", "Detect whether an image is anomalous or normal."),
+            ("object_detection", "📦", "Object Detection", "Localise objects with boxes. Needs a COCO JSON (images + annotations)."),
+            ("pose_estimation", "🤸", "Pose Estimation", "Boxes plus keypoints. Needs a COCO JSON with keypoint annotations."),
         ]
         
         st.markdown("<h4 style='margin-bottom:12px;'>1. Select Vision Task</h4>", unsafe_allow_html=True)
@@ -3481,6 +3483,18 @@ if current_main_section == "⚙️ AutoML":
                 if len(subdirs) == 1 and not any(f.endswith('.jpg') or f.endswith('.png') for f in os.listdir(data_dir)):
                     data_dir = os.path.join(data_dir, subdirs[0])
                 st.success(f"Data ready (found {len(os.listdir(data_dir))} items in root).")
+
+                if cv_task in ('object_detection', 'pose_estimation'):
+                    # Catch the missing sidecar here: discovering it only after the Start
+                    # Training click wasted the upload and extraction on a guaranteed failure.
+                    from src.engines.vision import find_coco_annotation
+                    found_annotation = find_coco_annotation(temp_extract_dir)
+                    if found_annotation:
+                        st.success(f"COCO annotation file: `{os.path.basename(found_annotation)}`")
+                    else:
+                        st.error("This archive has no COCO annotation JSON (it needs the "
+                                 "'images', 'annotations' and 'categories' keys), which "
+                                 f"{cv_task} trains from.")
             elif cv_upload_path:
                 st.error("Selected image archive must be a ZIP file.")
 
@@ -3610,6 +3624,19 @@ if current_main_section == "⚙️ AutoML":
                                 mlflow.log_metric("final_val_acc", hist_data['val_acc'][-1])
                             if len(hist_data['val_loss']) > 0:
                                 mlflow.log_metric("final_val_loss", hist_data['val_loss'][-1])
+
+                            if cv_task in ('object_detection', 'pose_estimation') and trainer.history:
+                                # Detection quality is not an accuracy: report what was measured
+                                # on the held-out split instead of a single blended score.
+                                last_epoch = trainer.history[-1]
+                                shown = {'precision': 'Precision', 'recall': 'Recall',
+                                         'f1': 'F1 @ IoU 0.5'}
+                                if last_epoch.get('pck') is not None:
+                                    shown['pck'] = 'PCK @ 0.1'
+                                score_cols = st.columns(len(shown))
+                                for col_score, (key, label) in zip(score_cols, shown.items()):
+                                    col_score.metric(label, f"{last_epoch[key]:.3f}")
+                                    mlflow.log_metric(f"final_{key}", last_epoch[key])
                                 
                             # Log Model
                             import torch
@@ -3675,10 +3702,15 @@ if current_main_section == "⚙️ AutoML":
                         mask_img = Image.fromarray((prediction * (255 // (prediction.max() if prediction.max() > 0 else 1))).astype(np.uint8))
                         st.image(mask_img, caption="Predicted Mask", use_container_width=True)
                     elif trainer.task_type in ['object_detection', 'pose_estimation']:
-                        if isinstance(prediction, dict):
-                            st.json({k: str(type(v)) for k, v in prediction.items()})
-                        else:
-                            st.write(prediction)
+                        from PIL import Image as PILImage
+                        from src.engines.vision import draw_detections
+                        overlay, kept = draw_detections(PILImage.open(img_path), prediction)
+                        st.image(overlay,
+                                 caption=f"{kept} detection(s) above 0.50 confidence",
+                                 use_container_width=True)
+                        if not kept:
+                            st.info("No box cleared the 0.50 threshold. Untrained or "
+                                    "under-trained models often need more epochs.")
 
                     try:
                         os.remove(img_path)
@@ -5089,16 +5121,25 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                                 loaded_model = load_registered_model(selected_model_name, selected_version)
                                 
                                 img = Image.open(test_img).convert('RGB')
+                                # Every vision model here was trained on ImageNet-normalised
+                                # tensors, so skipping the normalise step fed this page pixels
+                                # the model never saw and made every score it shows meaningless.
                                 transform = T.Compose([
                                     T.Resize((224, 224)),
                                     T.ToTensor(),
+                                    T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
                                 ])
                                 img_t = transform(img).unsqueeze(0)
                                 
                                 loaded_model.eval()
+                                # A model logged from a GPU run comes back with CUDA weights, so
+                                # the input has to follow the model: feeding it CPU tensors broke
+                                # every vision task on this page whenever training used CUDA.
+                                model_device = next(loaded_model.parameters()).device
+                                img_t = img_t.to(model_device)
                                 with torch.no_grad():
                                     if task_type in ['object_detection', 'pose_estimation']:
-                                        outputs = loaded_model([img_t.squeeze(0)])
+                                        outputs = loaded_model([img_t[0]])
                                     else:
                                         outputs = loaded_model(img_t)
                                 
@@ -5112,20 +5153,38 @@ loaded_model = mlflow.pyfunc.load_model("models:/{selected_model_name}/{selected
                                     st.success("Multi-label probabilities generated.")
                                     st.json({"probs": probs.tolist()})
                                 elif task_type == 'image_segmentation':
-                                    mask = outputs.argmax(dim=1).squeeze().numpy()
+                                    mask = outputs['out'].argmax(dim=1).squeeze().cpu().numpy() \
+                                        if isinstance(outputs, dict) \
+                                        else outputs.argmax(dim=1).squeeze().cpu().numpy()
                                     st.success("Segmentation Mask Generated!")
                                     mask_img = Image.fromarray((mask * (255 // (mask.max() if mask.max() > 0 else 1))).astype('uint8'))
                                     st.image(mask_img, caption="Predicted Mask")
                                 elif task_type in ['object_detection', 'pose_estimation']:
                                     pred_obj = outputs[0] if isinstance(outputs, list) else outputs
-                                    st.success("Structured detection/pose output generated.")
-                                    if isinstance(pred_obj, dict):
-                                        st.json({k: str(type(v)) for k, v in pred_obj.items()})
-                                    else:
-                                        st.write(pred_obj)
+                                    from src.engines.vision import draw_detections
+                                    # The model was fed a 224x224 resize, so its coordinates
+                                    # have to come back to this image's pixels before drawing.
+                                    scale_x, scale_y = img.size[0] / 224.0, img.size[1] / 224.0
+                                    boxes = pred_obj["boxes"].cpu().numpy()
+                                    boxes[:, [0, 2]] *= scale_x
+                                    boxes[:, [1, 3]] *= scale_y
+                                    drawable = {"boxes": boxes,
+                                                "scores": pred_obj["scores"].cpu().numpy(),
+                                                "labels": pred_obj["labels"].cpu().numpy()}
+                                    if "keypoints" in pred_obj:
+                                        keypoints = pred_obj["keypoints"].cpu().numpy()
+                                        keypoints[..., 0] *= scale_x
+                                        keypoints[..., 1] *= scale_y
+                                        drawable["keypoints"] = keypoints
+                                    overlay, kept = draw_detections(img, drawable)
+                                    st.image(overlay,
+                                             caption=f"{kept} detection(s) above 0.50 confidence")
+                                    if not kept:
+                                        st.info("No box cleared the 0.50 threshold. An "
+                                                "under-trained model often needs more epochs.")
                                 else:
                                     st.success("Prediction Generated!")
-                                    st.write(outputs.numpy())
+                                    st.write(outputs.cpu().numpy())
                             except Exception as e:
                                 st.error(f"Vision Inference Error: {e}")
                             

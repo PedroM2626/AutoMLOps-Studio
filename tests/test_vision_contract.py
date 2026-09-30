@@ -2,7 +2,8 @@
 
 Scope is the surface app.py drives: the Vision Studio wizard (CVAutoMLTrainer), the
 "Architect Insight" text (get_cv_explanation) and the dataset/transform helpers.
-Nothing here builds a torchvision backbone, because that downloads pretrained weights.
+Detection and pose models are built with weights=None, so nothing here downloads
+pretrained weights; training them end to end is tests/test_vision_detection.py.
 """
 
 import ast
@@ -25,8 +26,10 @@ TRAINABLE_TASK_TYPES = {
     "image_multi_label",
     "image_segmentation",
     "image_anomaly_detection",
+    "object_detection",
+    "pose_estimation",
 }
-UNIMPLEMENTED_TASK_TYPES = ("object_detection", "pose_estimation")
+DETECTION_TASK_TYPES = ("object_detection", "pose_estimation")
 
 RANDOM_TRANSFORMS = {
     "RandomHorizontalFlip",
@@ -102,88 +105,88 @@ def segmentation_dirs(tmp_path_factory, rng):
 
 
 # ---------------------------------------------------------------------------
-# The unsupported-task guard (the point of this file)
+# Detection and pose: the input guard that replaced the old NotImplementedError
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("task_type", UNIMPLEMENTED_TASK_TYPES)
-def test_unsupported_task_train_raises_not_implemented(task_type, tmp_path):
-    trainer = CVAutoMLTrainer(task_type=task_type, num_classes=3, backbone="resnet18")
-    with pytest.raises(NotImplementedError):
-        trainer.train(data_dir=str(tmp_path), n_epochs=2, batch_size=2, lr=0.01)
-
-
-@pytest.mark.parametrize("task_type", UNIMPLEMENTED_TASK_TYPES)
-def test_unsupported_task_message_is_honest(task_type):
-    trainer = CVAutoMLTrainer(task_type=task_type)
-    with pytest.raises(NotImplementedError) as excinfo:
-        trainer.train(data_dir="unused", n_epochs=1)
-
-    message = str(excinfo.value)
-    assert task_type in message, f"message must name the refused task: {message}"
-    assert "not implemented" in message.lower(), f"message must say it is unsupported: {message}"
-    named_alternatives = [t for t in TRAINABLE_TASK_TYPES if t in message]
-    assert len(named_alternatives) >= 2, f"message must point at usable tasks: {message}"
-
-
-@pytest.mark.parametrize("task_type", UNIMPLEMENTED_TASK_TYPES)
-def test_unsupported_task_produces_no_fake_history_or_model(task_type):
-    """The guard exists because the old code looped over epochs writing zeroed metrics."""
+@pytest.mark.parametrize("task_type", DETECTION_TASK_TYPES)
+def test_train_refuses_detection_without_annotations_and_records_nothing(task_type, tmp_path):
+    """The run used to loop over epochs writing zeros, so it looked trained, logged a flat
+    loss curve and shipped an untrained model as the champion."""
     epochs_reported = []
     trainer = CVAutoMLTrainer(task_type=task_type)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError) as excinfo:
         trainer.train(
-            data_dir="unused",
+            data_dir=str(tmp_path),
             n_epochs=3,
             callback=lambda *args: epochs_reported.append(args),
         )
 
     assert trainer.history == [], f"no epoch may be recorded: {trainer.history}"
     assert trainer.best_model is None, "an untrained model must not be handed back as champion"
-    assert epochs_reported == [], "the epoch callback must never fire for an unsupported task"
+    assert epochs_reported == [], "the epoch callback must never fire when the input is rejected"
     assert trainer.get_per_class_metrics() == {}
 
+    message = str(excinfo.value)
+    assert task_type in message, f"the message must name the refused task: {message}"
+    assert "COCO annotation JSON" in message, f"the message must say what is missing: {message}"
+    for key in ("images", "annotations", "categories"):
+        assert key in message, f"the message must list the required COCO keys: {message}"
 
-@pytest.mark.parametrize(
-    "task_type,builder",
-    [("object_detection", "fasterrcnn_resnet50_fpn"), ("pose_estimation", "keypointrcnn_resnet50_fpn")],
-)
-def test_unsupported_task_guard_fires_before_any_weight_download(
-    task_type, builder, monkeypatch
-):
+
+def test_detection_input_guard_fires_before_any_model_is_built(tmp_path, monkeypatch):
+    """The annotation check runs first, so a rejected run never builds a 40M-parameter
+    backbone and never reaches the network."""
     attempts = []
 
-    def _boom(*args, **kwargs):
-        attempts.append(builder)
-        raise AssertionError(f"{builder} must not be constructed for {task_type}")
+    def _boom(name):
+        def _build(*args, **kwargs):
+            attempts.append(name)
+            raise AssertionError(f"{name} must not be built when the dataset is rejected")
+        return _build
 
-    monkeypatch.setattr(vision, builder, _boom)
-    trainer = CVAutoMLTrainer(task_type=task_type)
-    with pytest.raises(NotImplementedError):
-        trainer.train(data_dir="unused", n_epochs=1)
+    for builder in ("fasterrcnn_resnet50_fpn", "keypointrcnn_resnet50_fpn"):
+        monkeypatch.setattr(vision, builder, _boom(builder))
+
+    for task_type in DETECTION_TASK_TYPES:
+        trainer = CVAutoMLTrainer(task_type=task_type)
+        with pytest.raises(ValueError, match="COCO annotation JSON"):
+            trainer.train(data_dir=str(tmp_path), n_epochs=1)
+
     assert attempts == []
 
 
-def test_orchestrator_propagates_the_guard_without_recording_metrics():
-    """src/core/orchestrator.py:60 forwards train() to headless/API callers."""
+def test_orchestrator_surfaces_a_detection_run_without_a_dataset():
+    """src/core/orchestrator.py forwards train() to headless/API callers."""
     from src.core.orchestrator import AutoMLOrchestrator
 
     orchestrator = AutoMLOrchestrator(
         {"task_type": "object_detection", "selected_backbone": "resnet18", "dataset_path": None}
     )
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError, match="COCO annotation JSON"):
         orchestrator.run_vision_training()
 
 
 # ---------------------------------------------------------------------------
 # UI / engine sync
 # ---------------------------------------------------------------------------
-def test_ui_offers_only_trainable_vision_tasks():
+def test_ui_offers_every_task_the_engine_can_train():
     ui_tasks = {
         entry[0] for literal in _app_literal("CV_TASKS") for entry in literal
     }
     assert ui_tasks, "app.py must still declare the Vision Studio task cards"
-    forbidden = ui_tasks & set(UNIMPLEMENTED_TASK_TYPES)
-    assert not forbidden, f"app.py would offer tasks that train() refuses: {sorted(forbidden)}"
-    assert ui_tasks <= TRAINABLE_TASK_TYPES
+    assert ui_tasks == TRAINABLE_TASK_TYPES, (
+        f"Vision Studio and train() drifted apart: offered={sorted(ui_tasks)} "
+        f"trainable={sorted(TRAINABLE_TASK_TYPES)}"
+    )
+
+
+def test_every_vision_task_card_describes_its_own_input_shape():
+    """Detection and pose need a COCO JSON, and the card is where a user learns that."""
+    cards = {
+        entry[0]: entry for literal in _app_literal("CV_TASKS") for entry in literal
+    }
+    for task_type in DETECTION_TASK_TYPES:
+        description = cards[task_type][3].lower()
+        assert "coco" in description, f"{task_type} card hides the required format: {description}"
 
 
 def test_backbone_registry_matches_the_backbones_the_ui_offers():
@@ -200,15 +203,32 @@ def test_backbone_registry_values_are_class_builders():
         assert callable(builder), f"{name} is not a callable builder"
 
 
-def test_get_model_for_detection_tasks_requires_pretrained_weights():
-    """train() refuses these tasks while get_model() can still build them, so the engine
-    is only half-guarded.  Building either detection backbone needs a weights download,
-    so the gap is documented here rather than exercised."""
-    pytest.skip("get_model('object_detection'/'pose_estimation') downloads pretrained weights")
+@pytest.mark.parametrize("task_type", DETECTION_TASK_TYPES)
+def test_detection_models_are_reheaded_to_the_dataset(task_type):
+    """The COCO heads ship with 20 classes, so leaving them in place trained a 2-category
+    dataset as if it had 20. Both heads are rebuilt from the annotation counts."""
+    trainer = CVAutoMLTrainer(task_type=task_type, num_classes=3, weights=None)
+    trainer.num_keypoints = 5
+    model = trainer.get_model()
+
+    assert model.roi_heads.box_predictor.cls_score.out_features == 3
+    keypoint_head = getattr(model.roi_heads, "keypoint_predictor", None)
+    if task_type == "pose_estimation":
+        assert keypoint_head.out_channels == 5
+    else:
+        assert keypoint_head is None, "Faster R-CNN has no keypoint head to size"
+
+
+def test_pose_head_never_ends_up_with_zero_channels():
+    """A ConvTranspose2d with no output channels cannot be built, so it falls back to one."""
+    trainer = CVAutoMLTrainer(task_type="pose_estimation", num_classes=2, weights=None)
+    trainer.num_keypoints = 0
+
+    assert trainer.get_model().roi_heads.keypoint_predictor.out_channels == 1
 
 
 # ---------------------------------------------------------------------------
-# get_cv_explanation, the "Architect Insight" string used by app.py:3695
+# get_cv_explanation, the "Architect Insight" string used by app.py
 # ---------------------------------------------------------------------------
 @pytest.mark.parametrize("backbone", sorted(BACKBONE_REGISTRY))
 def test_get_cv_explanation_returns_non_empty_text_for_every_ui_backbone(backbone):
@@ -328,6 +348,25 @@ def test_eval_transforms_are_deterministic():
         trainer._build_transforms({"horizontal_flip": True, "color_jitter": True}, train=False)
     )
     assert not (set(names) & RANDOM_TRANSFORMS), f"eval pipeline kept a random op: {names}"
+
+
+@pytest.mark.parametrize("task_type", ["image_segmentation"] + list(DETECTION_TASK_TYPES))
+def test_geometric_augmentation_is_dropped_for_tasks_with_annotated_geometry(task_type):
+    """The mask or the COCO coordinates never move with the image, so a flip would train the
+    model against shifted labels."""
+    trainer = CVAutoMLTrainer(task_type=task_type)
+    kept = trainer._safe_augmentation({
+        "horizontal_flip": True, "vertical_flip": True, "random_rotation": 20,
+        "random_crop": True, "color_jitter": True,
+    })
+
+    assert kept == {"color_jitter": True}
+
+
+def test_classification_keeps_every_augmentation_it_was_given():
+    trainer = CVAutoMLTrainer(task_type="image_classification")
+    config = {"horizontal_flip": True, "color_jitter": True}
+    assert trainer._safe_augmentation(config) == config
 
 
 # ---------------------------------------------------------------------------
