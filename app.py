@@ -24,8 +24,7 @@ from src.tracking.mlflow import (
     register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model, get_run_details
 )
-from src.core.data_lake import DataLake
-from src.utils.helpers import mask_tracking_uri
+from src.utils.helpers import mask_tracking_uri, safe_upload_filename
 from src.tracking.manager import TrainingJobManager, JobStatus
 import shap
 import joblib # type: ignore
@@ -34,7 +33,6 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
 import io
 from PIL import Image
-import re
 import datetime
 import json
 import time
@@ -3737,8 +3735,8 @@ if current_main_section == "🤖 Reinforcement Learning":
                         os.makedirs(custom_env_dir, exist_ok=True)
                         # The browser-supplied filename is attacker-controlled: keep only a
                         # flat .py basename so it cannot escape tmp/ via separators or "..".
-                        safe_env_name = os.path.basename(uploaded_file.name.replace("\\", "/"))
-                        if not re.fullmatch(r"[A-Za-z0-9._-]+\.py", safe_env_name) or safe_env_name.startswith("."):
+                        safe_env_name = safe_upload_filename(uploaded_file.name, "py")
+                        if safe_env_name is None:
                             st.error("❌ Invalid environment file name. Use a plain name like cartpole_env.py")
                         else:
                             custom_env_path = os.path.join(custom_env_dir, safe_env_name)

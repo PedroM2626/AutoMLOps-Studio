@@ -6,6 +6,22 @@ import re
 # carry credentials, even though the store connection legitimately needs them.
 _CREDENTIALS_IN_URI = re.compile(r'(?P<scheme>[a-zA-Z][\w+.-]*)://[^/@]+:[^/@]+@')
 
+def safe_upload_filename(original_name, extension):
+    """Reduce a browser-supplied filename to a flat "<name>.<ext>" or return None.
+
+    The name in an upload is attacker-controlled: without this, "../evil.py" or a Windows
+    path could escape the directory the app writes into. Browsers strip paths today, which
+    is not something a security check should rely on.
+    """
+    if not original_name:
+        return None
+    flat = os.path.basename(str(original_name).replace("\\", "/"))
+    if not re.fullmatch(r"[A-Za-z0-9._-]+\." + re.escape(extension), flat):
+        return None
+    if flat.startswith("."):
+        return None
+    return flat
+
 def mask_tracking_uri(uri):
     """Strip credentials from a tracking URI before it is displayed or written out."""
     text = str(uri or "")

@@ -66,3 +66,32 @@ def test_windows_path_store_produces_runnable_snippet(monkeypatch):
     assert _snippet_uri(code) == "file:///C:/Users/me/mlruns"
     compile(code, "<snippet>", "exec")
 
+
+
+def test_upload_filename_guard_never_yields_a_traversable_name():
+    """The RL environment upload writes under tmp/ using the client-supplied name, so the
+    guard's contract is: either reject, or return a flat name with no separators and no
+    parent-directory component - anything else escapes the directory."""
+    import os
+    from src.utils.helpers import safe_upload_filename
+
+    assert safe_upload_filename("cartpole_env.py", "py") == "cartpole_env.py"
+
+    b = chr(92)
+    hostile = [
+        "../evil.py", "../../evil.py", b.join(["..", "..", "evil.py"]),
+        "/etc/passwd.py", "C:" + b + "Users" + b + "me" + b + "evil.py",
+        "sub/dir/evil.py", "..", ".", "evil.PY", "evil.py.txt", "evil p y.py",
+        ".hidden.py", "evil;.py", "evil$", ".py", "", None,
+    ]
+
+    for name in hostile:
+        result = safe_upload_filename(name, "py")
+        assert result is None or (
+            os.path.basename(result) == result
+            and ".." not in result
+            and b not in result
+            and "/" not in result
+        ), f"escaped through {name!r} -> {result!r}"
+
+    assert safe_upload_filename("../../evil.py", "py") == "evil.py"
