@@ -180,13 +180,24 @@ def get_model_details(model_name, version=None):
         return None
 
 def load_registered_model(model_name, version=None):
-    """Load a registered model from MLflow."""
+    """Load a registered model with the loader its artifact was actually logged with.
+
+    The registry holds sklearn pipelines and PyTorch vision models side by side, and the
+    sklearn loader rejects the latter ("Model does not have the sklearn flavor"), which left
+    every vision page in the Model Registry holding a None.
+    """
     try:
         if version:
             model_uri = f"models:/{model_name}/{version}"
         else:
             model_uri = f"models:/{model_name}/latest"
-            
+
+        flavors = mlflow.models.get_model_info(model_uri).flavors
+        if "pytorch" in flavors:
+            # Bound to a new name on purpose: a plain `import mlflow.pytorch` inside this
+            # function would make `mlflow` local and break the lookup above it.
+            import mlflow.pytorch as mlflow_pytorch
+            return mlflow_pytorch.load_model(model_uri)
         return mlflow.sklearn.load_model(model_uri)
     except Exception as e:
         print(f"Error loading registered model: {e}")
