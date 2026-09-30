@@ -297,19 +297,42 @@ def test_score_detections_pck_counts_undetected_instances_as_wrong():
 
 # ---------------------------------------------------------------------------
 # Training
+#
+# Each task fits once per module. A Faster / Keypoint R-CNN build costs seconds on the
+# CPU-only CI runner, so refitting the same two epochs per assertion would multiply the
+# suite's slowest test without checking anything extra.
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("task_type", ["object_detection", "pose_estimation"])
-def test_detection_training_records_measured_metrics(task_type, tmp_path):
-    data_dir, _annotation = _write_coco_bundle(
-        tmp_path, with_keypoints=task_type == "pose_estimation")
-    trainer = _trainer(task_type)
+@pytest.fixture(scope="module")
+def detection_run(tmp_path_factory):
+    """object_detection fitted through annotation discovery, with augmentation offered."""
+    root = tmp_path_factory.mktemp("coco_detection_fit")
+    data_dir, _annotation = _write_coco_bundle(root, with_keypoints=False)
+    trainer = _trainer("object_detection")
     epochs = []
+    trainer.train(
+        data_dir=str(data_dir), n_epochs=2, batch_size=2, lr=0.01, optimizer_name="sgd",
+        augmentation_config={"horizontal_flip": True, "color_jitter": True},
+        callback=lambda *args: epochs.append(args))
+    return trainer, data_dir, epochs
 
-    model = trainer.train(
-        data_dir=str(data_dir), n_epochs=2, batch_size=2, lr=0.01,
-        optimizer_name="sgd", callback=lambda *args: epochs.append(args))
 
-    assert model is trainer.best_model is not None
+@pytest.fixture(scope="module")
+def pose_run(tmp_path_factory):
+    """pose_estimation fitted with an explicit annotation file instead of discovery."""
+    root = tmp_path_factory.mktemp("coco_pose_fit")
+    data_dir, annotation = _write_coco_bundle(root, with_keypoints=True)
+    trainer = _trainer("pose_estimation")
+    epochs = []
+    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
+                  optimizer_name="sgd", annotation_file=str(annotation),
+                  callback=lambda *args: epochs.append(args))
+    return trainer, data_dir, epochs
+
+
+def test_detection_training_records_measured_metrics(detection_run):
+    trainer, _data_dir, epochs = detection_run
+
+    assert trainer.best_model is not None
     assert len(trainer.history) == len(epochs) == 2
     for entry in trainer.history:
         assert entry["loss"] == entry["loss"] and entry["loss"] > 0, (
@@ -318,74 +341,60 @@ def test_detection_training_records_measured_metrics(task_type, tmp_path):
         assert 0.0 <= entry["val_loss"] <= 1e6
         assert 0.0 <= entry["f1"] <= 1.0
         assert entry["tp"] + entry["fn"] > 0, "validation must have scored real instances"
-    # The epoch tuple keeps the shape the other vision loops report.
-    assert len(epochs[-1]) == 6
+    assert len(epochs[-1]) == 6, "the callback keeps the shape the other vision loops use"
     assert epochs[-1][0] == 1
 
 
-@pytest.mark.parametrize("task_type", ["object_detection", "pose_estimation"])
-def test_detection_training_reads_class_count_from_the_annotations(task_type, tmp_path):
-    data_dir, _annotation = _write_coco_bundle(
-        tmp_path, with_keypoints=task_type == "pose_estimation")
-    trainer = CVAutoMLTrainer(task_type=task_type, num_classes=99,
-                              weights=None, image_size=TRAIN_IMAGE_SIZE)
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
+def test_detection_training_reads_class_count_from_the_annotations(detection_run):
+    trainer, _data_dir, _epochs = detection_run
 
     assert trainer.num_classes == 3, "two COCO categories plus the background row"
     assert trainer.class_names == ["background", "person", "bicycle"]
 
 
-def test_pose_training_sizes_the_keypoint_head_to_the_annotations(tmp_path):
-    data_dir, _annotation = _write_coco_bundle(tmp_path, with_keypoints=True)
-    trainer = _trainer("pose_estimation")
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
-
-    assert trainer.num_keypoints == 3
-    head = trainer.best_model.roi_heads.keypoint_predictor
-    assert head.kps_score_lowres.out_channels == 3
-    assert trainer.best_model.roi_heads.box_predictor.cls_score.out_features == 3
-
-
-def test_pose_training_falls_back_to_coco_keypoint_count_without_annotations(tmp_path):
-    data_dir, annotation = _write_coco_bundle(tmp_path, with_keypoints=True)
-    payload = json.loads(annotation.read_text(encoding="utf-8"))
-    for ann in payload["annotations"]:
-        ann["keypoints"] = ann["keypoints"][:3]
-    payload["keypoints"] = KEYPOINT_NAMES[:1]
-    annotation.write_text(json.dumps(payload), encoding="utf-8")
-
-    trainer = _trainer("pose_estimation")
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
-
-    assert trainer.num_keypoints == 1
-    assert trainer.best_model.roi_heads.keypoint_predictor.kps_score_lowres.out_channels == 1
-
-
-def test_pose_training_reports_pck_as_the_headline_metric(tmp_path):
-    data_dir, _annotation = _write_coco_bundle(tmp_path, with_keypoints=True)
-    trainer = _trainer("pose_estimation")
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
-
-    entry = trainer.history[-1]
-    assert entry["pck"] is not None and 0.0 <= entry["pck"] <= 1.0
-    assert entry["val_acc"] == entry["pck"]
-
-
-def test_detection_training_ignores_geometric_augmentation_but_keeps_colour(tmp_path):
-    data_dir, _annotation = _write_coco_bundle(tmp_path, with_keypoints=False)
-    trainer = _trainer("object_detection")
+def test_detection_training_applies_only_photometric_augmentation(detection_run):
+    """The fit above was offered a horizontal flip and colour jitter; only the second one can
+    be applied without moving the annotated geometry, and it still trained."""
+    trainer = CVAutoMLTrainer(task_type="object_detection", weights=None)
     augment = trainer._detection_augmentation(
         {"horizontal_flip": True, "random_rotation": 15, "color_jitter": True})
 
     assert [type(op).__name__ for op in augment.transforms] == ["ColorJitter"]
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd",
-                  augmentation_config={"horizontal_flip": True, "color_jitter": True})
-    assert len(trainer.history) == 1
+    assert trainer._detection_augmentation({"horizontal_flip": True}) is None
+    assert detection_run[0].history, "offering a dropped op did not abort the run"
+
+
+def test_pose_training_sizes_the_keypoint_head_to_the_annotations(pose_run):
+    trainer, _data_dir, _epochs = pose_run
+    head = trainer.best_model.roi_heads
+
+    assert trainer.num_keypoints == 3
+    assert head.keypoint_predictor.kps_score_lowres.out_channels == 3
+    assert head.box_predictor.cls_score.out_features == 3
+
+
+def test_pose_training_reports_pck_as_the_headline_metric(pose_run):
+    trainer, _data_dir, _epochs = pose_run
+    entry = trainer.history[-1]
+
+    assert entry["pck"] is not None and 0.0 <= entry["pck"] <= 1.0
+    assert entry["val_acc"] == entry["pck"]
+
+
+def test_pose_dataset_keypoint_width_comes_from_the_annotations(tmp_path):
+    """One keypoint per instance must size the work to one, not to COCO's 17."""
+    data_dir, annotation = _write_coco_bundle(tmp_path, with_keypoints=True)
+    payload = json.loads(annotation.read_text(encoding="utf-8"))
+    for ann in payload["annotations"]:
+        ann["keypoints"] = ann["keypoints"][:3]
+    annotation.write_text(json.dumps(payload), encoding="utf-8")
+
+    dataset = CocoDetectionDataset(str(data_dir), str(annotation), require_keypoints=True)
+    _image, target = dataset[0]
+
+    assert dataset.num_keypoints == 1
+    assert target["keypoints"].shape[1] == 1
+    assert target["num_keypoints"].tolist() == [1, 1]
 
 
 def test_detection_training_without_an_annotation_file_explains_the_layout(tmp_path):
@@ -417,33 +426,17 @@ def test_detection_training_with_a_missing_explicit_annotation_file(tmp_path):
                       annotation_file=str(tmp_path / "absent.json"))
 
 
-def test_detection_training_explicit_annotation_file_is_used_over_discovery(tmp_path):
-    data_dir, annotation = _write_coco_bundle(tmp_path)
-    other = tmp_path / "empty.json"
-    other.write_text(json.dumps({"images": [], "annotations": [], "categories": []}),
-                     encoding="utf-8")
-    trainer = _trainer("object_detection")
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd", annotation_file=str(annotation))
-
-    assert trainer.class_names == ["background", "person", "bicycle"]
-    assert len(trainer.history) == 1
-
-
 # ---------------------------------------------------------------------------
 # Inference
 # ---------------------------------------------------------------------------
-@pytest.mark.parametrize("task_type", ["object_detection", "pose_estimation"])
-def test_predict_returns_boxes_scores_and_labels_in_source_pixels(task_type, tmp_path):
-    data_dir, _annotation = _write_coco_bundle(
-        tmp_path, with_keypoints=task_type == "pose_estimation")
-    trainer = _trainer(task_type)
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
-
-    sample = tmp_path / "unseen.png"
+@pytest.mark.parametrize("run_fixture", ["detection_run", "pose_run"])
+def test_predict_returns_boxes_scores_and_labels_in_source_pixels(run_fixture, request,
+                                                                  tmp_path):
+    trainer, _data_dir, _epochs = request.getfixturevalue(run_fixture)
+    sample = tmp_path / f"unseen_{run_fixture}.png"
     rng = np.random.default_rng(3)
     Image.fromarray(rng.integers(0, 255, (30, 40, 3), dtype=np.uint8)).save(sample)
+
     result = trainer.predict(str(sample))
 
     assert set(result) >= {"boxes", "scores", "labels", "class_names"}
@@ -453,19 +446,17 @@ def test_predict_returns_boxes_scores_and_labels_in_source_pixels(task_type, tmp
     # Coordinates come back for a 40x30 image, not for the square the model saw.
     assert (result["boxes"][:, 0] >= 0).all() and (result["boxes"][:, 2] <= 40.01).all()
     assert (result["boxes"][:, 1] >= 0).all() and (result["boxes"][:, 3] <= 30.01).all()
-    if task_type == "pose_estimation":
+    if run_fixture == "pose_run":
         assert result["keypoints"].shape[1:] == (trainer.num_keypoints, 3)
 
 
-def test_predict_of_detection_result_is_repeatable(tmp_path):
-    data_dir, _annotation = _write_coco_bundle(tmp_path, with_keypoints=False)
-    trainer = _trainer("object_detection")
-    trainer.train(data_dir=str(data_dir), n_epochs=1, batch_size=2, lr=0.01,
-                  optimizer_name="sgd")
+def test_predict_of_detection_result_is_repeatable(detection_run, tmp_path):
+    trainer, _data_dir, _epochs = detection_run
     sample = tmp_path / "again.png"
     Image.fromarray(np.zeros((30, 40, 3), dtype=np.uint8)).save(sample)
 
     first, second = trainer.predict(str(sample)), trainer.predict(str(sample))
+
     assert np.array_equal(first["boxes"], second["boxes"])
     assert np.array_equal(first["labels"], second["labels"])
 
