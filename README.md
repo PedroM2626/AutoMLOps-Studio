@@ -2,7 +2,7 @@
 
 ### Comprehensive Automated Machine Learning & MLOps Platform
 
-[![Version](https://img.shields.io/badge/Version-5.11.0-blue)](https://github.com/PedroM2626/AutoMLOps-Studio)
+[![Version](https://img.shields.io/badge/Version-5.11.1-blue)](https://github.com/PedroM2626/AutoMLOps-Studio)
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Live Demo](https://img.shields.io/badge/Live%20Demo-Streamlit%20Cloud-FF4B4B?style=flat&logo=streamlit&logoColor=white)](https://automlops-studio.streamlit.app/)

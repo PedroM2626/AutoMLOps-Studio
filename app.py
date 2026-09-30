@@ -663,7 +663,7 @@ with st.sidebar:
     st.markdown("""
     <div style='text-align:center; padding:10px 0;'>
         <h1 style='font-size:1.5rem; margin-bottom:0;'>🚀 AutoMLOps</h1>
-        <p style='color:#8b949e; font-size:0.8rem;'>Studio v5.11.0</p>
+        <p style='color:#8b949e; font-size:0.8rem;'>Studio v5.11.1</p>
     </div>
     """, unsafe_allow_html=True)
 
