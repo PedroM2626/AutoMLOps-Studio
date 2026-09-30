@@ -3,13 +3,34 @@ const path = require('path');
 const { spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
+const net = require('net');
 
 let mainWindow;
 let pythonProcess = null;
 
 // Configuration
-const PY_PORT = 8501;
-const UI_URL = `http://127.0.0.1:${PY_PORT}`;
+const PREFERRED_PORT = 8501;
+let pyPort = PREFERRED_PORT;
+let uiUrl = `http://127.0.0.1:${pyPort}`;
+
+// The port used to be fixed at 8501. If something already held it - a browser session of
+// this same app, or a Streamlit left running by an earlier crash - the child could not
+// bind and the window gave up after 20 retries and showed its error page.
+function findPort(preferred) {
+  return new Promise((resolve) => {
+    const probe = net.createServer();
+    probe.once('error', () => resolve(null));
+    probe.listen(preferred, '127.0.0.1', () => probe.close(() => resolve(preferred)));
+  }).then((free) => free !== null ? free : new Promise((resolve) => {
+    const any = net.createServer();
+    any.once('error', () => resolve(preferred));
+    any.listen(0, '127.0.0.1', () => {
+      // address() is null once the socket closes, so read the port first
+      const { port } = any.address();
+      any.close(() => resolve(port));
+    });
+  }));
+}
 
 function getPythonPath() {
   // Check for virtual environment first
@@ -46,7 +67,7 @@ function createPythonProcess() {
   // Use shell: true on Windows to help resolve commands
   pythonProcess = spawn(pythonExecutable, [
     '-m', 'streamlit', 'run', scriptPath,
-    '--server.port', PY_PORT.toString(),
+    '--server.port', pyPort.toString(),
     '--server.headless', 'true',
     '--server.address', '127.0.0.1'
   ], { 
@@ -93,7 +114,7 @@ function createWindow() {
   // We use a retry mechanism to wait for the server
   const loadUrlWithRetry = (retries = 0) => {
     // Simple fetch check or just loadURL and handle fail
-    mainWindow.loadURL(UI_URL).catch((err) => {
+    mainWindow.loadURL(uiUrl).catch((err) => {
       console.log(`Server not ready, retrying... (${retries})`);
       if (retries < 20) {
         setTimeout(() => loadUrlWithRetry(retries + 1), 1000);
@@ -112,7 +133,10 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  pyPort = await findPort(PREFERRED_PORT);
+  uiUrl = `http://127.0.0.1:${pyPort}`;
+  console.log(`Serving the Studio UI on port ${pyPort}`);
   createPythonProcess();
   createWindow();
 
