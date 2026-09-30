@@ -68,7 +68,6 @@ class TransformersWrapper(BaseEstimator, ClassifierMixin, RegressorMixin):
             import torch
             from transformers import AutoModelForSequenceClassification, AutoTokenizer
             from torch.optim import AdamW
-            from torch.utils.data import DataLoader, TensorDataset
         except ImportError:
             raise ImportError("torch and transformers libraries are required for deep learning models.")
 

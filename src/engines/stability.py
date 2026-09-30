@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from sklearn.base import clone
-from sklearn.model_selection import train_test_split, cross_val_score, KFold, StratifiedKFold, TimeSeriesSplit
+from sklearn.model_selection import train_test_split, KFold, StratifiedKFold, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 import logging

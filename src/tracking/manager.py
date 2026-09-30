@@ -8,7 +8,6 @@ Supports: submit, pause (Windows-safe), resume, cancel, delete.
 
 import multiprocessing
 import os
-import sys
 import time
 import uuid
 import logging
@@ -305,7 +304,6 @@ def _training_worker(config: dict, log_queue, status_queue, pause_event):
                     serialized_plots = {}
                     for pname, pobj in report.get('plots', {}).items():
                         try:
-                            import matplotlib
                             from PIL import Image
                             if isinstance(pobj, Image.Image):
                                 buf = io.BytesIO()

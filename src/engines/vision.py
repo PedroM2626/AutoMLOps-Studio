@@ -2,7 +2,7 @@ import os
 import time
 import logging
 import numpy as np
-from PIL import Image, ImageDraw
+from PIL import Image
 
 import torch
 import torch.nn as nn

@@ -11,17 +11,11 @@ import seaborn as sns
 import mlflow
 import optuna
 import joblib
-from PIL import Image
-import io
-
-from sklearn.model_selection import train_test_split, cross_val_score, TimeSeriesSplit, KFold, StratifiedKFold
-from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OneHotEncoder, LabelEncoder, OrdinalEncoder
-from sklearn.impute import SimpleImputer
-from sklearn.compose import ColumnTransformer
+from sklearn.model_selection import train_test_split, TimeSeriesSplit, KFold, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.ensemble import (
-    RandomForestClassifier, RandomForestRegressor, 
-    GradientBoostingClassifier, GradientBoostingRegressor, 
+    RandomForestClassifier, RandomForestRegressor,
+    GradientBoostingRegressor,
     VotingClassifier, VotingRegressor, IsolationForest,
     ExtraTreesClassifier, ExtraTreesRegressor,
     AdaBoostClassifier, AdaBoostRegressor,
@@ -56,9 +50,8 @@ from sklearn.linear_model import (
 from sklearn.svm import SVC, SVR, OneClassSVM, LinearSVC, NuSVC, NuSVR
 from sklearn.cluster import KMeans, AgglomerativeClustering, DBSCAN, MeanShift, Birch, SpectralClustering
 from sklearn.mixture import GaussianMixture
-from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin
+from sklearn.base import BaseEstimator, RegressorMixin
 from sklearn.exceptions import ConvergenceWarning
-from sklearn.model_selection import cross_val_predict
 
 def calculate_c_index(event_indicator, event_time, risk_scores):
     """Calculates Concordance Index (C-Index) for Survival Analysis."""
@@ -137,8 +130,7 @@ except ImportError:
     CATBOOST_AVAILABLE = False
 
 # Modular imports
-from src.core.processor import AutoMLDataProcessor
-from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS, _NEURAL_NET_KEYS, ENSEMBLE_DISPLAY_NAMES, get_ensemble_display_name
+from src.core.trainer import TransformersWrapper, _ENSEMBLE_MODEL_KEYS, _DL_MODEL_KEYS, _NEURAL_NET_KEYS
 
 # Preset/fixed-structure composites — no meaningful HP space, run only 1 trial each.
 # Distinct from _ENSEMBLE_MODEL_KEYS (which governs _filter_models mode-based exclusion).
@@ -147,8 +139,6 @@ _STATIC_ENSEMBLE_KEYS = frozenset([
     'custom_voting', 'custom_stacking', 'custom_bagging',
 ])
 from src.engines.stability import StabilityAnalyzer
-from src.tracking.mlflow import MLFlowTracker
-from src.utils.helpers import get_consumption_code, generate_model_card
 from src.utils.explainers import ModelExplainer
 
 # Reduce TensorFlow noise
@@ -2802,7 +2792,6 @@ class AutoMLTrainer:
                         plots[f'confusion_matrix_{m_name}'] = fig_cm
                         
                         if y_proba_plot is not None and hasattr(best_model_instance, 'classes_'):
-                            from sklearn.preprocessing import label_binarize
                             from sklearn.metrics import roc_curve, auc
                             
                             # ROC Curve
@@ -4341,7 +4330,6 @@ def export_model_to_onnx(model, X_sample, path):
     try:
         from skl2onnx import convert_sklearn
         from skl2onnx.common.data_types import FloatTensorType
-        import onnx
 
         if model is None:
             raise ValueError("No model to export.")

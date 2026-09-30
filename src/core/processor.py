@@ -2,8 +2,6 @@ import pandas as pd
 import numpy as np
 import logging
 import re
-import warnings
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import (
     StandardScaler, MinMaxScaler, RobustScaler, MaxAbsScaler, QuantileTransformer,
     PowerTransformer, OneHotEncoder, LabelEncoder, OrdinalEncoder

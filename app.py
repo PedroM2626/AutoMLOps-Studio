@@ -21,34 +21,25 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from src.tracking.mlflow import (
-    MLFlowTracker, get_model_registry, 
     register_model_from_run, get_registered_models, get_all_runs,
     get_model_details, load_registered_model, get_run_details
 )
 from src.core.data_lake import DataLake
-from src.utils.helpers import get_consumption_code, generate_model_card, mask_tracking_uri
-from src.utils.explainers import ModelExplainer
-from src.deploy.hf_deploy import deploy_to_huggingface
+from src.utils.helpers import mask_tracking_uri
 from src.tracking.manager import TrainingJobManager, JobStatus
 import shap
 import joblib # type: ignore
 import os
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.decomposition import PCA
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
 import io
 from PIL import Image
-import uuid
 import re
 import datetime
-import yaml
 import json
 import time
 import plotly.express as px
 import mlflow
-import logging
 
 # StreamlitLogHandler is replaced by TrainingJobManager queue-based logging.
 

@@ -4,13 +4,10 @@ import logging
 import numpy as np
 import pandas as pd
 import mlflow
-import joblib
 import yaml
 import json
 import psutil
-import gc
-from typing import Dict, Any, Optional, Tuple, List, Callable
-from sklearn.base import BaseEstimator
+from typing import Dict, Optional, Tuple, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -18,15 +15,10 @@ logger = logging.getLogger(__name__)
 try:
     import gymnasium as gym
     from stable_baselines3 import PPO, DQN, A2C, SAC, TD3
-    from stable_baselines3.common.env_util import make_vec_env
-    from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv, SubprocVecEnv
+    from stable_baselines3.common.vec_env import VecNormalize, DummyVecEnv
     from stable_baselines3.common.monitor import Monitor
-    from stable_baselines3.common.callbacks import (
-        BaseCallback, EvalCallback, CheckpointCallback, 
-        StopTrainingOnRewardThreshold, CallbackList
-    )
+    from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, CallbackList, CheckpointCallback
 
-    import optuna
     STABLE_BASELINES_AVAILABLE = True
 except ImportError:
     STABLE_BASELINES_AVAILABLE = False
@@ -375,7 +367,6 @@ class RLTrainer:
     
     def _objective(self, trial):
         """Optuna objective function for hyperparameter optimization."""
-        import optuna
         hp_space = self.HYPERPARAM_SPACES.get(self.algorithm, {})
         params = {}
         
